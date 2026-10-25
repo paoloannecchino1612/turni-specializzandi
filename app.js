@@ -612,7 +612,7 @@ function pendingFor(c){ return Object.values(SW).find(x=>x.status==="pending"&&x
    2 cambio di sala a catena: B lascia la sua postazione del giorno e prende c, un collega libero C prende quella di B
    3 spostamento: come la catena ma la postazione di B resta scoperta
    4 nessuno lo sostituisce */
-const KORD={diretta:0,scambio:1,catena:2,sposta:3,lascia:4};
+const KORD={giorno:0,diretta:1,scambio:2,catena:3,sposta:4,lascia:5};
 function planOptions(mk,c){ const mo=M(mk), SC=effSched(mk), post=postOf(c.k.split("|")[0]); if(!SC||!post) return [];
   const days=period(mk).days, di=days.indexOf(c.d), A=c.pid, day=c.d, nightish=k=>/\|[ND]$/.test(k);
   const onDay=pid=>shiftsOf(SC,pid).filter(y=>y.d===day);
@@ -636,6 +636,10 @@ function planOptions(mk,c){ const mo=M(mk), SC=effSched(mk), post=postOf(c.k.spl
         if(best) out.push({kind:"scambio",x:best.xs,w:best.w,pid:B.id,score:0,load:near(B.id),primary}); }
     } else if(busy.length===1&&!nightish(busy[0].k)&&!nightish(c.k)){
       const y=busy[0], postY=postOf(y.k.split("|")[0]), sY=y.k.split("|")[1];
+      /* 0. scambio nella stessa giornata (proposta preferita): B prende il turno di A, A prende quello di B (mattina ↔ pomeriggio) */
+      const uA=unavOf(mo,A,day)||"";
+      if(sY!==c.s&&/^[MP]$/.test(sY)&&/^[MP]$/.test(c.s)&&!FULL[uA]&&!uA.includes(sY)&&poolOf(postY,sY).some(o=>o.r.id===A))
+        add("giorno",{from:A,to:B.id,a:{d:day,k:c.k},b:{d:day,k:y.k}},B.id,{primary});
       /* 2. catena: un collega libero prende la postazione lasciata da B */
       let bestC=null;
       for(const {r:C} of poolOf(postY,sY)){ if(C.id===A||C.id===B.id||onDay(C.id).length) continue;
@@ -647,7 +651,7 @@ function planOptions(mk,c){ const mo=M(mk), SC=effSched(mk), post=postOf(c.k.spl
       add("sposta",{from:A,to:B.id,a:{d:day,k:c.k},b:null,extra:[{d:day,k:y.k,giver:B.id,taker:null}]},B.id,{primary});
     }
   }
-  out.sort((p,q)=>p.score-q.score||KORD[p.kind]-KORD[q.kind]||(q.primary-p.primary)||p.load-q.load);
+  out.sort((p,q)=>(q.kind==="giorno")-(p.kind==="giorno")||p.score-q.score||KORD[p.kind]-KORD[q.kind]||(q.primary-p.primary)||p.load-q.load);
   /* al massimo 2 proposte per collega e 9 in tutto */
   const per={}, res=[]; for(const o of out){ per[o.pid]=(per[o.pid]||0)+1; if(per[o.pid]<=2&&res.length<9) res.push(o); }
   const xs={from:A,to:null,a:{d:day,k:c.k},b:null,extra:[]}, ws=swapWarnings(mk,xs);
@@ -659,6 +663,7 @@ function personIssuesNew(mk,x,pid){ const before=effSched(mk), after=clone(befor
 function optText(c,o){ const A=esc(resName(c.pid)), B=esc(resName(o.pid)), sl=slotLabel(c);
   if(o.kind==="diretta") return `<span class="chip tag-F">Sostituzione</span> <strong>${B}</strong>, libero quel giorno, prende ${sl}`;
   if(o.kind==="scambio") return `<span class="chip tag-F">Scambio</span> <strong>${B}</strong>, libero quel giorno, prende ${sl}; in cambio ${A} prende <strong>${slotLabel(o.x.b)}</strong>`;
+  if(o.kind==="giorno") return `<span class="chip sh-P">Scambio in giornata</span> <strong>${B}</strong> prende ${sl}; in cambio ${A} prende <strong>${slotLabel(o.x.b)}</strong> di ${B}`;
   if(o.kind==="catena"){ const e=o.x.extra.find(z=>z.giver===o.pid); return `<span class="chip sh-P">Cambio di sala</span> <strong>${B}</strong> passa da ${slotLabel(e)} a ${sl}; <strong>${esc(resName(o.third))}</strong>, libero quel giorno, prende ${slotLabel(e)}`; }
   if(o.kind==="sposta"){ const e=o.x.extra.find(z=>z.taker===null); return `<span class="chip sh-M">Spostamento</span> <strong>${B}</strong> passa da ${slotLabel(e)} a ${sl}`; }
   return `<span class="chip">Scoperto</span> <strong>Nessuno lo sostituisce</strong>: ${A} viene tolto da ${sl}`; }
@@ -675,7 +680,7 @@ function planSheet(mk,list){ UI.plan={mk,list,opts:list.map(c=>planOptions(mk,c)
         <span class="row" style="gap:6px">${o.leave?"":`<button class="btn primary" data-act="planreq" data-c="${ci}" data-o="${oi}">Invia richiesta</button>`}<button class="btn ${UI.confirm==="planapp-"+ci+"-"+oi?"confirm":""}" data-act="planapp" data-c="${ci}" data-o="${oi}">${UI.confirm==="planapp-"+ci+"-"+oi?"Tocca di nuovo: applica subito":"Applica subito"}</button></span>
       </span></div>`; }).join("")}</div>`; }).join("");
   sheet(`<div class="row" style="justify-content:space-between"><h2>Programma un cambio</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
-   <p class="muted" style="margin:0;font-size:.86rem">Prima le soluzioni che rispettano tutte le regole (sostituzione da chi è libero, scambio, cambio di sala a catena), poi quelle che lasciano una postazione scoperta, infine quelle che forzano una regola. "Invia richiesta" la manda in Cambi a chi deve accettare; "Applica subito" la inserisce come cambio manuale.</p>${body}`); }
+   <p class="muted" style="margin:0;font-size:.86rem">Prima lo scambio in giornata (mattina ↔ pomeriggio con un collega in turno quel giorno), poi le soluzioni che rispettano tutte le regole (sostituzione da chi è libero, scambio, cambio di sala a catena), poi quelle che lasciano una postazione scoperta, infine quelle che forzano una regola. "Invia richiesta" la manda in Cambi a chi deve accettare; "Applica subito" la inserisce come cambio manuale.</p>${body}`); }
 function mo_rot(mk,pid){ return (M(mk).rot||{})[pid]; }
 function maybePlan(mk,pid,d){ if(!ADMIN()) return false; const c=conflictsOf(mk,pid,d); if(!c.length) return false; planSheet(mk,c); return true; }
 
