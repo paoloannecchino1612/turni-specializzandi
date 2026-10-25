@@ -257,7 +257,7 @@ function generate(mk,wk){
           if(t!=="fer")p.we++; p.wk[w]=(p.wk[w]||0)+1; if(x.s==="N")p.wn[w]=(p.wn[w]||0)+1; }); });
       return; }
     sched[d]={};
-    slotsOfDay(d).forEach(x=>{ if(extCovered(mo,d,x.key)){ sched[d][x.key]=[]; return; }
+    slotsOfDay(d).forEach(x=>{ if(extCovered(mo,d,x.key)||(multiPost(x.post)&&othersIn(mo,d,x.key)>=ROOM_MAX&&!(mo.fixed||{})[d+"|"+x.key+"|0"])){ sched[d][x.key]=[]; return; }
       sched[d][x.key]=[null]; slots.push({d,i,w,t,post:x.post,s:x.s,key:x.key,ext:extHas(mo,d,x.key)}); }); });
   const pri=x=>x.s==="N"?0:x.s==="D"?1:(x.t!=="fer"?2:3);
   slots.forEach(x=>x.r=rand()); slots.sort((a,b)=>pri(a)-pri(b)||a.i-b.i||a.r-b.r);
@@ -295,18 +295,58 @@ function generate(mk,wk){
   for(const grp of ["pri","jol"]) for(const sl of slots){ if(sl.ext||sched[sl.d][sl.key][0]) continue;
     const r=pick(sl,pools(mo,sl.post,sl.s)[grp],maxCap,true); if(r){ put(sl,r); st[r.id].g=(st[r.id].g||0)+1; } }
   /* chi è in rotazione TC/RM ed è libero (entro i turni ideali) va comunque in TC/RM come persona in più, nella sala meno affollata */
-  const cnt=(d,k)=>(sched[d][k]||[]).filter(x=>x).length+(EXT(mo)[d+"|"+k]||[]).length;
+  const ours=(d,k)=>(sched[d][k]||[]).filter(x=>x).length, cnt=(d,k)=>ours(d,k)+othersIn(mo,d,k), Y=curYear();
   byDay.forEach(list=>{ if(!list.length) return; const {d,i,w,t}=list[0]; if(t==="fes") return;
     const people=S.residents.filter(r=>inGem(mo,r.id)).map(r=>({r,o:rand()})).sort((a,b)=>a.o-b.o).map(x=>x.r);
     for(const r of people){ const rot=mo.rot[r.id], p=st[r.id]; if(fair&&p.tot>=fair) continue;
       const posts=S.posts.filter(x=>multiPost(x)&&x.cover===rot&&postActive(x)); if(!posts.length) continue;
       /* prima le sale vuote, poi le meno affollate; a parità si bilancia mattina/pomeriggio e la sala */
       const opts=[]; for(const sh of ["M","P"]){ if(!ok(mo,p,r.id,d,sh,w,soft)) continue;
-        posts.forEach(x=>{ if((x.on[t]||[]).includes(sh)&&sched[d][x.id+"|"+sh]) opts.push({post:x,sh,c:cnt(d,x.id+"|"+sh),mp:p[sh]-p[sh==="M"?"P":"M"],pc:p.pc[x.id]||0}); }); }
-      if(!opts.length) continue; opts.sort((a,b)=>a.c-b.c||a.mp-b.mp||a.pc-b.pc);
+        posts.forEach(x=>{ const k=x.id+"|"+sh; if(!(x.on[t]||[]).includes(sh)||!sched[d][k]) return; const c=cnt(d,k), o=ours(d,k);
+          if(c>=ROOM_MAX||(o>0&&!sameYearOk(Y))) return; opts.push({post:x,sh,c,o,mp:p[sh]-p[sh==="M"?"P":"M"],pc:p.pc[x.id]||0}); }); }
+      if(!opts.length) continue; opts.sort((a,b)=>(a.o>0)-(b.o>0)||a.c-b.c||a.mp-b.mp||a.pc-b.pc);
       const {post,sh}=opts[0], key=post.id+"|"+sh; put({d,i,w,t,post,s:sh,key},r,!!sched[d][key][0]); } });
   mo.sched=sched; mo.generated=new Date().toISOString(); if(only){ mo.weeksGen=mo.weeksGen||{}; mo.weeksGen[wk]=mo.generated; }
 }
+/* ridistribuzione nelle sale della stessa metodica (TC, RM): per ogni giorno e turno, finché una sala ha almeno 2 persone
+   più di un'altra si sposta una persona, preferendo i più giovani (1°, poi 2°, 3°, 4° anno). Si spostano solo i turni che
+   si possono modificare: dell'anno che si guarda; con più anni attivo, il proprietario anche quelli degli altri anni.
+   I turni fissi (inseriti a mano) non si spostano. */
+function rebalanceRooms(mk){ const days=period(mk).days, sch={}, posts={}, fixedOf={}, mon={}, Ys=MULTI?YEARS:[CURY];
+  for(const y of Ys){ const st=y===CURY?S:yState(y); if(!st) continue; const m=(st.months||{})[mk]; if(!m||!m.sched) continue;
+    sch[y]=y===CURY?m.sched:JSON.parse(JSON.stringify(m.sched)); fixedOf[y]=m.fixed||{}; mon[y]=st; posts[y]={};
+    (st.posts||[]).forEach(p=>{ posts[y][normRoom(p.name)]=p; }); }
+  const canMove=y=>y===CURY||(OWNER&&MULTI), yearOf=y=>(y===CURY?curYear():y);
+  const groups={}; S.posts.filter(p=>multiPost(p)).forEach(p=>{ (groups[p.cover]=groups[p.cover]||[]).push(normRoom(p.name)); });
+  const sheetExt=MULTI?{}:(M(mk).ext||{});
+  let moved=0; const changed=new Set();
+  for(const d of days){ const t=dayType(d); if(t==="fes") continue;
+    for(const sh of ["M","P"]) for(const g in groups){
+      for(let guard=0;guard<12;guard++){
+        const rooms=groups[g].filter(rn=>{ const p=posts[CURY]&&posts[CURY][rn]; return p&&((p.on||{})[t]||[]).includes(sh); }); if(rooms.length<2) break;
+        const occ={}, tot={};
+        rooms.forEach(rn=>{ occ[rn]=[]; for(const y in sch){ const p=posts[y][rn]; if(!p) continue; const key=p.id+"|"+sh, arr=((sch[y][d]||{})[key])||[];
+            arr.forEach((pid,i)=>{ if(pid) occ[rn].push({y:+y,pid,key,i}); }); }
+          const pc=posts[CURY][rn]; tot[rn]=occ[rn].length+((sheetExt[d+"|"+pc.id+"|"+sh])||[]).length; });
+        const order=[...rooms].sort((a,b)=>tot[b]-tot[a]), A=order[0];
+        const targets=[...rooms].sort((a,b)=>tot[a]-tot[b]);
+        let done=false;
+        for(const B of targets){ if(tot[A]-tot[B]<2) break;
+          const cand=occ[A].filter(o=>{ if(!canMove(o.y)||fixedOf[o.y][d+"|"+o.key+"|"+o.i]===o.pid) return false;
+              const pb=posts[o.y][B]; if(!pb||!((pb.on||{})[t]||[]).includes(sh)||!(yearsFor(pb).includes(yearOf(o.y))||!MULTI)) return false;
+              if(occ[B].some(x=>x.y===o.y)&&!sameYearOk(yearOf(o.y))) return false; return true; })
+            .sort((a,b)=>yearOf(a.y)-yearOf(b.y));
+          if(!cand.length) continue;
+          const o=cand[0], pb=posts[o.y][B], kb=pb.id+"|"+sh, day=sch[o.y][d]=sch[o.y][d]||{};
+          const arrA=day[o.key]; arrA.splice(o.i,1); if(!arrA.length) arrA.push(null);
+          const fx=fixedOf[o.y], pre=d+"|"+o.key+"|"; Object.keys(fx).filter(z=>z.startsWith(pre)).forEach(z=>{ const j=+z.split("|").pop(); if(j>o.i){ fx[pre+(j-1)]=fx[z]; delete fx[z]; } });
+          const arrB=day[kb]=day[kb]||[null]; if(!arrB[0]) arrB[0]=o.pid; else arrB.push(o.pid);
+          moved++; changed.add(o.y); done=true; break; }
+        if(!done) break; } } }
+  /* altri anni (solo proprietario): si salva il loro orario */
+  for(const y of changed){ if(y===CURY||!db) continue; const st=mon[y], months={...(st.months||{})}; months[mk]={...months[mk],sched:sch[y]};
+    db.doc(yDocs(y).mon).set({state:JSON.stringify({months}),updated:new Date().toISOString()}).catch(()=>toast("Non riesco a salvare l'orario del "+y+"° anno")); }
+  return moved; }
 /* aggiorna: i turni già assegnati restano (fissi solo per questa generazione), si tolgono quelli in conflitto con indisponibilità/ferie/congressi e si ricopre il resto */
 function refreshSched(mk){ const mo=M(mk); if(!mo.sched) return {removed:0,added:0,covered:0};
   const old=clone(mo.sched), keep={}, fx=mo.fixed||{}; let removed=0, covered=0;
@@ -320,14 +360,17 @@ function refreshSched(mk){ const mo=M(mk); if(!mo.sched) return {removed:0,added
   try{ generate(mk); } finally { mo.fixed=saved||{}; mo.weeksGen=wg; }
   let added=0; for(const d in mo.sched) for(const k in mo.sched[d]){ const before=(old[d]||{})[k]||[];
     (mo.sched[d][k]||[]).forEach(pid=>{ if(pid&&!before.includes(pid)) added++; }); }
-  return {removed,added,covered}; }
+  const moved=rebalanceRooms(mk);
+  return {removed,added,covered,moved}; }
 function derive(mk,override){
   const mo=M(mk), {days}=period(mk), per={}; S.residents.forEach(r=>per[r.id]=newStat());
   const holes=[], issues=[], where={}, SC=override||effSched(mk);
   if(!SC) return {per,holes,issues,where};
   days.forEach((d,i)=>{const w=Math.floor(i/7),t=dayType(d);
     slotsOfDay(d).forEach(({post,s,key})=>{ const arr=(SC[d]||{})[key]||[null];
-      if(!arr.some(x=>x)&&!extHas(mo,d,key)) holes.push({d,post:post.name,s});
+      if(!arr.some(x=>x)&&!roomCovered(mo,d,key)) holes.push({d,post:post.name,s});
+      if(multiPost(post)){ const o=arr.filter(x=>x); if(o.length>1) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: ${o.length} dello stesso anno (${o.map(resName).join(", ")})${sameYearOk(curYear())?"":" — non previsto per questo anno"}`);
+        if(o.length+othersIn(mo,d,key)>ROOM_MAX) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: ${o.length+othersIn(mo,d,key)} persone (massimo ${ROOM_MAX})`); }
       arr.forEach(pid=>{ if(!pid) return; const p=per[pid]; if(!p)return;
         if(p.on[d]) issues.push(`${resName(pid)}: ${p.on[d]==="N"||s==="N"?"lavora di giorno il "+fmt(d)+", giorno di monto":"due turni il "+fmt(d)}`);
         p.on[d]=s; where[pid+"|"+d]=post.name; p.pc[post.name]=(p.pc[post.name]||0)+1; p.tot++; p[s]++; if(t!=="fer")p.we++; if(t==="sab")p.sab=(p.sab||0)+1; if(t==="fes")p.fes=(p.fes||0)+1; p.wk[w]=(p.wk[w]||0)+1; if(s==="N")p.wn[w]=(p.wn[w]||0)+1;
@@ -396,7 +439,7 @@ function swapWarnings(mk,x){ const before=effSched(mk); if(!before) return {ok:f
   /* postazioni che con il cambio restano senza nessuno */
   const cells=[x.a,...(x.b?[x.b]:[]),...(x.extra||[])], seen=new Set(), holes=[];
   for(const c of cells){ const key=c.d+"|"+c.k; if(seen.has(key)) continue; seen.add(key);
-    const empty=sc=>!(((sc[c.d]||{})[c.k])||[]).some(v=>v)&&!extHas(M(mk),c.d,c.k);
+    const empty=sc=>!(((sc[c.d]||{})[c.k])||[]).some(v=>v)&&!roomCovered(M(mk),c.d,c.k);
     if(empty(after)&&!empty(before)) holes.push(`${slotLabel({d:c.d,k:c.k})} rimane scoperto`); }
   return {ok:true, holes, from:diff(x.from), to:x.to?diff(x.to):[], freeFrom:free(x.from), freeTo:x.to?free(x.to):{gain:[],smonto:[],lose:[]}}; }
 function freeBox(rows){ const li=[];
@@ -508,7 +551,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
        <button class="btn ${UI.confirm==="genwk"?"confirm":""}" data-act="genwk">${UI.confirm==="genwk"?"Tocca di nuovo: sovrascrive questa parte":cur===""?"Genera il mese":"Genera la settimana"}</button></div>
        <p class="muted" style="margin:0;font-size:.82rem">Generando una settimana, le altre restano come sono e vengono considerate per equità, riposi, monto e smonto.</p>
        ${mo.generated?`<div class="row" style="gap:8px"><button class="btn ${UI.confirm==="refresh"?"confirm":""}" data-act="refresh">${UI.confirm==="refresh"?"Tocca di nuovo: aggiorna i turni":"Aggiorna l'orario"}</button></div>
-       <p class="muted" style="margin:0;font-size:.82rem">Tiene fermi i turni già assegnati; toglie quelli in conflitto con indisponibilità, ferie o congressi e quelli ora coperti da altri anni; poi ridistribuisce: ricopre i turni scoperti dando la precedenza a chi ha meno turni.</p>`:""}
+       <p class="muted" style="margin:0;font-size:.82rem">Tiene fermi i turni già assegnati; toglie quelli in conflitto con indisponibilità, ferie o congressi e quelli ora coperti da altri anni; poi ridistribuisce: ricopre i turni scoperti dando la precedenza a chi ha meno turni e pareggia le persone tra le sale della stessa metodica (TC, RM), spostando prima i più giovani.</p>`:""}
        <div class="row" style="gap:8px"><button class="btn" data-act="extlink">Turni degli altri anni da link</button><label class="btn">Turni degli altri anni da file<input type="file" id="extfile" accept=".xlsx,.xls,.csv" hidden></label>${Object.keys(mo.ext||{}).length?`<span class="chip">${Object.keys(mo.ext).length} turni coperti da altri anni</span>${clrBtn("clrext","Rimuovi")}`:""}</div>`; })():""}
     ${noRot.length?`<p class="muted" style="margin:0;font-size:.85rem">Senza rotazione questo mese: ${noRot.map(r=>esc(rName(r))).join(", ")}.</p>`:""}</div>`;
   if(!mo.generated&&!ADMIN()) return head+`<div class="panel empty"><h2>Turni non ancora pubblicati</h2><p>Appena verranno generati li vedrai qui.</p></div>`;
@@ -532,7 +575,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
        if(!arr) return `<td class="cell none">·</td>`;
        const ex=EXT(mo)[d+"|"+c.k], lw=LOWER(mo)[d+"|"+c.k], exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${lw.map(esc).join("<br>")}</span>`:"");
        if(!arr.length) return `<td class="cell" style="cursor:default" title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
-       return `<td class="cell ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(ex||arr.some(v=>v)?"":`<span class="hole">scoperto</span>`)).join("")}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
+       return `<td class="cell ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(ex||lw&&multiPost(c.post)||arr.some(v=>v)?"":`<span class="hole">scoperto</span>`)).join("")}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
   } else if(UI.view==="nome"){
     if(!UI.who) UI.who=myPid()||"";
     const pid=UI.who, rows=[];
@@ -831,6 +874,12 @@ function maybePlan(mk,pid,d){ if(!ADMIN()) return false; const c=conflictsOf(mk,
 function multiPost(p){ return !!p&&(p.cover==="TC"||p.cover==="RM"); }
 function extCovered(mo,d,key){ return !!EXT(mo)[d+"|"+key] && !multiPost(postOf(key.split("|")[0])) && !(mo.fixed||{})[d+"|"+key+"|0"]; }
 function extHas(mo,d,key){ return !!EXT(mo)[d+"|"+key]; }
+/* sale TC/RM: al massimo 3 persone in tutto (anni diversi); stesso anno insieme solo per 2° e 3° anno, segnalato */
+const ROOM_MAX=3;
+function curYear(){ return +(S.groupYear||2); }
+function sameYearOk(y){ return y===2||y===3; }
+function othersIn(mo,d,key){ return (EXT(mo)[d+"|"+key]||[]).length+(LOWER(mo)[d+"|"+key]||[]).length; }
+function roomCovered(mo,d,key){ return extHas(mo,d,key)||(multiPost(postOf(key.split("|")[0]))&&!!LOWER(mo)[d+"|"+key]); }
 /* allinea l'orario già presente: i turni coperti da altri anni restano vuoti (non buchi), gli altri tornano da coprire */
 function syncExt(mo){ if(!mo.sched) return;
   for(const d in mo.sched) for(const k in mo.sched[d]){ const a=mo.sched[d][k];
@@ -1000,7 +1049,7 @@ document.addEventListener("click",e=>{
     if(S.multiYear){ S.multiYear=false; persist(); toast("Più anni disattivato: dati degli altri anni conservati"); render(); return; }
     el.disabled=true; el.textContent="Creazione degli anni…"; enableYears().then(()=>{ toast("Più anni attivo: scegli l'anno in alto"); render(); }).catch(e=>{ toast("Errore: "+(e.message||e)); render(); }); return; }
   if(a==="refresh"){ if(UI.confirm!=="refresh"){UI.confirm="refresh";render();return;} UI.confirm=null;
-    const r=refreshSched(UI.mk); persist(); render(); toast(`Orario aggiornato: ${r.removed} tolti per indisponibilità, ${r.covered} liberati perché coperti da altri anni, ${r.added} nuovi assegnati`); return; }
+    const r=refreshSched(UI.mk); persist(); render(); toast(`Orario aggiornato: ${r.removed} tolti per indisponibilità, ${r.covered} liberati perché coperti da altri anni, ${r.added} nuovi assegnati, ${r.moved} spostati tra sale della stessa metodica`); return; }
   if(a==="extlink"){ sheet(`<div class="row" style="justify-content:space-between"><h2>Turni degli altri anni</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
      <label class="stack" style="gap:4px"><span class="label">Link del foglio Google</span><input id="extUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/…" value="${esc(S.extSheetUrl||"")}"></label>
      <p class="muted" style="margin:0;font-size:.84rem">Apri la scheda del mese giusto e copia il link dalla barra degli indirizzi (contiene <code>gid=</code>). Se il link non indica la scheda, si usa quella chiamata «${esc(monthName(UI.mk))}». Il foglio deve essere condiviso come «Chiunque abbia il link può visualizzare».</p>
