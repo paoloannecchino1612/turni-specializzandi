@@ -109,9 +109,19 @@ async function showRequestState(u) {
   btn.hidden = false;
 }
 box.querySelector("#ldreq").onclick = async () => {
-  const u = auth.currentUser; if (!u) return; msg("");
-  try { await setDoc(fdoc(fs, "accessRequests/" + u.uid), { email: u.email.toLowerCase(), at: new Date().toISOString() }); await showRequestState(u); }
-  catch (e) { msg("Non riesco a inviare la richiesta: riprova tra poco."); }
+  const u = auth.currentUser, btn = box.querySelector("#ldreq"), st = box.querySelector("#ldstate");
+  if (!u) { st.textContent = "Sessione scaduta: esci e rientra."; return; }
+  btn.disabled = true; btn.textContent = "Invio in corso…";
+  try {
+    await setDoc(fdoc(fs, "accessRequests/" + u.uid), { email: u.email.toLowerCase(), at: new Date().toISOString() });
+    st.textContent = "Richiesta inviata. Riceverai l'accesso quando verrà approvata: poi tocca \"riprova\".";
+    btn.hidden = true;
+  } catch (e) {
+    st.textContent = e && e.code === "permission-denied"
+      ? "Richiesta bloccata dal server (permission-denied): le regole di Firebase non permettono ancora le richieste di accesso."
+      : "Non riesco a inviare la richiesta (" + ((e && (e.code || e.message)) || "errore sconosciuto") + "). Riprova tra poco.";
+  }
+  btn.disabled = false; if (!btn.hidden) btn.textContent = "Chiedi l'accesso";
 };
 box.querySelector("#ldretry").onclick = async () => { const u = auth.currentUser; if (!u) return; started = false; box.querySelector("#ldenied").hidden = true; await start(u); };
 
