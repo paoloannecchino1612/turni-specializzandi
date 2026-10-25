@@ -103,8 +103,8 @@ function unavRef(mk,pid){ const u=CLAIMS[pid]; return db.collection(u?`unav/${u}
 /* scadenza: indisponibilità, ferie e congressi di un mese si modificano fino a 2 giorni prima del suo primo lunedì; dopo solo il proprietario */
 function unavDeadline(mk){ return add(period(mk).first,-2); }
 function todayIso(){ const t=new Date(); return ymd(new Date(Date.UTC(t.getFullYear(),t.getMonth(),t.getDate()))); }
-function unavLocked(mk){ return !OWNER&&todayIso()>unavDeadline(mk); }
-function canEditUnav(pid,mk){ return OWNER||(!!pid&&pid===myPid()&&!unavLocked(mk||UI.mk)); }
+function unavLocked(mk){ return !ADMIN()&&todayIso()>unavDeadline(mk); }
+function canEditUnav(pid,mk){ return ADMIN()||(!!pid&&pid===myPid()&&!unavLocked(mk||UI.mk)); }
 function unavDenyMsg(pid,mk){ return pid===myPid()&&unavLocked(mk||UI.mk)?`Modifiche chiuse dal ${fmt(add(unavDeadline(mk||UI.mk),1))}: per cambiare chiedi a chi gestisce i turni`:"Puoi modificare solo le tue indisponibilità"; }
 const SRC={}, SUBS={};
 function recomputeUnav(){ const keep={};
@@ -330,7 +330,7 @@ function vIndisp(){ if(!S.residents.length) return monthBar()+noRes();
   if(!OWNER&&me&&!UI.selTouched) UI.sel=me;
   if(!UI.sel||!S.residents.find(r=>r.id===UI.sel)) UI.sel=S.residents[0].id;
   const ro=db&&!canEditUnav(UI.sel), dl=unavDeadline(UI.mk), closed=todayIso()>dl;
-  const dlBox=`<div class="${closed?"alerts":"okline"}" style="${closed?"":"font-weight:500;color:var(--muted)"}">${closed?`<strong>Modifiche chiuse</strong><span style="font-size:.86rem">Indisponibilità, ferie e congressi di ${monthName(UI.mk)} si potevano inserire fino a ${fmt(dl,true)}.${OWNER?" Tu puoi ancora modificarle.":" Per cambiare qualcosa chiedi a chi gestisce i turni."}</span>`:`Puoi inserire o modificare indisponibilità, ferie e congressi di ${monthName(UI.mk)} fino a <strong>${fmt(dl,true)}</strong>.`}</div>`;
+  const dlBox=`<div class="${closed?"alerts":"okline"}" style="${closed?"":"font-weight:500;color:var(--muted)"}">${closed?`<strong>Modifiche chiuse</strong><span style="font-size:.86rem">Indisponibilità, ferie e congressi di ${monthName(UI.mk)} si potevano inserire fino a ${fmt(dl,true)}.${ADMIN()?" Tu puoi ancora modificarle, anche per gli altri.":" Per cambiare qualcosa chiedi a chi gestisce i turni."}</span>`:`Puoi inserire o modificare indisponibilità, ferie e congressi di ${monthName(UI.mk)} fino a <strong>${fmt(dl,true)}</strong>.`}</div>`;
   const m=+UI.mk.slice(5);
   const cnt=id=>Object.entries(mo.unav[id]||{}).filter(([d,u])=>d>=p.first&&d<=p.last&&(mode==="T"?!(u==="F"||u==="C"):u===mode)).length;
   const MODES=[["T","Indisponibilità turni"],["F","Ferie"],["C","Ferie congresso"]];
@@ -344,7 +344,7 @@ function vIndisp(){ if(!S.residents.length) return monthBar()+noRes();
   <div class="panel"><div class="row" style="justify-content:space-between"><h2>${esc(resName(UI.sel))} · ${MODES.find(x=>x[0]===mode)[1]}</h2><span class="row" style="gap:6px"><span class="chip">${esc(rotName(mo.rot[UI.sel]))}</span><span class="chip tag-F">${tot(UI.sel,"F")} ferie</span><span class="chip tag-C">${tot(UI.sel,"C")} congr.</span></span></div>
    ${dlBox}
    <p class="muted" style="margin:0;font-size:.85rem">${ro?(UI.sel===myPid()?`Sola lettura: il termine per ${monthName(UI.mk)} è scaduto.`:`Stai guardando le voci di ${esc(resName(UI.sel))}: puoi modificare solo le tue.`):hint}</p>
-   ${ro?"":`<div class="row">${mode==="T"?clrBtn("clrone",`Elimina indisponibilità di ${esc(resName(UI.sel))}`):""}${clrBtn("clrF",`Elimina tutte le ferie di ${esc(resName(UI.sel))}`)}${clrBtn("clrC",`Elimina tutte le ferie congresso di ${esc(resName(UI.sel))}`)}${OWNER?clrBtn("clrall",`Elimina ${mode==="T"?"tutte le indisponibilità":mode==="F"?"tutte le ferie":"tutti i congressi"} del mese`):""}</div>`}
+   ${ro?"":`<div class="row">${mode==="T"?clrBtn("clrone",`Elimina indisponibilità di ${esc(resName(UI.sel))}`):""}${clrBtn("clrF",`Elimina tutte le ferie di ${esc(resName(UI.sel))}`)}${clrBtn("clrC",`Elimina tutte le ferie congresso di ${esc(resName(UI.sel))}`)}${ADMIN()?clrBtn("clrall",`Elimina ${mode==="T"?"tutte le indisponibilità":mode==="F"?"tutte le ferie":"tutti i congressi"} del mese`):""}</div>`}
    <div class="cal">${DOW.map(d=>`<div class="dow">${d}</div>`).join("")}
    ${p.days.map(d=>{const u=unavOf(mo,UI.sel,d), t=dayType(d), out=+d.slice(5,7)!==m;
      const tag=u==="F"?`<span class="full-tag tag-F">Ferie</span>`:u==="C"?`<span class="full-tag tag-C">Congresso</span>`:u==="G"?`<span class="full-tag">Indisp.</span>`:`<span class="marks">${SH.filter(s=>u.includes(s)).map(s=>`<span class="sh-${s}">${s==="D"?"G":s}</span>`).join("")}</span>`;

@@ -37,7 +37,7 @@ service cloud.firestore {
     match /planner/{doc} { allow read: if allowed(); allow write: if isAdmin(); }
 
     // indisponibilità: ognuno scrive solo le proprie; il proprietario anche quelle degli altri e lo spazio "staff"
-    // si accettano modifiche fino a 2 giorni prima del primo lunedì del mese (doc = "AAAA-MM_pid"); dopo solo il proprietario
+    // si accettano modifiche fino a 2 giorni prima del primo lunedì del mese (doc = "AAAA-MM_pid"); dopo solo proprietario e gestori, che possono modificare anche quelle degli altri
     function beforeDeadline(docId) {
       let p = docId.split('_')[0].split('-');
       let first = timestamp.date(int(p[0]), int(p[1]), 1);
@@ -46,7 +46,7 @@ service cloud.firestore {
     }
     match /unav/{uid}/m/{doc} {
       allow read: if allowed();
-      allow write: if isOwner() || (allowed() && request.auth.uid == uid && beforeDeadline(doc));
+      allow write: if isAdmin() || (allowed() && request.auth.uid == uid && beforeDeadline(doc));
     }
 
     // collegamento nome-account: ognuno il proprio; il proprietario può scollegare chiunque
