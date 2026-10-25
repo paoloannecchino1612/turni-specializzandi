@@ -33,6 +33,7 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 - Notte e guardia sono turni della sala DEA ma li coprono **tutti** (esclusi Bambin Gesù/Brescia). Ogni altra sala è coperta dalla sua rotazione; Angiografia e DEA fanno da jolly su TC/RM.
 - Mai due turni nello stesso giorno. Il giorno della notte è **monto**, il giorno dopo **smonto**: in nessuno dei due si lavora di giorno; mai assegnati automaticamente.
 - 5 turni/settimana ideali, 6 massimo; il generatore prova prima a stare a 5.
+- Indisponibilità, ferie e congressi di un mese si inseriscono/modificano fino a 2 giorni prima del primo lunedì del periodo; dopo solo il proprietario (bloccato anche nelle regole Firestore).
 - Presenza minima per rotazione 66% (lun–sab), ridotta solo da ferie e congressi: va segnalata.
 - Il generatore distribuisce in modo omogeneo sale e mattina/pomeriggio; i buchi vanno distribuiti uniformemente (li coprono altri anni).
 - Chi è al Bambin Gesù non entra mai nei turni generati, ma i gestori possono assegnarlo a mano.

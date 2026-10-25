@@ -100,7 +100,12 @@ function setSync(t){document.getElementById("sync").textContent=t;}
 const uT={}, uBusy={};
 /* ognuno scrive solo nel proprio spazio unav/<suo account>; il gestore scrive anche in unav/staff per chi non ha ancora collegato il nome */
 function unavRef(mk,pid){ const u=CLAIMS[pid]; return db.collection(u?`unav/${u}/m`:"unav/staff/m").doc(mk+"_"+pid); }
-function canEditUnav(pid){ return OWNER||(!!pid&&pid===myPid()); }
+/* scadenza: indisponibilità, ferie e congressi di un mese si modificano fino a 2 giorni prima del suo primo lunedì; dopo solo il proprietario */
+function unavDeadline(mk){ return add(period(mk).first,-2); }
+function todayIso(){ const t=new Date(); return ymd(new Date(Date.UTC(t.getFullYear(),t.getMonth(),t.getDate()))); }
+function unavLocked(mk){ return !OWNER&&todayIso()>unavDeadline(mk); }
+function canEditUnav(pid,mk){ return OWNER||(!!pid&&pid===myPid()&&!unavLocked(mk||UI.mk)); }
+function unavDenyMsg(pid,mk){ return pid===myPid()&&unavLocked(mk||UI.mk)?`Modifiche chiuse dal ${fmt(add(unavDeadline(mk||UI.mk),1))}: per cambiare chiedi a chi gestisce i turni`:"Puoi modificare solo le tue indisponibilità"; }
 const SRC={}, SUBS={};
 function recomputeUnav(){ const keep={};
   for(const mk in UNAV) for(const pid in UNAV[mk]){ const k=mk+"_"+pid; if(uT[k]||uBusy[k]) keep[k]=UNAV[mk][pid]; }
@@ -122,7 +127,7 @@ function linkPanel(){ const anyFree=S.residents.some(r=>!CLAIMS[r.id]);
 function claimPanel(why){ return linkPanel(); }
 function claimPanelOld(why){ return `<div class="panel"><h2>Chi sei?</h2><p class="muted" style="margin:0;font-size:.88rem">${why}</p>
   <div class="pickers">${S.residents.map(r=>{const taken=CLAIMS[r.id]&&CLAIMS[r.id]!==MYUID;return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""}>${esc(r.name)}${taken?' <span class="cnt">già collegato</span>':""}</button>`;}).join("")}</div></div>`; }
-function saveUnav(mk,pid){ const k=mk+"_"+pid; if(db&&!canEditUnav(pid)){ toast("Puoi modificare solo le tue indisponibilità"); return; } clearTimeout(uT[k]); setSync("Modifiche in corso…");
+function saveUnav(mk,pid){ const k=mk+"_"+pid; if(db&&!canEditUnav(pid,mk)){ toast(unavDenyMsg(pid,mk)); return; } clearTimeout(uT[k]); setSync("Modifiche in corso…");
   uT[k]=setTimeout(async()=>{ delete uT[k];
     if(!db){ try{localStorage.setItem("turni.unav",JSON.stringify(UNAV));}catch(e){} setSync("Salvato su questo dispositivo"); return; }
     if(uBusy[k]){ saveUnav(mk,pid); return; } uBusy[k]=true;
@@ -324,7 +329,8 @@ function vIndisp(){ if(!S.residents.length) return monthBar()+noRes();
     if(!me) return monthBar()+claimPanel("Tocca il tuo nome per collegarlo al tuo account. Serve una volta sola: dopo potrai modificare solo le tue indisponibilità, ferie e congressi."); }
   if(!OWNER&&me&&!UI.selTouched) UI.sel=me;
   if(!UI.sel||!S.residents.find(r=>r.id===UI.sel)) UI.sel=S.residents[0].id;
-  const ro=db&&!canEditUnav(UI.sel);
+  const ro=db&&!canEditUnav(UI.sel), dl=unavDeadline(UI.mk), closed=todayIso()>dl;
+  const dlBox=`<div class="${closed?"alerts":"okline"}" style="${closed?"":"font-weight:500;color:var(--muted)"}">${closed?`<strong>Modifiche chiuse</strong><span style="font-size:.86rem">Indisponibilità, ferie e congressi di ${monthName(UI.mk)} si potevano inserire fino a ${fmt(dl,true)}.${OWNER?" Tu puoi ancora modificarle.":" Per cambiare qualcosa chiedi a chi gestisce i turni."}</span>`:`Puoi inserire o modificare indisponibilità, ferie e congressi di ${monthName(UI.mk)} fino a <strong>${fmt(dl,true)}</strong>.`}</div>`;
   const m=+UI.mk.slice(5);
   const cnt=id=>Object.entries(mo.unav[id]||{}).filter(([d,u])=>d>=p.first&&d<=p.last&&(mode==="T"?!(u==="F"||u==="C"):u===mode)).length;
   const MODES=[["T","Indisponibilità turni"],["F","Ferie"],["C","Ferie congresso"]];
@@ -336,7 +342,8 @@ function vIndisp(){ if(!S.residents.length) return monthBar()+noRes();
   <div class="panel"><span class="label">Specializzando</span>
    <div class="pickers">${S.residents.map(r=>`<button data-act="sel" data-id="${r.id}" aria-pressed="${r.id===UI.sel}">${esc(r.name)}${cnt(r.id)?`<span class="cnt">${cnt(r.id)}</span>`:""}</button>`).join("")}</div></div>
   <div class="panel"><div class="row" style="justify-content:space-between"><h2>${esc(resName(UI.sel))} · ${MODES.find(x=>x[0]===mode)[1]}</h2><span class="row" style="gap:6px"><span class="chip">${esc(rotName(mo.rot[UI.sel]))}</span><span class="chip tag-F">${tot(UI.sel,"F")} ferie</span><span class="chip tag-C">${tot(UI.sel,"C")} congr.</span></span></div>
-   <p class="muted" style="margin:0;font-size:.85rem">${ro?`Stai guardando le voci di ${esc(resName(UI.sel))}: puoi modificare solo le tue.`:hint}</p>
+   ${dlBox}
+   <p class="muted" style="margin:0;font-size:.85rem">${ro?(UI.sel===myPid()?`Sola lettura: il termine per ${monthName(UI.mk)} è scaduto.`:`Stai guardando le voci di ${esc(resName(UI.sel))}: puoi modificare solo le tue.`):hint}</p>
    ${ro?"":`<div class="row">${mode==="T"?clrBtn("clrone",`Elimina indisponibilità di ${esc(resName(UI.sel))}`):""}${clrBtn("clrF",`Elimina tutte le ferie di ${esc(resName(UI.sel))}`)}${clrBtn("clrC",`Elimina tutte le ferie congresso di ${esc(resName(UI.sel))}`)}${OWNER?clrBtn("clrall",`Elimina ${mode==="T"?"tutte le indisponibilità":mode==="F"?"tutte le ferie":"tutti i congressi"} del mese`):""}</div>`}
    <div class="cal">${DOW.map(d=>`<div class="dow">${d}</div>`).join("")}
    ${p.days.map(d=>{const u=unavOf(mo,UI.sel,d), t=dayType(d), out=+d.slice(5,7)!==m;
@@ -679,7 +686,7 @@ document.addEventListener("click",e=>{
   if(a==="mprev"||a==="mnext"){const [y,m]=UI.mk.split("-").map(Number);UI.mk=mkOf(y,m+(a==="mnext"?1:-1));render();return;}
   if(a==="goto"){UI.tab=el.dataset.tab;render();return;}
   if(a==="sel"){UI.sel=el.dataset.id;UI.selTouched=true;try{localStorage.setItem("turni.me",UI.sel);}catch(_){}render();return;}
-  if(a==="day"&&db&&!canEditUnav(UI.sel)){ toast("Puoi modificare solo le tue indisponibilità"); return; }
+  if(a==="day"&&db&&!canEditUnav(UI.sel)){ toast(unavDenyMsg(UI.sel)); return; }
   if(a==="day"){ const mode=UI.umode||"T"; if(mode==="T"){daySheet(el.dataset.d);return;}
     const mo=M(UI.mk), d=el.dataset.d; mo.unav[UI.sel]={...(mo.unav[UI.sel]||{})};
     if(unavOf(mo,UI.sel,d)===mode) delete mo.unav[UI.sel][d]; else mo.unav[UI.sel][d]=mode; saveUnav(UI.mk,UI.sel); render(); return; }
