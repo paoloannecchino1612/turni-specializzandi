@@ -295,9 +295,14 @@ function render(){
   if(needLink&&!OWNER){ app.innerHTML=`<section class="view">${linkPanel()}</section>`; return; }
   app.innerHTML=`<section class="view">${needLink?linkPanel():""}${({mese:vMese,indisp:vIndisp,turni:vTurni,cambi:vCambi,imp:vImp}[UI.tab]||vMese)()}</section>`;
 }
-function monthBar(){ const p=period(UI.mk);
+/* mese il cui periodo (primo lunedì → ultima domenica) contiene la data di oggi */
+function todayMk(){ const t=new Date(), today=ymd(new Date(Date.UTC(t.getFullYear(),t.getMonth(),t.getDate())));
+  for(const dm of [0,1,-1]){ const mk=mkOf(t.getFullYear(),t.getMonth()+1+dm), p=period(mk); if(today>=p.first&&today<=p.last) return mk; }
+  return mkOf(t.getFullYear(),t.getMonth()+1); }
+function monthBar(){ const p=period(UI.mk), tm=todayMk();
   return `<div class="monthbar"><button class="btn icon" data-act="mprev" aria-label="Mese precedente">‹</button>
   <span class="name">${monthName(UI.mk)}</span><button class="btn icon" data-act="mnext" aria-label="Mese successivo">›</button>
+  ${UI.mk!==tm?`<button class="btn" data-act="mtoday">Oggi</button>`:`<span class="chip">mese corrente</span>`}
   <span class="period">${fmt(p.first)} → ${fmt(p.last)} · ${p.days.length/7} settimane</span></div>`; }
 function noRes(){return `<div class="panel empty"><h2>Nessuno specializzando</h2><p>Aggiungi i nomi in Impostazioni, poi assegna a ciascuno la rotazione del mese.</p><button class="btn primary" data-act="goto" data-tab="imp">Vai a Impostazioni</button></div>`;}
 
@@ -670,6 +675,7 @@ document.addEventListener("click",e=>{
     if(a==="clrsched"){ const mo=M(UI.mk); mo.sched=null; mo.generated=null; toast("Turni eliminati"); }
     else { const mode=UI.umode||"T"; clearUnav(a==="clrone"?[UI.sel]:S.residents.map(r=>r.id),mode); toast(a==="clrone"?"Eliminate per "+resName(UI.sel):"Eliminate per tutti"); }
     persist(); render(); return; }
+  if(a==="mtoday"){UI.mk=todayMk();render();return;}
   if(a==="mprev"||a==="mnext"){const [y,m]=UI.mk.split("-").map(Number);UI.mk=mkOf(y,m+(a==="mnext"?1:-1));render();return;}
   if(a==="goto"){UI.tab=el.dataset.tab;render();return;}
   if(a==="sel"){UI.sel=el.dataset.id;UI.selTouched=true;try{localStorage.setItem("turni.me",UI.sel);}catch(_){}render();return;}
