@@ -23,7 +23,7 @@ const DEFAULT={
 let S=null, db=null, docRef=null, downloads=null, OWNER=false;
 /* gestori: specializzandi scelti dal proprietario che possono usare tutte le funzioni di gestione */
 function ADMIN(){ return OWNER||(!!S&&(S.managers||[]).includes(myPid())); }
-const SW={}, CLAIMS={}; let ALLOW=[], lastRoles="";
+const SW={}, CLAIMS={}; let ALLOW=[], lastRoles="", REQS=[];
 function syncRoles(){ if(!OWNER||!db||!S) return; const uids=[...new Set((S.managers||[]).map(p=>CLAIMS[p]).filter(Boolean))].sort(); const k=JSON.stringify(uids); if(k===lastRoles) return; lastRoles=k; db.doc("roles/managers").set({uids}).catch(()=>{lastRoles="";}); } let MYUID=null, USER=null;
 const UNAV={}; /* mk → pid → {data: codice} — un documento per specializzando e mese */
 function UN(mk){return UNAV[mk]||(UNAV[mk]={});}
@@ -414,12 +414,14 @@ function vImp(){
   const mgPanel=`<div class="panel"><h2>Gestori</h2>
    <p class="muted" style="margin:0;font-size:.85rem">${OWNER?"I gestori possono usare tutte le funzioni come te: rotazioni, impostazioni, generazione e modifica dei turni, cambi manuali e cambi da inserire. Non possono modificare le indisponibilità degli altri, scegliere i gestori o scollegare gli account. Si possono scegliere solo specializzandi che hanno già collegato il nome.":"Questo elenco lo modifica solo il proprietario del tool."}</p>
    <div class="pickers">${S.residents.filter(r=>CLAIMS[r.id]||mg.includes(r.id)).map(r=>`<button ${OWNER?`data-act="mgr" data-id="${r.id}"`:"disabled"} aria-pressed="${mg.includes(r.id)}">${esc(r.name)}</button>`).join("")||`<span class="muted">Nessuno ha ancora collegato il nome.</span>`}</div></div>`;
+  const reqPanel=OWNER&&REQS.length?`<div class="panel" style="border:2px solid var(--accent)"><h2>Richieste di accesso <span class="chip">${REQS.length}</span></h2>
+   <div class="list">${REQS.map(r=>`<div class="item"><span class="stack" style="gap:2px"><span class="name-strong">${esc(r.email)}</span><span class="muted" style="font-size:.78rem">${new Date(r.at).toLocaleString("it-IT",{dateStyle:"short",timeStyle:"short"})}</span></span><span class="row" style="gap:6px"><button class="btn primary" data-act="reqok" data-id="${esc(r.id)}">Approva</button><button class="btn danger" data-act="reqno" data-id="${esc(r.id)}">Rifiuta</button></span></div>`).join("")}</div></div>`:"";
   const allowPanel=OWNER?`<div class="panel"><h2>Email autorizzate</h2><p class="muted" style="margin:0;font-size:.85rem">Solo queste email possono entrare nell'app (tu entri sempre). Una per riga. Dopo averle salvate, manda il link ai colleghi: si registrano con la stessa email e una password a scelta.</p>
    <textarea id="allowtxt" rows="6" style="width:100%;font:.88rem var(--f-mono);color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px">${esc(ALLOW.join("\n"))}</textarea>
    <div class="row"><button class="btn primary" data-act="allowsave">Salva elenco</button><span class="muted" style="font-size:.85rem">${ALLOW.length} email autorizzate</span></div></div>`:"";
   const importPanel=OWNER?`<div class="panel"><h2>Importa dati</h2><p class="muted" style="margin:0;font-size:.85rem">Carica il file di esportazione dal vecchio tool (.json): sostituisce impostazioni e turni e aggiunge indisponibilità e cambi. I collegamenti nome-account vanno rifatti.</p>
    <input type="file" id="impfile" accept=".json,application/json"></div>`:"";
-  return mgPanel+allowPanel+linkedPanel()+importPanel+`
+  return reqPanel+mgPanel+allowPanel+linkedPanel()+importPanel+`
   <div class="panel"><h2>Specializzandi</h2>
    <form class="row" id="addform"><input id="newname" placeholder="Cognome Nome" style="flex:1 1 12em" autocomplete="off"><select id="newyear" aria-label="Anno"><option value="">Anno</option>${[1,2,3,4].map(y=>`<option>${y}</option>`).join("")}</select><button class="btn primary" type="submit">Aggiungi</button></form>
    <div class="list">${S.residents.map(r=>`<div class="item"><input id="rname-${r.id}" data-rname="${r.id}" value="${esc(r.name)}" aria-label="Nome" style="font-weight:600;width:100%"><button class="btn danger ${UI.confirm==="del-"+r.id?"confirm":""}" data-act="del" data-id="${r.id}">${UI.confirm==="del-"+r.id?"Conferma":"Rimuovi"}</button></div>`).join("")||`<p class="muted" style="margin:0">Ancora nessuno.</p>`}</div></div>
@@ -640,6 +642,11 @@ document.addEventListener("click",e=>{
     if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done,()=>showText(txt,list)); else showText(txt,list); return; }
   if(a==="repmark"){ const list=Object.values(SW).filter(x=>x.status==="accepted"&&!x.reported); markReported(list); closeSheet(); return; }
   if(a==="mgr"&&OWNER){ const id=el.dataset.id; S.managers=S.managers||[]; toggle(S.managers,id); persist(); syncRoles(); render(); return; }
+  if((a==="reqok"||a==="reqno")&&OWNER){ const r=REQS.find(x=>x.id===el.dataset.id); if(!r) return;
+    const done=()=>db.doc("accessRequests/"+r.id).delete().then(()=>{REQS=REQS.filter(x=>x.id!==r.id);render();});
+    if(a==="reqno"){ done().then(()=>toast("Richiesta rifiutata")); return; }
+    const list=[...new Set([...ALLOW,r.email.toLowerCase()])];
+    db.doc("access/allow").set({emails:list}).then(()=>{ALLOW=list; return done();}).then(()=>toast(r.email+" ora può entrare")).catch(()=>toast("Approvazione non riuscita")); return; }
   if(a==="allowsave"&&OWNER){ const v=document.getElementById("allowtxt").value; const list=[...new Set(v.split(/[\s,;]+/).map(x=>x.trim().toLowerCase()).filter(x=>x.includes("@")))];
     db.doc("access/allow").set({emails:list}).then(()=>{ALLOW=list;toast("Elenco salvato: "+list.length+" email");render();}).catch(()=>toast("Salvataggio non riuscito")); return; }
   if(a==="swdel"&&ADMIN()){ const id=el.dataset.id; if(UI.confirm!=="swdel-"+id){UI.confirm="swdel-"+id;render();return;} UI.confirm=null;
@@ -751,6 +758,10 @@ render();
       for(const x of list) if(!CLAIMS[x.pid]) CLAIMS[x.pid]=x.u;
       syncSubs(list.map(x=>x.u)); recomputeUnav(); syncRoles(); if(S&&!layer.innerHTML) render(); }, ()=>{});
     syncSubs([]);
+    if(OWNER) db.collection("accessRequests").limit(200).onSnapshot(qs=>{ REQS=qs.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.email).sort((a,b)=>(a.at||"").localeCompare(b.at||"")); 
+      const t=document.querySelector('#tabs button[data-tab="imp"]'); if(t) t.textContent=REQS.length?`Impostazioni (${REQS.length})`:"Impostazioni";
+      if(REQS.length&&!UI.reqToast){ UI.reqToast=true; toast(REQS.length===1?"Nuova richiesta di accesso in Impostazioni":REQS.length+" richieste di accesso in Impostazioni"); }
+      if(S&&!layer.innerHTML&&UI.tab==="imp") render(); },()=>{});
     if(OWNER) db.doc("access/allow").onSnapshot(sn=>{ ALLOW=sn.exists?((sn.data()||{}).emails||[]):[]; if(S&&!layer.innerHTML&&UI.tab==="imp") render(); },()=>{});
   } else {
     let raw=null; try{raw=localStorage.getItem("turni.state"); const u=JSON.parse(localStorage.getItem("turni.unav")||"{}"); Object.assign(UNAV,u);}catch(e){}

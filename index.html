@@ -172,7 +172,9 @@ body{margin:0;font-size:15px} img{max-width:100%} [hidden]{display:none!importan
    <button class="go" id="lgo" type="submit">Entra</button><button class="link" id="lreset" type="button">Password dimenticata?</button></form>
   <div id="lverify" hidden class="stack" style="gap:10px"><p style="margin:0">Ti abbiamo mandato un'email a <strong id="lvmail"></strong>: apri il link per confermare l'indirizzo, poi torna qui. Controlla anche lo spam.</p>
    <button class="go" id="lvdone" type="button">Ho confermato</button><button class="link" id="lvagain" type="button">Invia di nuovo l'email</button><button class="link" id="lvout" type="button">Esci</button></div>
-  <div id="ldenied" hidden class="stack" style="gap:10px"><p style="margin:0">L'email <strong id="ldmail"></strong> non è ancora autorizzata. Chiedi a chi gestisce i turni di aggiungerla, poi rientra.</p><button class="link" id="ldout" type="button">Esci</button></div>
+  <div id="ldenied" hidden class="stack" style="gap:10px"><p style="margin:0">L'email <strong id="ldmail"></strong> non è ancora autorizzata.</p>
+   <p id="ldstate" style="margin:0;font-size:.9rem" class="muted">Invia la richiesta a chi gestisce i turni: quando la approva potrai entrare.</p>
+   <button class="go" id="ldreq" type="button">Chiedi l'accesso</button><button class="link" id="ldretry" type="button">Ho ricevuto l'accesso: riprova</button><button class="link" id="ldout" type="button">Esci</button></div>
   <p id="lmsg" hidden></p>
 </div></div>
 

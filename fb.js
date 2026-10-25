@@ -100,6 +100,20 @@ box.querySelector("#lvagain").onclick = async () => { try { await sendEmailVerif
 box.querySelector("#lvdone").onclick = async () => { await reload(auth.currentUser); start(auth.currentUser); };
 box.querySelector("#lvout").onclick = () => user.signOut();
 box.querySelector("#ldout").onclick = () => user.signOut();
+/* richiesta di accesso: il proprietario la vede in Impostazioni e la approva */
+async function showRequestState(u) {
+  const st = box.querySelector("#ldstate"), btn = box.querySelector("#ldreq");
+  try { const r = await getDoc(fdoc(fs, "accessRequests/" + u.uid));
+    if (r.exists()) { st.textContent = "Richiesta inviata il " + new Date(r.data().at).toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" }) + ". Riceverai l'accesso quando verrà approvata: poi tocca \"riprova\"."; btn.hidden = true; return; }
+  } catch (e) {}
+  btn.hidden = false;
+}
+box.querySelector("#ldreq").onclick = async () => {
+  const u = auth.currentUser; if (!u) return; msg("");
+  try { await setDoc(fdoc(fs, "accessRequests/" + u.uid), { email: u.email.toLowerCase(), at: new Date().toISOString() }); await showRequestState(u); }
+  catch (e) { msg("Non riesco a inviare la richiesta: riprova tra poco."); }
+};
+box.querySelector("#ldretry").onclick = async () => { const u = auth.currentUser; if (!u) return; started = false; box.querySelector("#ldenied").hidden = true; await start(u); };
 
 let started = false;
 async function start(u) {
@@ -111,7 +125,7 @@ async function start(u) {
   OWNER = await checkOwner();
   if (!OWNER) { /* solo le email inserite dal proprietario possono entrare */
     let ok = false; try { const a = await getDoc(fdoc(fs, "access/allow")); ok = a.exists() && (a.data().emails || []).map(x => String(x).toLowerCase()).includes(u.email.toLowerCase()); } catch (e) { ok = false; }
-    if (!ok) { started = false; box.hidden = false; box.querySelector("#lform").hidden = true; box.querySelector("#lverify").hidden = true; box.querySelector("#ldenied").hidden = false; box.querySelector("#ldmail").textContent = u.email; return; }
+    if (!ok) { started = false; box.hidden = false; box.querySelector("#lform").hidden = true; box.querySelector("#lverify").hidden = true; box.querySelector("#ldenied").hidden = false; box.querySelector("#ldmail").textContent = u.email; showRequestState(u); return; }
   }
   box.hidden = true; document.getElementById("whoami").textContent = u.email; document.getElementById("acct").hidden = false;
   ready();

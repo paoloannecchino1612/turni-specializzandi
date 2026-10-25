@@ -25,6 +25,13 @@ service cloud.firestore {
     // email autorizzate: ognuno può leggere l'elenco per sapere se è ammesso, solo il proprietario lo modifica
     match /access/allow { allow read: if signedIn(); allow write: if isOwner(); }
 
+    // richieste di accesso: chi non è autorizzato scrive la propria; solo il proprietario le vede e le chiude
+    match /accessRequests/{uid} {
+      allow create, update: if signedIn() && request.auth.uid == uid && request.resource.data.email == request.auth.token.email.lower();
+      allow read: if isOwner() || (signedIn() && request.auth.uid == uid);
+      allow delete: if isOwner();
+    }
+
     // impostazioni del tool e turni dei mesi: tutti leggono, proprietario e gestori scrivono
     match /config/{doc} { allow read: if allowed(); allow write: if isAdmin(); }
     match /planner/{doc} { allow read: if allowed(); allow write: if isAdmin(); }
