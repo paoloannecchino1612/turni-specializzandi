@@ -46,13 +46,17 @@ function filterSW(){ for(const k in SW) delete SW[k]; const ids=new Set(S?S.resi
   for(const k in SWALL){ const x=SWALL[k]; if(!MULTI||ids.has(x.from)||ids.has(x.to)) SW[k]=x; } }
 /* cascata: i turni degli anni superiori (4 → 3 → 2 → 1) contano come "coperti da altri anni" per l'anno che si guarda */
 const EXTC={key:null,map:{}};
-function autoExt(mk){ const out={};
-  for(const y of YEARS){ if(y<=CURY) continue; const st=yState(y); const m2=st&&st.months&&st.months[mk]; if(!m2||!m2.sched) continue;
+function autoExt(mk,lower){ const out={};
+  for(const y of YEARS){ if(lower?y>=CURY:y<=CURY) continue; const st=yState(y); const m2=st&&st.months&&st.months[mk]; if(!m2||!m2.sched) continue;
     const mine={}; S.posts.forEach(p=>mine[normRoom(p.name)]=p); const pmap={}; (st.posts||[]).forEach(p=>pmap[p.id]=mine[normRoom(p.name)]);
     const nm={}; (st.residents||[]).forEach(r=>nm[r.id]=`(${r.year||st.groupYear||y}) ${r.name}`);
     for(const d in m2.sched) for(const k in m2.sched[d]){ const [pid,sh]=k.split("|"), my=pmap[pid]; if(!my||!((my.on||{})[dayType(d)]||[]).includes(sh)) continue;
       (m2.sched[d][k]||[]).forEach(x=>{ if(!x||!nm[x]) return; const kk=d+"|"+my.id+"|"+sh; (out[kk]=out[kk]||[]).push(nm[x]); }); } }
   return out; }
+/* anni sotto (generati dopo nella cascata): solo da vedere, non cambiano la generazione */
+const LOWC={key:null,map:{}};
+function LOWER(mo){ if(!MULTI||!S) return {}; const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+S.posts.map(p=>p.id+":"+p.name).join(",");
+  if(LOWC.key!==key){ LOWC.key=key; LOWC.map=autoExt(mo.mk,true); } return LOWC.map; }
 function EXT(mo){ const own=mo.ext||{}; if(!MULTI||!S) return own;
   const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+S.posts.map(p=>p.id+":"+p.name).join(",");
   if(EXTC.key!==key){ EXTC.key=key; EXTC.map=autoExt(mo.mk); }
@@ -214,7 +218,12 @@ function load(raw){ const st=raw?JSON.parse(raw):clone(DEFAULT);
 /* ---------- generazione ---------- */
 function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
 function newStat(){return {on:{},tot:0,M:0,P:0,D:0,N:0,we:0,wk:{},wn:{},pc:{},last:{}};}
+/* abilitazione a notti e guardie: per specializzando (r.nights / r.guards); se non indicata, sì tranne il 1° anno */
+function resOf(pid){ return S.residents.find(r=>r.id===pid); }
+function yearOfRes(r){ return +(r.year||S.groupYear||2); }
+function canDo(pid,s){ if(s!=="N"&&s!=="D") return true; const r=resOf(pid); if(!r) return true; const v=s==="N"?r.nights:r.guards; return v===undefined?yearOfRes(r)!==1:!!v; }
 function ok(mo,p,pid,d,s,w,cap,forceG){
+  if(!canDo(pid,s)) return false;
   { const u=unavOf(mo,pid,d); if(blocked(u,s)&&!(forceG&&u==="G")) return false; }
   if(p.on[d]) return false;
   if(p.on[add(d,-1)]==="N") return false;
@@ -318,6 +327,7 @@ function derive(mk,override){
       arr.forEach(pid=>{ if(!pid) return; const p=per[pid]; if(!p)return;
         if(p.on[d]) issues.push(`${resName(pid)}: ${p.on[d]==="N"||s==="N"?"lavora di giorno il "+fmt(d)+", giorno di monto":"due turni il "+fmt(d)}`);
         p.on[d]=s; where[pid+"|"+d]=post.name; p.pc[post.name]=(p.pc[post.name]||0)+1; p.tot++; p[s]++; if(t!=="fer")p.we++; if(t==="sab")p.sab=(p.sab||0)+1; if(t==="fes")p.fes=(p.fes||0)+1; p.wk[w]=(p.wk[w]||0)+1; if(s==="N")p.wn[w]=(p.wn[w]||0)+1;
+        if(!canDo(pid,s)) issues.push(`${resName(pid)}: ${s==="N"?"notte":"guardia"} il ${fmt(d)}, ma non è abilitato/a ${s==="N"?"alle notti":"alle guardie"}`);
         {const u=unavOf(mo,pid,d); if(blocked(u,s)) issues.push(`${resName(pid)}: ${u==="F"?"in ferie":u==="C"?"a congresso":u==="G"?"indisponibile tutto il giorno, inserito perché il turno sarebbe rimasto scoperto,":"indisponibile"} ${fmt(d)} (${SHN[s]})`);}
         const rot=mo.rot[pid];
         if(isExt(rot)&&!isBG(rot)) issues.push(`${resName(pid)}: in turno il ${fmt(d)} ma è ${rot?"a "+rotName(rot):"senza rotazione"}`);
@@ -363,6 +373,7 @@ function personIssues(mk,sc,pid){ const mo=M(mk), {days}=period(mk), out=[], on=
     for(const k in (sc[d]||{})) if((sc[d][k]||[]).includes(pid)){ const [postId,s]=k.split("|"), post=postOf(postId);
       (on[d]=on[d]||[]).push(s); wk[w]=(wk[w]||0)+1; if(s==="N") wn[w]=(wn[w]||0)+1;
       const u=unavOf(mo,pid,d);
+      if(!canDo(pid,s)) out.push(`${s==="N"?"notte":"guardia"} il ${fmt(d)}, ma non è abilitato/a ${s==="N"?"alle notti":"alle guardie"}`);
       if(blocked(u,s)) out.push(u==="F"?`lavora durante le ferie: ${fmt(d)} (${SHN[s]})`:u==="C"?`lavora durante il congresso: ${fmt(d)} (${SHN[s]})`:`indisponibilità non rispettata: ${fmt(d)} (${SHN[s]})`);
       if(post){ const cov=covOf(post,s), rot=mo.rot[pid]; if(cov!=="ALL"&&rot!==cov&&!isBG(rot)&&!(isJolly(rot)&&!isJolly(cov))) out.push(`copre ${esc(post.name)} il ${fmt(d)}, fuori dalla sua rotazione (${esc(rotName(rot))})`); } } });
   for(const d in on){ if(on[d].length>1) out.push(on[d].includes("N")?`lavora di giorno il ${fmt(d)}, giorno di monto (ha la notte)`:`doppio turno il ${fmt(d)} (${on[d].map(s=>SHN[s]).join(" + ")})`);
@@ -393,7 +404,7 @@ function myPid(){ if(!MYUID||!S) return null; for(const pid in CLAIMS) if(CLAIMS
 const app=document.getElementById("app");
 function yearBar(){ if(!MULTI) return ""; return `<div class="pickers" style="margin-bottom:2px">${YEARS.map(y=>`<button data-act="year" data-v="${y}" aria-pressed="${y===CURY}">${y}° anno</button>`).join("")}</div>`; }
 function switchYear(y){ if(!db||y===CURY||!REBUILD) return true; if(saveT||saving){ toast("Attendi il salvataggio e riprova"); return false; }
-  CURY=y; docRef=db.doc(yDocs(y).mon); cfgRef=db.doc(yDocs(y).cfg); S=null; UI.who=null; UI.sel=null; UI.confirm=null; EXTC.key=null;
+  CURY=y; docRef=db.doc(yDocs(y).mon); cfgRef=db.doc(yDocs(y).cfg); S=null; UI.who=null; UI.sel=null; UI.confirm=null; EXTC.key=null; LOWC.key=null;
   try{ localStorage.setItem("turni.year",String(y)); }catch(e){}
   REBUILD(); if(!S) render(); return true; }
 /* all'avvio con più anni: si apre l'anno di chi entra (una volta) */
@@ -515,7 +526,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
      ${p.days.map((d,i)=>{const t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
        if(!arr) return `<td class="cell none">·</td>`;
-       const ex=EXT(mo)[d+"|"+c.k], exh=ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"";
+       const ex=EXT(mo)[d+"|"+c.k], lw=LOWER(mo)[d+"|"+c.k], exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${lw.map(esc).join("<br>")}</span>`:"");
        if(!arr.length) return `<td class="cell" style="cursor:default" title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
        return `<td class="cell ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(ex||arr.some(v=>v)?"":`<span class="hole">scoperto</span>`)).join("")}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
   } else if(UI.view==="nome"){
@@ -570,7 +581,7 @@ function vImp(){
   return reqPanel+yearsPanel+covPanel+mgPanel+allowPanel+linkedPanel()+importPanel+`
   <div class="panel"><h2>Specializzandi</h2>
    <form class="row" id="addform"><input id="newname" placeholder="Cognome Nome" style="flex:1 1 12em" autocomplete="off"><select id="newyear" aria-label="Anno">${[1,2,3,4].map(y=>`<option ${y===2?"selected":""}>${y}° anno</option>`).join("")}</select><button class="btn primary" type="submit">Aggiungi</button></form>
-   <div class="list">${S.residents.map(r=>`<div class="item"><input id="rname-${r.id}" data-rname="${r.id}" value="${esc(r.name)}" aria-label="Nome" style="font-weight:600;width:100%"><button class="btn danger ${UI.confirm==="del-"+r.id?"confirm":""}" data-act="del" data-id="${r.id}">${UI.confirm==="del-"+r.id?"Conferma":"Rimuovi"}</button></div>`).join("")||`<p class="muted" style="margin:0">Ancora nessuno.</p>`}</div></div>
+   <div class="list">${S.residents.map(r=>`<div class="item"><input id="rname-${r.id}" data-rname="${r.id}" value="${esc(r.name)}" aria-label="Nome" style="font-weight:600;width:100%"><span class="pickers sm" style="flex:none"><button data-act="rflag" data-id="${r.id}" data-f="nights" aria-pressed="${canDo(r.id,"N")}">Notti</button><button data-act="rflag" data-id="${r.id}" data-f="guards" aria-pressed="${canDo(r.id,"D")}">Guardie</button></span><button class="btn danger ${UI.confirm==="del-"+r.id?"confirm":""}" data-act="del" data-id="${r.id}">${UI.confirm==="del-"+r.id?"Conferma":"Rimuovi"}</button></div>`).join("")||`<p class="muted" style="margin:0">Ancora nessuno.</p>`}</div></div>
   <div class="panel"><div class="row" style="justify-content:space-between"><h2>Postazioni da coprire</h2><button class="btn" data-act="addpost">Aggiungi postazione</button></div>
    <p class="muted" style="margin:0;font-size:.85rem">Una persona per turno. "Dom/festivi" comprende anche i festivi infrasettimanali.</p>
    ${S.posts.map(p=>`<div class="post">
@@ -871,13 +882,14 @@ function daySheet(d){ const mo=M(UI.mk), u=unavOf(mo,UI.sel,d), avail=shiftsOfDa
   layer.dataset.d=d; }
 function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf(postId), arr=mo.sched[d][k], {per}=derive(UI.mk);
   const w=Math.floor(period(UI.mk).days.indexOf(d)/7), {pri,jol}=pools(mo,post,s), cov=covOf(post,s);
-  const why=pid=>{ const p=per[pid], u=unavOf(mo,pid,d);
+  const why=pid=>{ const p=per[pid], u=unavOf(mo,pid,d); if(!canDo(pid,s)) return s==="N"?"non abilitato alle notti":"non abilitato alle guardie";
     if(blocked(u,s)) return u==="F"?"in ferie":u==="C"?"a congresso":"indisponibile"; if(p.on[d]&&!arr.includes(pid)) return p.on[d]==="N"?"giorno di monto (ha la notte)":s==="N"?`già di ${SHN[p.on[d]].toLowerCase()}, sarebbe il monto`:`già di ${SHN[p.on[d]].toLowerCase()}`;
     if(p.on[add(d,-1)]==="N") return "giorno di smonto"; if(s==="N"&&p.on[add(d,1)]) return "lavora nel giorno di smonto";
     if(!arr.includes(pid)&&(p.wk[w]||0)>=S.maxWeek) return `già ${p.wk[w]} turni in settimana`; return ""; };
   const btn=(r,i,cur,tag)=>{const y=why(r.id), isCur=cur===r.id;return `<button class="cand ${isCur?"cur":""}" data-act="assign" data-i="${i}" data-id="${r.id}"><span><span class="name-strong">${esc(rName(r))}</span>${tag?` <span class="muted" style="font-size:.78rem">· ${esc(rotName(mo.rot[r.id]))}</span>`:""}${y&&!isCur?`<br><span class="why">${y}</span>`:""}</span><span class="chip">${per[r.id].tot} turni · ${per[r.id].N} N</span></button>`;};
   sheet(`<div class="row" style="justify-content:space-between"><div><h2>${esc(post.name)} · ${SHN[s]}</h2><span class="muted">${fmt(d,true)} · ${esc(S.hours[s])}</span></div><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
    ${EXT(mo)[d+"|"+k]?`<p class="muted" style="margin:0;font-size:.84rem">Altri anni: ${EXT(mo)[d+"|"+k].map(esc).join(", ")}</p>`:""}
+   ${LOWER(mo)[d+"|"+k]?`<p class="muted" style="margin:0;font-size:.84rem;font-style:italic">Anni successivi: ${LOWER(mo)[d+"|"+k].map(esc).join(", ")}</p>`:""}
    ${[...arr,...(multiPost(post)&&arr.some(x=>x)?[undefined]:[])].map((cur,i)=>`<div class="stack" style="gap:6px"><span class="label">${cur===undefined?"Aggiungi un'altra persona":cur?`Ora: ${esc(resName(cur))}`:"Scoperto"}</span>
      ${cov!=="ALL"?`<span class="groupname">Rotazione ${esc(rotName(cov))}</span>`:`<span class="groupname">Tutti gli specializzandi</span>`}
      ${pri.map(r=>btn(r,i,cur,cov==="ALL")).join("")||`<p class="muted" style="margin:0">Nessuno in questa rotazione.</p>`}
@@ -978,6 +990,7 @@ document.addEventListener("click",e=>{
     const next={...COVY,[k]:cur}; COVY=next; EXTC.key=null; render();
     db.doc("config/years").set({state:JSON.stringify({coverage:next}),updated:new Date().toISOString()}).catch(()=>toast("Non riesco a salvare: le regole del database vanno aggiornate"));
     return; }
+  if(a==="rflag"){ const r=resOf(el.dataset.id); if(!r) return; const f=el.dataset.f; r[f]=!canDo(r.id,f==="nights"?"N":"D"); persist(); render(); return; }
   if(a==="year"){ switchYear(+el.dataset.v); render(); return; }
   if(a==="years"){ if(UI.confirm!=="years"){UI.confirm="years";render();return;} UI.confirm=null;
     if(S.multiYear){ S.multiYear=false; persist(); toast("Più anni disattivato: dati degli altri anni conservati"); render(); return; }
