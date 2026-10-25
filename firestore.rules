@@ -37,6 +37,8 @@ service cloud.firestore {
     // impostazioni del tool e turni dei mesi: tutti leggono, proprietario e gestori scrivono
     // ogni anno: config/main + planner/state (2° anno), config/yN + planner/yN (altri anni); scrive il proprietario o i gestori di quell'anno
     match /config/{doc} { allow read: if allowed(); allow write: if isOwner() || (allowed() && ((doc == "main" && mgrList("uids")) || (doc != "main" && mgrList(doc)))); }
+    // anni che coprono ogni sala: elenco unico, lo modificano il proprietario e i gestori di qualsiasi anno
+    match /config/years { allow read: if allowed(); allow write: if isOwner() || (allowed() && isManager()); }
     match /planner/{doc} { allow read: if allowed(); allow write: if isOwner() || (allowed() && ((doc == "state" && mgrList("uids")) || (doc != "state" && mgrList(doc)))); }
 
     // indisponibilità: ognuno scrive solo le proprie; il proprietario anche quelle degli altri e lo spazio "staff"
