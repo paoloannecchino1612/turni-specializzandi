@@ -28,7 +28,7 @@ function syncRoles(){ if(!OWNER||!db||!S) return; const uids=[...new Set((S.mana
 const UNAV={}; /* mk → pid → {data: codice} — un documento per specializzando e mese */
 function UN(mk){return UNAV[mk]||(UNAV[mk]={});}
 const now=new Date();
-const UI={tab:"mese", mk:mkOf(now.getFullYear(), now.getMonth()+2), sel:null, view:null, confirm:null};
+const UI={tab:"turni", mk:mkOf(now.getFullYear(), now.getMonth()+2), sel:null, view:null, confirm:null};
 try{const t=localStorage.getItem("turni.tab"); if(t) UI.tab=t; const me=localStorage.getItem("turni.me"); if(me) UI.sel=me;}catch(e){}
 
 /* ---------- date ---------- */
@@ -288,7 +288,7 @@ function myPid(){ if(!MYUID||!S) return null; for(const pid in CLAIMS) if(CLAIMS
 /* ---------- render ---------- */
 const app=document.getElementById("app");
 function render(){
-  if(!ADMIN()&&(UI.tab==="mese"||UI.tab==="imp")) UI.tab="indisp";
+  if(!ADMIN()&&(UI.tab==="mese"||UI.tab==="imp")) UI.tab="turni";
   document.querySelectorAll("#tabs button").forEach(b=>{b.setAttribute("aria-selected",b.dataset.tab===UI.tab); b.hidden=!ADMIN()&&(b.dataset.tab==="mese"||b.dataset.tab==="imp");});
   if(!S){app.innerHTML=`<div class="empty">Caricamento dati…</div>`;return;}
   const needLink=db&&MYUID&&S.residents.length&&!myPid();
