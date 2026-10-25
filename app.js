@@ -196,7 +196,7 @@ function generate(mk,wk){
       return; }
     sched[d]={};
     slotsOfDay(d).forEach(x=>{ if(extCovered(mo,d,x.key)){ sched[d][x.key]=[]; return; }
-      sched[d][x.key]=[null]; slots.push({d,i,w,t,post:x.post,s:x.s,key:x.key}); }); });
+      sched[d][x.key]=[null]; slots.push({d,i,w,t,post:x.post,s:x.s,key:x.key,ext:extHas(mo,d,x.key)}); }); });
   const pri=x=>x.s==="N"?0:x.s==="D"?1:(x.t!=="fer"?2:3);
   slots.forEach(x=>x.r=rand()); slots.sort((a,b)=>pri(a)-pri(b)||a.i-b.i||a.r-b.r);
   const pick=(sl,cands,cap,forceG)=>{ let best=null,bk=null;
@@ -207,25 +207,41 @@ function generate(mk,wk){
       if(forceG) key.unshift(p.g||0);
       if(!best||cmp(key,bk)<0){best=r;bk=key;} }
     return best; };
-  const put=(sl,r)=>{ const p=st[r.id]; sched[sl.d][sl.key][0]=r.id; p.on[sl.d]=sl.s; p.tot++; p[sl.s]++; p.pc[sl.post.id]=(p.pc[sl.post.id]||0)+1; p.last[sl.d]=sl.post.id;
+  const put=(sl,r,more)=>{ const p=st[r.id]; if(more) sched[sl.d][sl.key].push(r.id); else sched[sl.d][sl.key][0]=r.id; p.on[sl.d]=sl.s; p.tot++; p[sl.s]++; p.pc[sl.post.id]=(p.pc[sl.post.id]||0)+1; p.last[sl.d]=sl.post.id;
     if(sl.t!=="fer")p.we++; p.wk[sl.w]=(p.wk[sl.w]||0)+1; if(sl.s==="N")p.wn[sl.w]=(p.wn[sl.w]||0)+1; };
   /* prima si resta entro i turni ideali (es. 5, con un riposo in settimana), poi si arriva al massimo solo dove serve */
   /* ogni giorno si riempiono per prime le sale/turni finora meno coperti: i buchi si distribuiscono in modo omogeneo */
   /* turni inseriti a mano (fissi): si mettono per primi e il generatore non li tocca */
   const fx=mo.fixed||{};
-  slots.forEach(sl=>{ const pid=fx[sl.d+"|"+sl.key+"|0"]; if(pid&&st[pid]) put(sl,{id:pid}); });
+  slots.forEach(sl=>{ const pre=sl.d+"|"+sl.key+"|", ids=Object.keys(fx).filter(k=>k.startsWith(pre)).sort((a,b)=>+a.split("|").pop()-+b.split("|").pop()).map(k=>fx[k]).filter(pid=>st[pid]);
+    ids.forEach((pid,n)=>put(sl,{id:pid},n>0)); });
   const soft=S.targetWeek||S.maxWeek, fill={}, byDay=days.map(()=>[]);
   slots.forEach(sl=>byDay[sl.i].push(sl));
   for(const [grp,cap] of [["pri",soft],["jol",soft],["pri",S.maxWeek],["jol",S.maxWeek]])
     for(const pr of [0,1,2,3]) for(const list of byDay){
-      const todo=list.filter(sl=>pri(sl)===pr&&!sched[sl.d][sl.key][0]);
+      const todo=list.filter(sl=>pri(sl)===pr&&!sl.ext&&!sched[sl.d][sl.key][0]);
       todo.forEach(sl=>sl.r=rand());
       todo.sort((a,b)=>(fill[a.key]||0)-(fill[b.key]||0)||a.r-b.r);
       for(const sl of todo){ const r=pick(sl,pools(mo,sl.post,sl.s)[grp],cap); if(r){ put(sl,r); fill[sl.key]=(fill[sl.key]||0)+1; } } }
   /* regola prioritaria: chi ha segnato "tutta la giornata" viene inserito lo stesso se il turno resterebbe scoperto
      (ferie, congressi e indisponibilità di singoli turni restano vincolanti); si distribuisce tra chi è stato forzato meno */
-  for(const grp of ["pri","jol"]) for(const sl of slots){ if(sched[sl.d][sl.key][0]) continue;
+  /* TC/RM dove c'è già un altro anno: si coprono dopo, con chi resta entro i turni ideali */
+  for(const grp of ["pri","jol"]) for(const list of byDay){
+    const todo=list.filter(sl=>sl.ext&&!sched[sl.d][sl.key][0]); todo.forEach(sl=>sl.r=rand()); todo.sort((a,b)=>(fill[a.key]||0)-(fill[b.key]||0)||a.r-b.r);
+    for(const sl of todo){ const r=pick(sl,pools(mo,sl.post,sl.s)[grp],soft); if(r){ put(sl,r); fill[sl.key]=(fill[sl.key]||0)+1; } } }
+  for(const grp of ["pri","jol"]) for(const sl of slots){ if(sl.ext||sched[sl.d][sl.key][0]) continue;
     const r=pick(sl,pools(mo,sl.post,sl.s)[grp],S.maxWeek,true); if(r){ put(sl,r); st[r.id].g=(st[r.id].g||0)+1; } }
+  /* chi è in rotazione TC/RM ed è libero (entro i turni ideali) va comunque in TC/RM come persona in più, nella sala meno affollata */
+  const cnt=(d,k)=>(sched[d][k]||[]).filter(x=>x).length+((mo.ext||{})[d+"|"+k]||[]).length;
+  byDay.forEach(list=>{ if(!list.length) return; const {d,i,w,t}=list[0]; if(t==="fes") return;
+    const people=S.residents.filter(r=>inGem(mo,r.id)).map(r=>({r,o:rand()})).sort((a,b)=>a.o-b.o).map(x=>x.r);
+    for(const r of people){ const rot=mo.rot[r.id], p=st[r.id];
+      const posts=S.posts.filter(x=>multiPost(x)&&x.cover===rot); if(!posts.length) continue;
+      /* prima le sale vuote, poi le meno affollate; a parità si bilancia mattina/pomeriggio e la sala */
+      const opts=[]; for(const sh of ["M","P"]){ if(!ok(mo,p,r.id,d,sh,w,soft)) continue;
+        posts.forEach(x=>{ if((x.on[t]||[]).includes(sh)&&sched[d][x.id+"|"+sh]) opts.push({post:x,sh,c:cnt(d,x.id+"|"+sh),mp:p[sh]-p[sh==="M"?"P":"M"],pc:p.pc[x.id]||0}); }); }
+      if(!opts.length) continue; opts.sort((a,b)=>a.c-b.c||a.mp-b.mp||a.pc-b.pc);
+      const {post,sh}=opts[0], key=post.id+"|"+sh; put({d,i,w,t,post,s:sh,key},r,!!sched[d][key][0]); } });
   mo.sched=sched; mo.generated=new Date().toISOString(); if(only){ mo.weeksGen=mo.weeksGen||{}; mo.weeksGen[wk]=mo.generated; }
 }
 function derive(mk,override){
@@ -234,7 +250,8 @@ function derive(mk,override){
   if(!SC) return {per,holes,issues,where};
   days.forEach((d,i)=>{const w=Math.floor(i/7),t=dayType(d);
     slotsOfDay(d).forEach(({post,s,key})=>{ const arr=(SC[d]||{})[key]||[null];
-      arr.forEach(pid=>{ if(!pid){holes.push({d,post:post.name,s});return;} const p=per[pid]; if(!p)return;
+      if(!arr.some(x=>x)&&!extHas(mo,d,key)) holes.push({d,post:post.name,s});
+      arr.forEach(pid=>{ if(!pid) return; const p=per[pid]; if(!p)return;
         if(p.on[d]) issues.push(`${resName(pid)}: ${p.on[d]==="N"||s==="N"?"lavora di giorno il "+fmt(d)+", giorno di monto":"due turni il "+fmt(d)}`);
         p.on[d]=s; where[pid+"|"+d]=post.name; p.pc[post.name]=(p.pc[post.name]||0)+1; p.tot++; p[s]++; if(t!=="fer")p.we++; if(t==="sab")p.sab=(p.sab||0)+1; if(t==="fes")p.fes=(p.fes||0)+1; p.wk[w]=(p.wk[w]||0)+1; if(s==="N")p.wn[w]=(p.wn[w]||0)+1;
         {const u=unavOf(mo,pid,d); if(blocked(u,s)) issues.push(`${resName(pid)}: ${u==="F"?"in ferie":u==="C"?"a congresso":u==="G"?"indisponibile tutto il giorno, inserito perché il turno sarebbe rimasto scoperto,":"indisponibile"} ${fmt(d)} (${SHN[s]})`);}
@@ -300,8 +317,8 @@ function swapWarnings(mk,x){ const before=effSched(mk); if(!before) return {ok:f
   /* postazioni che con il cambio restano senza nessuno */
   const cells=[x.a,...(x.b?[x.b]:[]),...(x.extra||[])], seen=new Set(), holes=[];
   for(const c of cells){ const key=c.d+"|"+c.k; if(seen.has(key)) continue; seen.add(key);
-    const nb=((before[c.d]||{})[c.k]||[]).filter(v=>!v).length, na=((after[c.d]||{})[c.k]||[]).filter(v=>!v).length;
-    if(na>nb) holes.push(`${slotLabel({d:c.d,k:c.k})} rimane scoperto`); }
+    const empty=sc=>!(((sc[c.d]||{})[c.k])||[]).some(v=>v)&&!extHas(M(mk),c.d,c.k);
+    if(empty(after)&&!empty(before)) holes.push(`${slotLabel({d:c.d,k:c.k})} rimane scoperto`); }
   return {ok:true, holes, from:diff(x.from), to:x.to?diff(x.to):[], freeFrom:free(x.from), freeTo:x.to?free(x.to):{gain:[],smonto:[],lose:[]}}; }
 function freeBox(rows){ const li=[];
   for(const [who,f] of rows){ f.gain.forEach(d=>li.push(`<li><strong>${who}</strong>: giorno libero il ${d}</li>`)); (f.smonto||[]).forEach(([d,n])=>li.push(`<li><strong>${who}</strong>: il ${d} non lavori, ma è lo smonto della notte del ${n}: non è un giorno libero</li>`)); f.lose.forEach(d=>li.push(`<li><strong>${who}</strong>: lavori il ${d}, che prima era libero</li>`)); }
@@ -412,7 +429,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
        if(!arr) return `<td class="cell none">·</td>`;
        const ex=(mo.ext||{})[d+"|"+c.k], exh=ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"";
        if(!arr.length) return `<td class="cell" style="cursor:default" title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
-       return `<td class="cell ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:`<span class="hole">scoperto</span>`).join("")}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
+       return `<td class="cell ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(ex||arr.some(v=>v)?"":`<span class="hole">scoperto</span>`)).join("")}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
   } else if(UI.view==="nome"){
     if(!UI.who) UI.who=myPid()||"";
     const pid=UI.who, rows=[];
@@ -701,7 +718,10 @@ function maybePlan(mk,pid,d){ if(!ADMIN()) return false; const c=conflictsOf(mk,
 
 /* ---------- turni coperti dagli altri anni (import dal foglio "BOZZA ORARI") ---------- */
 /* mo.ext: "giorno|postId|turno" → ["(3) Rossi", …]; quei turni non vengono assegnati ai nostri e non sono buchi */
-function extCovered(mo,d,key){ return !!(mo.ext||{})[d+"|"+key] && !(mo.fixed||{})[d+"|"+key+"|0"]; }
+/* TC e RM possono avere più persone: lì un altro anno non toglie il nostro posto (resta da coprire con priorità bassa, ma vuoto non è un buco) */
+function multiPost(p){ return !!p&&(p.cover==="TC"||p.cover==="RM"); }
+function extCovered(mo,d,key){ return !!(mo.ext||{})[d+"|"+key] && !multiPost(postOf(key.split("|")[0])) && !(mo.fixed||{})[d+"|"+key+"|0"]; }
+function extHas(mo,d,key){ return !!(mo.ext||{})[d+"|"+key]; }
 /* allinea l'orario già presente: i turni coperti da altri anni restano vuoti (non buchi), gli altri tornano da coprire */
 function syncExt(mo){ if(!mo.sched) return;
   for(const d in mo.sched) for(const k in mo.sched[d]){ const a=mo.sched[d][k];
@@ -763,12 +783,13 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
     if(!arr.includes(pid)&&(p.wk[w]||0)>=S.maxWeek) return `già ${p.wk[w]} turni in settimana`; return ""; };
   const btn=(r,i,cur,tag)=>{const y=why(r.id), isCur=cur===r.id;return `<button class="cand ${isCur?"cur":""}" data-act="assign" data-i="${i}" data-id="${r.id}"><span><span class="name-strong">${esc(rName(r))}</span>${tag?` <span class="muted" style="font-size:.78rem">· ${esc(rotName(mo.rot[r.id]))}</span>`:""}${y&&!isCur?`<br><span class="why">${y}</span>`:""}</span><span class="chip">${per[r.id].tot} turni · ${per[r.id].N} N</span></button>`;};
   sheet(`<div class="row" style="justify-content:space-between"><div><h2>${esc(post.name)} · ${SHN[s]}</h2><span class="muted">${fmt(d,true)} · ${esc(S.hours[s])}</span></div><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
-   ${arr.map((cur,i)=>`<div class="stack" style="gap:6px"><span class="label">${cur?`Ora: ${esc(resName(cur))}`:"Scoperto"}</span>
+   ${(mo.ext||{})[d+"|"+k]?`<p class="muted" style="margin:0;font-size:.84rem">Altri anni: ${mo.ext[d+"|"+k].map(esc).join(", ")}</p>`:""}
+   ${[...arr,...(multiPost(post)&&arr.some(x=>x)?[undefined]:[])].map((cur,i)=>`<div class="stack" style="gap:6px"><span class="label">${cur===undefined?"Aggiungi un'altra persona":cur?`Ora: ${esc(resName(cur))}`:"Scoperto"}</span>
      ${cov!=="ALL"?`<span class="groupname">Rotazione ${esc(rotName(cov))}</span>`:`<span class="groupname">Tutti gli specializzandi</span>`}
      ${pri.map(r=>btn(r,i,cur,cov==="ALL")).join("")||`<p class="muted" style="margin:0">Nessuno in questa rotazione.</p>`}
      ${jol.length?`<span class="groupname">Jolly</span>${jol.map(r=>btn(r,i,cur,true)).join("")}`:""}
      ${(()=>{const bg=S.residents.filter(r=>isBG(mo.rot[r.id])); return bg.length?`<span class="groupname">Bambin Gesù (solo a mano)</span>${bg.map(r=>btn(r,i,cur,true)).join("")}`:"";})()}
-     ${cur?`<button class="btn danger" data-act="assign" data-i="${i}" data-id="">Lascia scoperto</button>`:""}</div>`).join("")}`);
+     ${cur?`<button class="btn danger" data-act="assign" data-i="${i}" data-id="">${arr.filter(x=>x).length>1?"Togli":"Lascia scoperto"}</button>`:""}</div>`).join("")}`);
   layer.dataset.d=d; layer.dataset.k=k; }
 
 /* ---------- export ---------- */
@@ -777,7 +798,7 @@ async function exportXlsx(){
   if(typeof XLSX==="undefined"){toast("Libreria Excel non caricata, riprova tra poco");return;}
   const SC=effSched(UI.mk)||{}, cols=columns(SC,p);
   const t1=[["Data","Giorno",...cols.map(c=>`${c.post.name} ${c.s==="D"||c.s==="N"?"":SHN[c.s]+" "}(${S.hours[c.s]})`.replace("  "," "))]];
-  p.days.forEach(d=>t1.push([d.split("-").reverse().join("/"),DOW[isoDow(d)]+(dayType(d)==="fes"&&isoDow(d)!==6?" (festivo)":""),...cols.map(c=>{const a=(SC[d]||{})[c.k], ex=(mo.ext||{})[d+"|"+c.k]||[];return a?[...a.map(x=>x?resName(x):"SCOPERTO"),...ex].join(", "):"";})]));
+  p.days.forEach(d=>t1.push([d.split("-").reverse().join("/"),DOW[isoDow(d)]+(dayType(d)==="fes"&&isoDow(d)!==6?" (festivo)":""),...cols.map(c=>{const a=(SC[d]||{})[c.k], ex=(mo.ext||{})[d+"|"+c.k]||[];return a?[...a.map(x=>x?resName(x):ex.length?"":"SCOPERTO").filter(x=>x),...ex].join(", "):"";})]));
   const people=S.residents.filter(r=>inGem(mo,r.id)||(SC&&shiftsOf(SC,r.id).length));
   const lab=(c,w)=>c==="S"?"Smonto":c==="X"?"indisp.":c==="F"?"ferie":c==="C"?"congresso":c==="D"?"Guardia domenica":c==="N"?"Monto (notte)":c?`${w} ${c}`:"";
   const t2=[["Specializzando","Rotazione",...p.days.map(d=>`${DOW[isoDow(d)]} ${+d.slice(8)}/${+d.slice(5,7)}`)]];
@@ -907,7 +928,12 @@ document.addEventListener("click",e=>{
   if(a==="view"){UI.view=el.dataset.v;render();return;}
   if(a==="cell"){cellSheet(el.dataset.d,el.dataset.k);return;}
   if(a==="assign"){ const mo=M(UI.mk), d=layer.dataset.d, k=layer.dataset.k, i=+el.dataset.i, id=el.dataset.id||null;
-    mo.sched[d][k][i]=id; mo.fixed=mo.fixed||{}; if(id) mo.fixed[d+"|"+k+"|"+i]=id; else delete mo.fixed[d+"|"+k+"|"+i];
+    const arr=mo.sched[d][k], fx=mo.fixed=mo.fixed||{}, pre=d+"|"+k+"|";
+    if(id){ arr[i]=id; fx[pre+i]=id; }
+    else if(arr.filter(x=>x).length>1){ /* più persone: si toglie solo questa e si riallineano i turni fissi */
+      const pins=arr.map((x,j)=>fx[pre+j]===x&&x?x:null); arr.splice(i,1); pins.splice(i,1);
+      Object.keys(fx).filter(z=>z.startsWith(pre)).forEach(z=>delete fx[z]); pins.forEach((x,j)=>{ if(x) fx[pre+j]=x; }); }
+    else { arr[i]=null; delete fx[pre+i]; }
     persist(); closeSheet(); render(); return; }
   if(a==="manualstart"){ const mo=M(UI.mk); if(!mo.sched){ const sc={}; period(UI.mk).days.forEach(d=>{ sc[d]={}; slotsOfDay(d).forEach(x=>{ sc[d][x.key]=extCovered(mo,d,x.key)?[]:[null]; }); }); mo.sched=sc; mo.generated=null; }
     UI.view="giorni"; persist(); render(); return; }
