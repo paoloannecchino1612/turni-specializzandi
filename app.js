@@ -67,6 +67,9 @@ function syncRoles(){ if(!OWNER||!db||!S) return; const uidsOf=st=>[...new Set((
   if(MULTI){ for(const y of [1,3,4]){ const st=yState(y); if(!st) return; doc["y"+y]=uidsOf(st); } }
   const k=JSON.stringify(doc); if(k===lastRoles) return; lastRoles=k; db.doc("roles/managers").set(doc).catch(()=>{lastRoles="";}); } let MYUID=null, USER=null;
 const UNAV={}; /* mk → pid → {data: codice} — un documento per specializzando e mese */
+/* preferenze di turno (3° e 4° anno), nello stesso documento delle indisponibilità: mk → pid → {data: "M" | "TC1|M" …} */
+const PREF={}; function PR(mk){return PREF[mk]||(PREF[mk]={});}
+function canPref(pid){ const r=resOf(pid); return !!r&&yearOfRes(r)>=3; }
 function UN(mk){return UNAV[mk]||(UNAV[mk]={});}
 const now=new Date();
 const UI={tab:"turni", mk:mkOf(now.getFullYear(), now.getMonth()+2), sel:null, view:null, confirm:null};
@@ -153,13 +156,14 @@ function unavLocked(mk){ return !ADMIN()&&todayIso()>unavDeadline(mk); }
 function canEditUnav(pid,mk){ return ADMIN()||(!!pid&&pid===myPid()&&!unavLocked(mk||UI.mk)); }
 function unavDenyMsg(pid,mk){ return pid===myPid()&&unavLocked(mk||UI.mk)?`Modifiche chiuse dal ${fmt(add(unavDeadline(mk||UI.mk),1))}: per cambiare chiedi a chi gestisce i turni`:"Puoi modificare solo le tue indisponibilità"; }
 const SRC={}, SUBS={};
-function recomputeUnav(){ const keep={};
-  for(const mk in UNAV) for(const pid in UNAV[mk]){ const k=mk+"_"+pid; if(uT[k]||uBusy[k]) keep[k]=UNAV[mk][pid]; }
+function recomputeUnav(){ const keep={}, keepP={};
+  for(const mk in UNAV) for(const pid in UNAV[mk]){ const k=mk+"_"+pid; if(uT[k]||uBusy[k]){ keep[k]=UNAV[mk][pid]; keepP[k]=PR(mk)[pid]; } }
   for(const mk in UNAV) for(const pid in UNAV[mk]) delete UNAV[mk][pid];
+  for(const mk in PREF) for(const pid in PREF[mk]) delete PREF[mk][pid];
   /* i dati del database arrivano congelati: si copiano, altrimenti le modifiche successive vengono ignorate */
-  for(const x of Object.values(SRC.staff||{})) UN(x.mk)[x.pid]={...(x.days||{})};
-  for(const u in SRC){ if(u==="staff") continue; for(const x of Object.values(SRC[u])) if(CLAIMS[x.pid]===u) UN(x.mk)[x.pid]={...(x.days||{})}; }
-  for(const k in keep){ const i=k.indexOf("_"); UN(k.slice(0,i))[k.slice(i+1)]=keep[k]; } }
+  for(const x of Object.values(SRC.staff||{})){ UN(x.mk)[x.pid]={...(x.days||{})}; if(x.pref) PR(x.mk)[x.pid]={...x.pref}; }
+  for(const u in SRC){ if(u==="staff") continue; for(const x of Object.values(SRC[u])) if(CLAIMS[x.pid]===u){ UN(x.mk)[x.pid]={...(x.days||{})}; if(x.pref) PR(x.mk)[x.pid]={...x.pref}; } }
+  for(const k in keep){ const i=k.indexOf("_"); UN(k.slice(0,i))[k.slice(i+1)]=keep[k]; if(keepP[k]) PR(k.slice(0,i))[k.slice(i+1)]=keepP[k]; } }
 function syncSubs(uids){ const want=new Set(["staff",...uids]);
   for(const u of want) if(!SUBS[u]) SUBS[u]=db.collection(`unav/${u}/m`).limit(1000).onSnapshot(qs=>{ SRC[u]={}; for(const doc of qs.docs){ const x=doc.data(); if(x&&x.mk&&x.pid) SRC[u][doc.id]=x; } recomputeUnav(); if(S&&!layer.innerHTML) render(); },()=>{});
   for(const u in SUBS) if(!want.has(u)){ try{SUBS[u]();}catch(e){} delete SUBS[u]; delete SRC[u]; } }
@@ -178,7 +182,7 @@ function saveUnav(mk,pid){ const k=mk+"_"+pid; if(db&&!canEditUnav(pid,mk)){ toa
   uT[k]=setTimeout(async()=>{ delete uT[k];
     if(!db){ try{localStorage.setItem("turni.unav",JSON.stringify(UNAV));}catch(e){} setSync("Salvato su questo dispositivo"); return; }
     if(uBusy[k]){ saveUnav(mk,pid); return; } uBusy[k]=true;
-    try{ await unavRef(mk,pid).set({mk,pid,days:UN(mk)[pid]||{},updated:new Date().toISOString()}); setSync("Salvato"); }
+    try{ await unavRef(mk,pid).set({mk,pid,days:UN(mk)[pid]||{},pref:PR(mk)[pid]||{},updated:new Date().toISOString()}); setSync("Salvato"); }
     catch(e){ setSync(e&&e.code==="invalid_argument"?"Non hai i permessi per salvare: chiedi a chi gestisce i turni di invitarti":"Salvataggio non riuscito, riprova"); }
     uBusy[k]=false; },400); }
 function persist(){ if(!ADMIN()) return; clearTimeout(saveT); setSync("Modifiche in corso…"); saveT=setTimeout(()=>{saveT=null;flush();},500); }
@@ -291,6 +295,14 @@ function generate(mk,wk,only2){ /* only2: Set di pid a cui si possono dare turni
   const capN=nightQuota(mk,"N"), capD=nightQuota(mk,"D"), nDone={N:0,D:0};
   const fair=fairMonth(mk), mMain=fair&&hasLowerYear()?fair:null, maxCap=S.maxWeek, soft=S.targetWeek||S.maxWeek, fill={}, byDay=days.map(()=>[]);
   slots.forEach(sl=>byDay[sl.i].push(sl));
+  /* preferenze di turno (3° e 4° anno): si provano per prime, rispettando tutte le regole e le quote */
+  { const PRF=PR(mk);
+    const order=S.residents.filter(r=>PRF[r.id]&&canPref(r.id)&&inGem(mo,r.id)&&(!only2||only2.has(r.id))).sort((a,b)=>st[a.id].jit-st[b.id].jit);
+    for(const r of order) for(const d of Object.keys(PRF[r.id]).sort()){ const code=PRF[r.id][d]; if(!code) continue;
+      const [pid0,sh]=code.includes("|")?code.split("|"):[null,code];
+      const cands=slots.filter(sl=>sl.d===d&&sl.s===sh&&(!pid0||sl.post.id===pid0)&&!sched[d][sl.key][0]).filter(sl=>{ const pl=pools(mo,sl.post,sl.s); return pl.pri.some(x=>x.id===r.id)||pl.jol.some(x=>x.id===r.id); });
+      cands.sort((a,b)=>(a.ext-b.ext)||((fill[a.key]||0)-(fill[b.key]||0)));
+      for(const sl of cands){ if(pick(sl,[r],maxCap,false,sl.ext?fair:undefined)){ put(sl,r); fill[sl.key]=(fill[sl.key]||0)+1; break; } } } }
   for(const [grp,cap] of [["pri",soft],["jol",soft],["pri",maxCap],["jol",maxCap]])
     for(const pr of [0,1,2,3]) for(const list of ((pr<2&&(capN||capD))?byDay.map(l=>({l,o:rand()})).sort((a,b)=>a.o-b.o).map(x=>x.l):byDay)){
       const todo=list.filter(sl=>pri(sl)===pr&&!sl.ext&&!sched[sl.d][sl.key][0]);
@@ -392,6 +404,9 @@ function derive(mk,override){
         if(isExt(rot)&&!isBG(rot)) issues.push(`${resName(pid)}: in turno il ${fmt(d)} ma è ${rot?"a "+rotName(rot):"senza rotazione"}`);
         else if(!isBG(rot)&&covOf(post,s)!=="ALL"&&rot!==covOf(post,s)&&!(isJolly(rot)&&!isJolly(covOf(post,s)))) issues.push(`${resName(pid)}: in ${post.name} il ${fmt(d)} ma la rotazione è ${rotName(rot)}`);
       }); }); });
+  { const PRF=PR(mk); for(const pid in PRF){ if(!per[pid]||!canPref(pid)) continue; for(const d in PRF[pid]){ const code=PRF[pid][d]; if(!code||!days.includes(d)) continue;
+      const [pp,sh]=code.includes("|")?code.split("|"):[null,code]; const okk=Object.entries(SC[d]||{}).some(([k,a])=>a.includes(pid)&&k.endsWith("|"+sh)&&(!pp||k.startsWith(pp+"|")));
+      if(!okk) issues.push(`${resName(pid)}: preferenza non rispettata il ${fmt(d)} (${pp?esc((postOf(pp)||{}).name||pp)+" ":""}${SHN[sh]})`); } } }
   for(const pid in per){ const p=per[pid];
     for(const d in p.on){ if(p.on[d]==="N" && p.on[add(d,1)]) issues.push(`${resName(pid)}: lavora il ${fmt(add(d,1))}, giorno di smonto`); }
     for(const w in p.wk){ if(p.wk[w]>S.maxWeek) issues.push(`${resName(pid)}: ${p.wk[w]} turni nella settimana ${+w+1} (max ${S.maxWeek})`); }
@@ -515,7 +530,7 @@ function vMese(){ if(!S.residents.length) return monthBar()+noRes();
   </div>${presenceBox(presence(UI.mk))}`; }
 
 function vIndisp(){ if(!S.residents.length) return monthBar()+noRes();
-  const mo=M(UI.mk), p=period(UI.mk), mode=UI.umode||"T", me=myPid();
+  const mo=M(UI.mk), p=period(UI.mk), me=myPid(); let mode=UI.umode||"T"; if(mode==="R"&&!S.residents.some(r=>canPref(r.id))) mode=UI.umode="T";
   if(!OWNER&&db){ if(!MYUID) return monthBar()+`<div class="panel"><h2>Accedi con il tuo account</h2><p class="muted" style="margin:0">Per compilare le tue indisponibilità accedi con la tua email.</p></div>`;
     if(!me) return monthBar()+claimPanel("Tocca il tuo nome per collegarlo al tuo account. Serve una volta sola: dopo potrai modificare solo le tue indisponibilità, ferie e congressi."); }
   if(!OWNER&&me&&!UI.selTouched) UI.sel=me;
@@ -523,9 +538,10 @@ function vIndisp(){ if(!S.residents.length) return monthBar()+noRes();
   const ro=db&&!canEditUnav(UI.sel), dl=unavDeadline(UI.mk), closed=todayIso()>dl;
   const dlBox=`<div class="${closed?"alerts":"okline"}" style="${closed?"":"font-weight:500;color:var(--muted)"}">${closed?`<strong>Modifiche chiuse</strong><span style="font-size:.86rem">Indisponibilità, ferie e congressi di ${monthName(UI.mk)} si potevano inserire fino a ${fmt(dl,true)}.${ADMIN()?" Tu puoi ancora modificarle, anche per gli altri.":" Per cambiare qualcosa chiedi a chi gestisce i turni."}</span>`:`Puoi inserire o modificare indisponibilità, ferie e congressi di ${monthName(UI.mk)} fino a <strong>${fmt(dl,true)}</strong>.`}</div>`;
   const m=+UI.mk.slice(5);
-  const cnt=id=>Object.entries(mo.unav[id]||{}).filter(([d,u])=>d>=p.first&&d<=p.last&&(mode==="T"?!(u==="F"||u==="C"):u===mode)).length;
-  const MODES=[["T","Indisponibilità turni"],["F","Ferie"],["C","Ferie congresso"]];
-  const hint={T:"Tocca un giorno: compaiono i turni previsti quel giorno da segnare come non disponibili.",F:"Tocca i giorni di ferie: si segna l'intera giornata. Tocca di nuovo per togliere.",C:"Tocca i giorni di congresso: si segna l'intera giornata. Tocca di nuovo per togliere."}[mode];
+  const cnt=id=>mode==="R"?Object.entries(PR(UI.mk)[id]||{}).filter(([d,v])=>v&&d>=p.first&&d<=p.last).length:Object.entries(mo.unav[id]||{}).filter(([d,u])=>d>=p.first&&d<=p.last&&(mode==="T"?!(u==="F"||u==="C"):u===mode)).length;
+  const MODES=[["T","Indisponibilità turni"],["F","Ferie"],["C","Ferie congresso"],...(S.residents.some(r=>canPref(r.id))?[["R","Preferenze di turno"]]:[])];
+  if(mode==="R"&&!canPref(UI.sel)){ const f=S.residents.find(r=>canPref(r.id)&&(r.id===me||ADMIN())); if(f&&!UI.selTouched) UI.sel=f.id; }
+  const hint={T:"Tocca un giorno: compaiono i turni previsti quel giorno da segnare come non disponibili.",F:"Tocca i giorni di ferie: si segna l'intera giornata. Tocca di nuovo per togliere.",C:"Tocca i giorni di congresso: si segna l'intera giornata. Tocca di nuovo per togliere.",R:canPref(UI.sel)?"Tocca un giorno e scegli il turno che preferisci (e se vuoi la sala). Il 4° anno viene sistemato per primo, poi il 3°: le preferenze si rispettano se le regole lo permettono; quelle non rispettate vengono segnalate ai gestori.":"Le preferenze di turno sono solo per 3° e 4° anno."}[mode];
   const pr=presence(UI.mk), myRot=mo.rot[UI.sel], lowDays=new Set(pr.filter(x=>x.rot.id===myRot).map(x=>x.d));
   const tot=(id,v)=>Object.entries(mo.unav[id]||{}).filter(([d,u])=>d>=p.first&&d<=p.last&&u===v).length;
   return monthBar()+(OWNER?"":`<div class="panel" style="gap:4px"><h2>Compila le tue indisponibilità</h2><p class="muted" style="margin:0;font-size:.88rem">Scegli il tuo nome, poi segna i turni in cui non ci sei, le ferie e i congressi. Si salva da solo e tutti vedono le stesse informazioni.</p></div>`)+`
@@ -535,10 +551,11 @@ function vIndisp(){ if(!S.residents.length) return monthBar()+noRes();
   <div class="panel"><div class="row" style="justify-content:space-between"><h2>${esc(resName(UI.sel))} · ${MODES.find(x=>x[0]===mode)[1]}</h2><span class="row" style="gap:6px"><span class="chip">${esc(rotName(mo.rot[UI.sel]))}</span><span class="chip tag-F">${tot(UI.sel,"F")} ferie</span><span class="chip tag-C">${tot(UI.sel,"C")} congr.</span></span></div>
    ${dlBox}
    <p class="muted" style="margin:0;font-size:.85rem">${ro?(UI.sel===myPid()?`Sola lettura: il termine per ${monthName(UI.mk)} è scaduto.`:`Stai guardando le voci di ${esc(resName(UI.sel))}: puoi modificare solo le tue.`):hint}</p>
-   ${ro?"":`<div class="row">${mode==="T"?clrBtn("clrone",`Elimina indisponibilità di ${esc(resName(UI.sel))}`):""}${clrBtn("clrF",`Elimina tutte le ferie di ${esc(resName(UI.sel))}`)}${clrBtn("clrC",`Elimina tutte le ferie congresso di ${esc(resName(UI.sel))}`)}${ADMIN()?clrBtn("clrall",`Elimina ${mode==="T"?"tutte le indisponibilità":mode==="F"?"tutte le ferie":"tutti i congressi"} del mese`):""}</div>`}
+   ${ro||mode!=="R"||!canPref(UI.sel)?"":`<div class="row">${clrBtn("clrR",`Elimina tutte le preferenze di ${esc(resName(UI.sel))}`)}</div>`}
+   ${ro||mode==="R"?"":`<div class="row">${mode==="T"?clrBtn("clrone",`Elimina indisponibilità di ${esc(resName(UI.sel))}`):""}${clrBtn("clrF",`Elimina tutte le ferie di ${esc(resName(UI.sel))}`)}${clrBtn("clrC",`Elimina tutte le ferie congresso di ${esc(resName(UI.sel))}`)}${ADMIN()?clrBtn("clrall",`Elimina ${mode==="T"?"tutte le indisponibilità":mode==="F"?"tutte le ferie":"tutti i congressi"} del mese`):""}</div>`}
    <div class="cal">${DOW.map(d=>`<div class="dow">${d}</div>`).join("")}
-   ${p.days.map(d=>{const u=unavOf(mo,UI.sel,d), t=dayType(d), out=+d.slice(5,7)!==m;
-     const tag=u==="F"?`<span class="full-tag tag-F">Ferie</span>`:u==="C"?`<span class="full-tag tag-C">Congresso</span>`:u==="G"?`<span class="full-tag">Indisp.</span>`:`<span class="marks">${SH.filter(s=>u.includes(s)).map(s=>`<span class="sh-${s}">${s==="D"?"G":s}</span>`).join("")}</span>`;
+   ${p.days.map(d=>{const u=unavOf(mo,UI.sel,d), t=dayType(d), out=+d.slice(5,7)!==m, pf=mode==="R"?((PR(UI.mk)[UI.sel]||{})[d]||""):"";
+     const tag=mode==="R"?(pf?(()=>{ const [pp,sh]=pf.includes("|")?pf.split("|"):[null,pf]; return `<span class="marks"><span class="sh-${sh}">${sh==="D"?"G":sh}</span></span>${pp?`<span style="font-size:.62rem;display:block">${esc((postOf(pp)||{}).name||pp)}</span>`:""}`; })():(FULL[u]?`<span class="full-tag">—</span>`:"")):u==="F"?`<span class="full-tag tag-F">Ferie</span>`:u==="C"?`<span class="full-tag tag-C">Congresso</span>`:u==="G"?`<span class="full-tag">Indisp.</span>`:`<span class="marks">${SH.filter(s=>u.includes(s)).map(s=>`<span class="sh-${s}">${s==="D"?"G":s}</span>`).join("")}</span>`;
      return `<button class="day ${out?"out":""} ${t!=="fer"?"we":""} ${t==="fes"&&isoDow(d)!==6?"fes":""} ${u==="G"?"full":""} ${u==="F"?"fer-day":""} ${u==="C"?"con-day":""} ${lowDays.has(d)?"low":""}" data-act="day" data-d="${d}" aria-label="${fmt(d,true)}">
        <span class="d">${+d.slice(8)}${out?`<span style="font-size:.65rem">/${+d.slice(5,7)}</span>`:""}</span>${tag}</button>`;}).join("")}</div>
    <div class="legend"><span><span class="chip sh-M">M</span> mattina</span><span><span class="chip sh-P">P</span> pomeriggio</span><span><span class="chip sh-N">N</span> notte</span><span><span class="chip sh-D">G</span> guardia domenica</span><span style="color:var(--bad)">rosso = festivo</span><span><span class="lowdot"></span> rotazione sotto il ${S.minPresence}%</span></div>
@@ -938,6 +955,14 @@ function extPreview(name){ const wb=UI.extWb; if(!wb) return; const ws=wb.Sheets
 const layer=document.getElementById("layer");
 function sheet(html){layer.innerHTML=`<div class="scrim" data-act="close"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;}
 function closeSheet(){layer.innerHTML="";}
+function prefSheet(d){ const mo=M(UI.mk), pid=UI.sel, cur=(PR(UI.mk)[pid]||{})[d]||"", u=unavOf(mo,pid,d);
+  const opts={}; slotsOfDay(d).forEach(x=>{ const pl=pools(mo,x.post,x.s); if(!(pl.pri.some(r=>r.id===pid)||pl.jol.some(r=>r.id===pid))) return; if(!canDo(pid,x.s)) return; (opts[x.s]=opts[x.s]||[]).push(x.post); });
+  const btn=(v,l)=>`<button data-act="pf" data-v="${v}" aria-pressed="${cur===v}">${l}</button>`;
+  sheet(`<div class="row" style="justify-content:space-between"><h2>Preferenza · ${fmt(d,true)}</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
+   ${u?`<p class="muted" style="margin:0;font-size:.85rem">Attenzione: quel giorno hai segnato ${FULL[u]?FULL[u].toLowerCase():"indisponibilità"}.</p>`:""}
+   ${SH.filter(s=>opts[s]).map(s=>`<span class="groupname">${SHN[s]} · ${esc(S.hours[s])}</span><div class="pickers">${btn(s,s==="N"||s==="D"?SHN[s]:"Sala qualsiasi")}${s==="N"||s==="D"?"":opts[s].map(p=>btn(p.id+"|"+s,esc(p.name))).join("")}</div>`).join("")||`<p class="muted" style="margin:0">Nessun turno disponibile per te quel giorno.</p>`}
+   <div class="row"><button class="btn" data-act="pf" data-v="">Nessuna preferenza</button><button class="btn primary" data-act="close">Fatto</button></div>`);
+  layer.dataset.d=d; }
 function daySheet(d){ const mo=M(UI.mk), u=unavOf(mo,UI.sel,d), avail=shiftsOfDay(d);
   sheet(`<div class="row" style="justify-content:space-between"><h2>${fmt(d,true)}</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
    ${u==="F"||u==="C"?`<p class="muted" style="margin:0">Giorno segnato come ${u==="F"?"ferie":"congresso"}: scegliendo un turno lo sostituisci.</p>`:""}
@@ -999,7 +1024,7 @@ document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]"); if(!el) return;
   const a=el.dataset.act;
   if(a==="close"){ if(e.target===el||el.tagName==="BUTTON"){closeSheet();render();} return; }
-  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrsched","clrext","refresh","refrot","years","unlink","swdel","mswgo"].includes(a)) UI.confirm=null;
+  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","clrext","refresh","refrot","years","unlink","swdel","mswgo"].includes(a)) UI.confirm=null;
   if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString()}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} const y=MULTI?yearOfPid(pid):null; if(y&&y!==CURY) switchYear(y); UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
   if(a==="unlink"){ const pid=el.dataset.id; if(UI.confirm!=="unl-"+pid){UI.confirm="unl-"+pid;render();return;} UI.confirm=null; const u=CLAIMS[pid]; if(!u) return; db.doc("claims/"+u).delete().then(()=>{delete CLAIMS[pid];render();}).catch(()=>toast("Non riesco a scollegare")); return; }
   if(a==="swsend"){ const F=UI.sw||{}, me=myPid(); if(!F.a||!F.to||!me) return; const [ad,ak]=F.a.split("#");
@@ -1096,9 +1121,13 @@ document.addEventListener("click",e=>{
   if(a==="sel"){UI.sel=el.dataset.id;UI.selTouched=true;try{localStorage.setItem("turni.me",UI.sel);}catch(_){}render();return;}
   if(a==="day"&&db&&!canEditUnav(UI.sel)){ toast(unavDenyMsg(UI.sel)); return; }
   if(a==="day"){ const mode=UI.umode||"T"; if(mode==="T"){daySheet(el.dataset.d);return;}
+    if(mode==="R"){ if(!canPref(UI.sel)){ toast("Le preferenze sono solo per 3° e 4° anno"); return; } if(db&&!canEditUnav(UI.sel)){ toast(unavDenyMsg(UI.sel)); return; } prefSheet(el.dataset.d); return; }
     const mo=M(UI.mk), d=el.dataset.d; mo.unav[UI.sel]={...(mo.unav[UI.sel]||{})};
     if(unavOf(mo,UI.sel,d)===mode) delete mo.unav[UI.sel][d]; else mo.unav[UI.sel][d]=mode; saveUnav(UI.mk,UI.sel); render(); maybePlan(UI.mk,UI.sel,d); return; }
   if(a==="umode"){UI.umode=el.dataset.v;render();return;}
+  if(a==="pf"){ const d=layer.dataset.d, v=el.dataset.v; const cur={...(PR(UI.mk)[UI.sel]||{})}; if(v) cur[d]=v; else delete cur[d]; PR(UI.mk)[UI.sel]=cur;
+    saveUnav(UI.mk,UI.sel); closeSheet(); render(); return; }
+  if(a==="clrR"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null; PR(UI.mk)[UI.sel]={}; saveUnav(UI.mk,UI.sel); toast("Preferenze eliminate"); render(); return; }
   if(a==="u"){ const d=layer.dataset.d, mo=M(UI.mk), v=el.dataset.v; mo.unav[UI.sel]={...(mo.unav[UI.sel]||{})};
     let u=unavOf(mo,UI.sel,d);
     if(v==="") u=""; else if(v==="G") u=u==="G"?"":"G";
