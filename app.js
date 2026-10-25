@@ -170,8 +170,8 @@ function load(raw){ const st=raw?JSON.parse(raw):clone(DEFAULT);
 /* ---------- generazione ---------- */
 function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
 function newStat(){return {on:{},tot:0,M:0,P:0,D:0,N:0,we:0,wk:{},wn:{},pc:{},last:{}};}
-function ok(mo,p,pid,d,s,w,cap){
-  if(blocked(unavOf(mo,pid,d),s)) return false;
+function ok(mo,p,pid,d,s,w,cap,forceG){
+  { const u=unavOf(mo,pid,d); if(blocked(u,s)&&!(forceG&&u==="G")) return false; }
   if(p.on[d]) return false;
   if(p.on[add(d,-1)]==="N") return false;
   if(s==="N" && p.on[add(d,1)]) return false;
@@ -196,11 +196,12 @@ function generate(mk,wk){
     slotsOfDay(d).forEach(x=>{ sched[d][x.key]=[null]; slots.push({d,i,w,t,post:x.post,s:x.s,key:x.key}); }); });
   const pri=x=>x.s==="N"?0:x.s==="D"?1:(x.t!=="fer"?2:3);
   slots.forEach(x=>x.r=rand()); slots.sort((a,b)=>pri(a)-pri(b)||a.i-b.i||a.r-b.r);
-  const pick=(sl,cands,cap)=>{ let best=null,bk=null;
-    for(const r of cands){ const p=st[r.id]; if(!ok(mo,p,r.id,sl.d,sl.s,sl.w,cap)) continue;
+  const pick=(sl,cands,cap,forceG)=>{ let best=null,bk=null;
+    for(const r of cands){ const p=st[r.id]; if(!ok(mo,p,r.id,sl.d,sl.s,sl.w,cap,forceG)) continue;
       const j=p.jit+rand()*0.5;
       const mp=(sl.s==="M"||sl.s==="P")?p[sl.s]-(sl.s==="M"?p.P:p.M):0, pc=p.pc[sl.post.id]||0, same=p.last[sl.d]===undefined&&p.last[add(sl.d,-1)]===sl.post.id?1:0;
       const key= sl.s==="N"?[p.N,p.tot,j] : sl.s==="D"?[p.we,p.tot,j] : sl.t!=="fer"?[p.we,p.tot,mp,pc+same,j] : [p.tot,mp,pc+same,j];
+      if(forceG) key.unshift(p.g||0);
       if(!best||cmp(key,bk)<0){best=r;bk=key;} }
     return best; };
   const put=(sl,r)=>{ const p=st[r.id]; sched[sl.d][sl.key][0]=r.id; p.on[sl.d]=sl.s; p.tot++; p[sl.s]++; p.pc[sl.post.id]=(p.pc[sl.post.id]||0)+1; p.last[sl.d]=sl.post.id;
@@ -215,6 +216,10 @@ function generate(mk,wk){
       todo.forEach(sl=>sl.r=rand());
       todo.sort((a,b)=>(fill[a.key]||0)-(fill[b.key]||0)||a.r-b.r);
       for(const sl of todo){ const r=pick(sl,pools(mo,sl.post,sl.s)[grp],cap); if(r){ put(sl,r); fill[sl.key]=(fill[sl.key]||0)+1; } } }
+  /* regola prioritaria: chi ha segnato "tutta la giornata" viene inserito lo stesso se il turno resterebbe scoperto
+     (ferie, congressi e indisponibilità di singoli turni restano vincolanti); si distribuisce tra chi è stato forzato meno */
+  for(const grp of ["pri","jol"]) for(const sl of slots){ if(sched[sl.d][sl.key][0]) continue;
+    const r=pick(sl,pools(mo,sl.post,sl.s)[grp],S.maxWeek,true); if(r){ put(sl,r); st[r.id].g=(st[r.id].g||0)+1; } }
   mo.sched=sched; mo.generated=new Date().toISOString(); if(only){ mo.weeksGen=mo.weeksGen||{}; mo.weeksGen[wk]=mo.generated; }
 }
 function derive(mk,override){
@@ -226,7 +231,7 @@ function derive(mk,override){
       arr.forEach(pid=>{ if(!pid){holes.push({d,post:post.name,s});return;} const p=per[pid]; if(!p)return;
         if(p.on[d]) issues.push(`${resName(pid)}: ${p.on[d]==="N"||s==="N"?"lavora di giorno il "+fmt(d)+", giorno di monto":"due turni il "+fmt(d)}`);
         p.on[d]=s; where[pid+"|"+d]=post.name; p.pc[post.name]=(p.pc[post.name]||0)+1; p.tot++; p[s]++; if(t!=="fer")p.we++; if(t==="sab")p.sab=(p.sab||0)+1; if(t==="fes")p.fes=(p.fes||0)+1; p.wk[w]=(p.wk[w]||0)+1; if(s==="N")p.wn[w]=(p.wn[w]||0)+1;
-        {const u=unavOf(mo,pid,d); if(blocked(u,s)) issues.push(`${resName(pid)}: ${u==="F"?"in ferie":u==="C"?"a congresso":"indisponibile"} ${fmt(d)} (${SHN[s]})`);}
+        {const u=unavOf(mo,pid,d); if(blocked(u,s)) issues.push(`${resName(pid)}: ${u==="F"?"in ferie":u==="C"?"a congresso":u==="G"?"indisponibile tutto il giorno, inserito perché il turno sarebbe rimasto scoperto,":"indisponibile"} ${fmt(d)} (${SHN[s]})`);}
         const rot=mo.rot[pid];
         if(isExt(rot)&&!isBG(rot)) issues.push(`${resName(pid)}: in turno il ${fmt(d)} ma è ${rot?"a "+rotName(rot):"senza rotazione"}`);
         else if(!isBG(rot)&&covOf(post,s)!=="ALL"&&rot!==covOf(post,s)&&!(isJolly(rot)&&!isJolly(covOf(post,s)))) issues.push(`${resName(pid)}: in ${post.name} il ${fmt(d)} ma la rotazione è ${rotName(rot)}`);

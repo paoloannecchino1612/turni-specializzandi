@@ -32,6 +32,7 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 - Lun–Sab: TC1–4, RM1–5, DEA, Angio 1–2 (Angio il sabato solo mattina) M/P; notte ogni giorno. Domenica e festivi: solo guardia DEA + notte. Festivi italiani incl. 29/6 (Roma).
 - Notte e guardia sono turni della sala DEA ma li coprono **tutti** (esclusi Bambin Gesù/Brescia). Ogni altra sala è coperta dalla sua rotazione; Angiografia e DEA fanno da jolly su TC/RM.
 - Mai due turni nello stesso giorno. Il giorno della notte è **monto**, il giorno dopo **smonto**: in nessuno dei due si lavora di giorno; mai assegnati automaticamente.
+- Regola prioritaria: chi segna indisponibilità "tutta la giornata" (G) viene inserito lo stesso se il turno resterebbe scoperto (ultimo passaggio del generatore, distribuito tra chi è stato forzato meno; segnalato in "Da controllare"). Ferie, congressi e indisponibilità di singoli turni restano vincolanti.
 - 5 turni/settimana ideali, 6 massimo; il generatore prova prima a stare a 5.
 - Indisponibilità, ferie e congressi di un mese si inseriscono/modificano fino a 2 giorni prima del primo lunedì del periodo; dopo solo proprietario e gestori, che possono modificare anche quelle degli altri (bloccato anche nelle regole Firestore).
 - Presenza minima per rotazione 66% (lun–sab), ridotta solo da ferie e congressi: va segnalata.
