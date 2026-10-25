@@ -475,7 +475,7 @@ function vCambi(){ if(!S.residents.length) return monthBar()+noRes();
     h+=`<div class="panel" style="gap:4px"><div class="row" style="justify-content:space-between"><h2>Cambi turno</h2><span class="chip">Sei ${esc(resName(me))}</span></div><p class="muted" style="margin:0;font-size:.85rem">Il collega deve accettare. Se il cambio forza una regola, prima di accettare compare un avviso con cosa comporta.</p></div>`;
     if(!SC) h+=`<div class="panel empty"><p>I turni di ${monthName(mk)} non sono ancora stati generati: i cambi si potranno chiedere dopo.</p></div>`;
     else {
-      const inbox=all.filter(x=>x.status==="pending"&&x.to===me);
+      const inbox=all.filter(x=>x.status==="pending"&&(x.needs?x.needs.includes(me)&&!(x.acc||[]).includes(me):x.to===me));
       if(inbox.length) h+=`<div class="panel"><h2>Richieste per te <span class="chip">${inbox.length}</span></h2><div class="stack" style="gap:8px">${inbox.map(x=>swCard(x,true)).join("")}</div></div>`;
       const F=UI.sw=UI.sw||{}; const mine=shiftsOf(SC,me);
       if(F.a&&!mine.some(x=>x.d+"#"+x.k===F.a)) F.a="";
@@ -543,17 +543,27 @@ function manualPanel(mk,SC,mo){ const F=UI.msw=UI.msw||{}; const inG=S.residents
 function swCard(x,inbox,mineOut,canDel){ const st={pending:["In attesa","chip"],accepted:[x.manual?"Inserito":"Accettato","chip tag-F"],rejected:["Rifiutato","chip"],cancelled:["Annullato","chip"],invalid:["Non più valido","chip"]}[x.status]||["?","chip"];
   const txt=`<strong>${esc(resName(x.from))}</strong> cede <span class="name-strong">${slotLabel(x.a)}</span> a <strong>${esc(resName(x.to))}</strong>${x.b?` e prende <span class="name-strong">${slotLabel(x.b)}</span>`:" senza nulla in cambio"}${(x.extra||[]).map(e=>`<br><span style="font-size:.85rem">+ ${slotLabel(e)} passa da ${esc(resName(e.giver))} a ${esc(resName(e.taker))} (monto/smonto)</span>`).join("")}`;
   const manual=x.manual?`<span class="muted" style="font-size:.8rem">Inserito dal gestore${x.by&&x.by!=="owner"?" "+esc(resName(x.by)):""}${x.reason?" · per "+esc(x.reason):""}</span>`:(x.reason?`<span class="muted" style="font-size:.8rem">Proposto dal gestore per ${esc(x.reason)} di ${esc(resName(x.from))}</span>`:"");
+  const waiting=x.status==="pending"&&x.needs?`<span class="muted" style="font-size:.8rem">Cambio a catena: in attesa di ${x.needs.filter(p=>!(x.acc||[]).includes(p)).map(p=>esc(resName(p))).join(", ")}</span>`:"";
   const forced=x.status==="accepted"&&x.forced&&x.forced.length?`<span class="muted" style="font-size:.8rem">Accettato forzando: ${x.forced.map(esc).join("; ")}</span>`:"";
-  return `<div class="cand" style="cursor:default;grid-template-columns:minmax(0,1fr) auto"><span class="stack" style="gap:3px"><span>${txt}</span>${manual}${forced}</span><span class="stack" style="gap:6px;align-items:flex-end"><span class="${st[1]}">${st[0]}</span>${inbox?`<button class="btn primary" data-act="swopen" data-id="${x.id}">Rispondi</button>`:""}${mineOut?`<button class="btn danger" data-act="swcancel" data-id="${x.id}">Annulla</button>`:""}${canDel?`<button class="btn danger ${UI.confirm==="swdel-"+x.id?"confirm":""}" data-act="swdel" data-id="${x.id}" title="${x.status==="accepted"?"Elimina solo la voce: l'orario resta com'è":"Elimina dallo storico"}">${UI.confirm==="swdel-"+x.id?(x.status==="accepted"?"Conferma (l'orario non cambia)":"Conferma"):"Elimina"}</button>`:""}</span></div>`; }
+  return `<div class="cand" style="cursor:default;grid-template-columns:minmax(0,1fr) auto"><span class="stack" style="gap:3px"><span>${txt}</span>${manual}${waiting}${forced}</span><span class="stack" style="gap:6px;align-items:flex-end"><span class="${st[1]}">${st[0]}</span>${inbox?`<button class="btn primary" data-act="swopen" data-id="${x.id}">Rispondi</button>`:""}${mineOut?`<button class="btn danger" data-act="swcancel" data-id="${x.id}">Annulla</button>`:""}${canDel?`<button class="btn danger ${UI.confirm==="swdel-"+x.id?"confirm":""}" data-act="swdel" data-id="${x.id}" title="${x.status==="accepted"?"Elimina solo la voce: l'orario resta com'è":"Elimina dallo storico"}">${UI.confirm==="swdel-"+x.id?(x.status==="accepted"?"Conferma (l'orario non cambia)":"Conferma"):"Elimina"}</button>`:""}</span></div>`; }
 function showText(txt,list){ sheet(`<div class="row" style="justify-content:space-between"><h2>Cambi da inserire</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
   <p class="muted" style="margin:0">Seleziona il testo e copialo.</p><textarea id="reptxt" readonly style="width:100%;min-height:40vh;font:.85rem var(--f-mono);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px">${esc(txt)}</textarea>
   <div class="row"><button class="btn primary" data-act="repmark">Segna come riportati</button><button class="btn" data-act="close">Chiudi</button></div>`);
   setTimeout(()=>{const t=document.getElementById("reptxt"); if(t){t.focus();t.select();}},50); }
+/* risposta del terzo collega in un cambio a catena */
+function thirdBody(x,id,me){ const e=(x.extra||[]).find(z=>z.taker===me); if(!e) return `<p>Questa richiesta non ti riguarda più.</p>`;
+  const before=effSched(UI.mk), after=clone(before); applySwap(after,x);
+  const b=new Set(personIssues(UI.mk,before,me)), mine=personIssues(UI.mk,after,me).filter(t=>!b.has(t)), w=swapWarnings(UI.mk,x);
+  return `<p style="margin:0">Cambio a catena per ${esc(resName(x.from))}: <strong>${esc(resName(x.to))}</strong> prende ${slotLabel(x.a)} e <strong>tu prendi ${slotLabel(e)}</strong> al posto suo.</p>
+   <p class="muted" style="margin:0;font-size:.86rem">Vale quando accettate entrambi.${(x.acc||[]).length?" Ha già accettato: "+x.acc.map(p=>esc(resName(p))).join(", ")+".":""}</p>
+   ${(mine.length||w.holes.length)?`<div class="alerts bad"><strong>Attenzione: accettando, il cambio implica che</strong><ul>${w.holes.map(t=>`<li>${t}</li>`).join("")}${mine.map(t=>`<li><strong>per te</strong>: ${t}</li>`).join("")}</ul><span style="font-size:.85rem">Premendo Accetto confermi il cambio anche se queste regole non vengono rispettate.</span></div>`:`<div class="okline">Per te il cambio rispetta tutte le regole.</div>`}
+   <div class="row"><button class="btn primary" data-act="swacc" data-id="${id}">Accetto</button><button class="btn danger" data-act="swrej" data-id="${id}">Non accetto</button></div>`; }
 function answerSheet(id){ const x=SW[id], me=myPid(); if(!x) return;
   const w=swapWarnings(UI.mk,x); UI.swRole="to";
   const body=!w.ok?`<div class="alerts bad">Il cambio non è più possibile: uno dei due turni nel frattempo è cambiato.</div><div class="row"><button class="btn" data-act="swinvalid" data-id="${id}">Chiudi la richiesta</button></div>`
-   : `<p style="margin:0">${esc(resName(x.from))} ti cede <strong>${slotLabel(x.a)}</strong>${x.b?` e prende il tuo <strong>${slotLabel(x.b)}</strong>`:", senza nulla in cambio"}.</p>
-     ${(x.extra||[]).length?`<div class="alerts" style="background:var(--accent-soft)"><strong>Insieme alla notte si scambiano anche</strong><ul>${x.extra.map(e=>`<li>${slotLabel(e)}: da ${e.giver===me?"te":esc(resName(e.giver))} a ${e.taker===me?"te":esc(resName(e.taker))}</li>`).join("")}</ul></div>`:""}
+   : (x.needs&&me!==x.to)?thirdBody(x,id,me):`<p style="margin:0">${esc(resName(x.from))} ti cede <strong>${slotLabel(x.a)}</strong>${x.b?` e prende il tuo <strong>${slotLabel(x.b)}</strong>`:", senza nulla in cambio"}.</p>
+     ${x.needs?`<p class="muted" style="margin:0;font-size:.86rem">È un cambio a catena: vale quando accettano ${x.needs.map(p=>esc(resName(p))).join(" e ")}.${(x.acc||[]).length?" Ha già accettato: "+x.acc.map(p=>esc(resName(p))).join(", ")+".":""}</p>`:""}
+     ${(x.extra||[]).length?`<div class="alerts" style="background:var(--accent-soft)"><strong>Insieme a questo cambio</strong><ul>${x.extra.map(e=>`<li>${slotLabel(e)}: da ${e.giver===me?"te":esc(resName(e.giver))} a ${e.taker===me?"te":esc(resName(e.taker))}</li>`).join("")}</ul></div>`:""}
      ${(w.from.length||w.to.length||w.holes.length)?`<div class="alerts bad"><strong>Attenzione: accettando, il cambio implica che</strong><ul>${w.holes.map(t=>`<li>${t}</li>`).join("")}${w.to.map(t=>`<li><strong>per te</strong>: ${t}</li>`).join("")}${w.from.map(t=>`<li><strong>per ${esc(resName(x.from))}</strong>: ${t}</li>`).join("")}</ul><span style="font-size:.85rem">Premendo Accetto confermi il cambio anche se queste regole non vengono rispettate.</span></div>`:`<div class="okline">Il cambio rispetta tutte le regole.</div>`}
      ${freeBox([["per te",w.freeTo],["per "+esc(resName(x.from)),w.freeFrom]])}
      <div class="row"><button class="btn primary" data-act="swacc" data-id="${id}">Accetto</button><button class="btn danger" data-act="swrej" data-id="${id}">Non accetto</button></div>`;
@@ -596,38 +606,75 @@ function conflictsOf(mk,onlyPid,onlyDay){ const mo=M(mk), SC=effSched(mk), out=[
       if(blocked(unavOf(mo,r.id,x.d),s)) out.push({pid:r.id,d:x.d,k:x.k,s}); } }
   return out.sort((a,b)=>a.d.localeCompare(b.d)); }
 function pendingFor(c){ return Object.values(SW).find(x=>x.status==="pending"&&x.from===c.pid&&x.a.d===c.d&&x.a.k===c.k); }
-/* proposte: chi può prendere il turno, in cessione o in scambio, ordinate per regole forzate e carico */
+/* proposte per coprire il turno c di chi è diventato indisponibile, dalla migliore:
+   1 sostituzione diretta da un collega libero quel giorno (con eventuale scambio di un suo turno per bilanciare)
+   2 cambio di sala a catena: B lascia la sua postazione del giorno e prende c, un collega libero C prende quella di B
+   3 spostamento: come la catena ma la postazione di B resta scoperta
+   4 nessuno lo sostituisce */
+const KORD={diretta:0,scambio:1,catena:2,sposta:3,lascia:4};
 function planOptions(mk,c){ const mo=M(mk), SC=effSched(mk), post=postOf(c.k.split("|")[0]); if(!SC||!post) return [];
-  const {pri,jol}=pools(mo,post,c.s), cands=[...pri,...jol].filter(r=>r.id!==c.pid), days=period(mk).days, di=days.indexOf(c.d), out=[];
-  const load=pid=>shiftsOf(SC,pid).filter(y=>Math.abs(days.indexOf(y.d)-di)<=3).length;
-  for(const r of cands){
-    const tryX=(x,keepExtra)=>{ if(!keepExtra) x.extra=nightLinks(mk,x); const w=swapWarnings(mk,x); if(!w.ok) return null; return {x,w,score:(w.from.length+w.to.length)*3+w.holes.length}; }; /* una regola forzata pesa più di un buco */
-    let best=tryX({from:c.pid,to:r.id,a:{d:c.d,k:c.k},b:null});
-    /* spostamento: il collega quel giorno lavora in un'altra postazione diurna, la lascia e prende questo turno */
-    for(const y of shiftsOf(SC,r.id)){ if(y.d!==c.d||y.k===c.k||/\|[ND]$/.test(y.k)||/\|[ND]$/.test(c.k)) continue;
-      const o=tryX({from:c.pid,to:r.id,a:{d:c.d,k:c.k},b:null,extra:[{d:y.d,k:y.k,giver:r.id,taker:null}]},true);
-      if(o&&(!best||o.score<best.score)) best=o; }
-    for(const y of shiftsOf(SC,r.id)){ const dj=days.indexOf(y.d); if(y.d===c.d||Math.abs(dj-di)>7) continue;
-      const o=tryX({from:c.pid,to:r.id,a:{d:c.d,k:c.k},b:{d:y.d,k:y.k}}); if(!o) continue;
-      if(!best||o.score<best.score||(o.score===best.score&&!best.x.b)) best=o; }
-    if(best) out.push({...best,pid:r.id,primary:pri.includes(r),load:load(r.id)}); }
-  out.sort((a,b)=>a.score-b.score||(b.primary-a.primary)||a.load-b.load);
-  /* ultima opzione: nessuno lo sostituisce */
-  const xs={from:c.pid,to:null,a:{d:c.d,k:c.k},b:null,extra:[]}, ws=swapWarnings(mk,xs);
-  const res=out.slice(0,8); if(ws.ok) res.push({x:xs,w:ws,score:ws.holes.length,pid:null,primary:false,load:0,leave:true});
+  const days=period(mk).days, di=days.indexOf(c.d), A=c.pid, day=c.d, nightish=k=>/\|[ND]$/.test(k);
+  const onDay=pid=>shiftsOf(SC,pid).filter(y=>y.d===day);
+  const near=pid=>shiftsOf(SC,pid).filter(y=>Math.abs(days.indexOf(y.d)-di)<=3).length;
+  const poolOf=(p,s)=>{ const {pri,jol}=pools(mo,p,s); return [...pri.map(r=>({r,primary:true})),...jol.map(r=>({r,primary:false}))]; };
+  const out=[];
+  const add=(kind,x,pid,extra)=>{ const w=swapWarnings(mk,x); if(!w.ok) return null;
+    const o={kind,x,w,pid,score:(w.from.length+w.to.length)*3+w.holes.length,load:pid?near(pid):0,...extra}; out.push(o); return o; };
+  const cands=poolOf(post,c.s).filter(o=>o.r.id!==A);
+  for(const {r:B,primary} of cands){
+    const busy=onDay(B.id);
+    if(!busy.length){
+      /* 1. sostituzione diretta */
+      const x={from:A,to:B.id,a:{d:day,k:c.k},b:null}; x.extra=nightLinks(mk,x);
+      const o=add("diretta",x,B.id,{primary});
+      /* variante: scambio con un turno di B nei 7 giorni vicini che A può fare, per non caricare B */
+      if(o){ let best=null;
+        for(const y of shiftsOf(SC,B.id)){ const dj=days.indexOf(y.d); if(Math.abs(dj-di)>7||y.d===day) continue;
+          const xs={from:A,to:B.id,a:{d:day,k:c.k},b:{d:y.d,k:y.k}}; xs.extra=nightLinks(mk,xs); const w=swapWarnings(mk,xs);
+          if(w.ok&&!w.from.length&&!w.to.length&&!w.holes.length&&(!best||Math.abs(dj-di)<best.dist)) best={xs,w,dist:Math.abs(dj-di)}; }
+        if(best) out.push({kind:"scambio",x:best.xs,w:best.w,pid:B.id,score:0,load:near(B.id),primary}); }
+    } else if(busy.length===1&&!nightish(busy[0].k)&&!nightish(c.k)){
+      const y=busy[0], postY=postOf(y.k.split("|")[0]), sY=y.k.split("|")[1];
+      /* 2. catena: un collega libero prende la postazione lasciata da B */
+      let bestC=null;
+      for(const {r:C} of poolOf(postY,sY)){ if(C.id===A||C.id===B.id||onDay(C.id).length) continue;
+        const x={from:A,to:B.id,a:{d:day,k:c.k},b:null,extra:[{d:day,k:y.k,giver:B.id,taker:C.id}]}; const w=swapWarnings(mk,x); if(!w.ok) continue;
+        const sc=(w.from.length+w.to.length+personIssuesNew(mk,x,C.id))*3+w.holes.length;
+        if(!bestC||sc<bestC.score||(sc===bestC.score&&near(C.id)<bestC.loadC)) bestC={x,w,score:sc,loadC:near(C.id),C:C.id}; }
+      if(bestC) out.push({kind:"catena",x:bestC.x,w:bestC.w,pid:B.id,third:bestC.C,score:bestC.score,load:near(B.id),primary});
+      /* 3. spostamento: la postazione di B resta scoperta */
+      add("sposta",{from:A,to:B.id,a:{d:day,k:c.k},b:null,extra:[{d:day,k:y.k,giver:B.id,taker:null}]},B.id,{primary});
+    }
+  }
+  out.sort((p,q)=>p.score-q.score||KORD[p.kind]-KORD[q.kind]||(q.primary-p.primary)||p.load-q.load);
+  /* al massimo 2 proposte per collega e 9 in tutto */
+  const per={}, res=[]; for(const o of out){ per[o.pid]=(per[o.pid]||0)+1; if(per[o.pid]<=2&&res.length<9) res.push(o); }
+  const xs={from:A,to:null,a:{d:day,k:c.k},b:null,extra:[]}, ws=swapWarnings(mk,xs);
+  if(ws.ok) res.push({kind:"lascia",x:xs,w:ws,score:ws.holes.length,pid:null,primary:false,load:0,leave:true});
   return res; }
+/* problemi nuovi per un terzo coinvolto nella catena */
+function personIssuesNew(mk,x,pid){ const before=effSched(mk), after=clone(before); if(!applySwap(after,x)) return 99;
+  const b=new Set(personIssues(mk,before,pid)); return personIssues(mk,after,pid).filter(t=>!b.has(t)).length; }
+function optText(c,o){ const A=esc(resName(c.pid)), B=esc(resName(o.pid)), sl=slotLabel(c);
+  if(o.kind==="diretta") return `<span class="chip tag-F">Sostituzione</span> <strong>${B}</strong>, libero quel giorno, prende ${sl}`;
+  if(o.kind==="scambio") return `<span class="chip tag-F">Scambio</span> <strong>${B}</strong>, libero quel giorno, prende ${sl}; in cambio ${A} prende <strong>${slotLabel(o.x.b)}</strong>`;
+  if(o.kind==="catena"){ const e=o.x.extra.find(z=>z.giver===o.pid); return `<span class="chip sh-P">Cambio di sala</span> <strong>${B}</strong> passa da ${slotLabel(e)} a ${sl}; <strong>${esc(resName(o.third))}</strong>, libero quel giorno, prende ${slotLabel(e)}`; }
+  if(o.kind==="sposta"){ const e=o.x.extra.find(z=>z.taker===null); return `<span class="chip sh-M">Spostamento</span> <strong>${B}</strong> passa da ${slotLabel(e)} a ${sl}`; }
+  return `<span class="chip">Scoperto</span> <strong>Nessuno lo sostituisce</strong>: ${A} viene tolto da ${sl}`; }
 function planSheet(mk,list){ UI.plan={mk,list,opts:list.map(c=>planOptions(mk,c))};
   const body=list.map((c,ci)=>{ const pend=pendingFor(c), opts=UI.plan.opts[ci];
-    return `<div class="stack" style="gap:8px"><div class="alerts bad"><strong>${esc(resName(c.pid))} è in turno: ${slotLabel(c)}</strong><span style="font-size:.85rem">L'indisponibilità inserita va in conflitto con questo turno.${pend?` Richiesta già inviata a ${esc(resName(pend.to))}, in attesa.`:""}</span></div>
-     ${opts.length?opts.map((o,oi)=>`<div class="cand" style="cursor:default;grid-template-columns:minmax(0,1fr)"><span class="stack" style="gap:4px">
-        <span>${o.leave?`<strong>Nessuno lo sostituisce</strong>: ${esc(resName(c.pid))} viene tolto da ${slotLabel(c)}`:`<strong>${esc(resName(o.pid))}</strong> prende ${slotLabel(c)}${o.x.b?` e in cambio ${esc(resName(c.pid))} prende <strong>${slotLabel(o.x.b)}</strong>`:(o.x.extra||[]).some(e=>e.taker===null)?" (spostamento dalla sua postazione)":" (cessione, senza nulla in cambio)"}`}</span>
-        ${(o.x.extra||[]).filter(e=>e.taker!==null).map(e=>`<span style="font-size:.82rem">+ ${slotLabel(e)} da ${esc(resName(e.giver))} a ${esc(resName(e.taker))} (monto/smonto)</span>`).join("")}
-        ${o.leave?"":`<span class="muted" style="font-size:.8rem">${esc(rotName(mo_rot(mk,o.pid)))}${o.primary?"":" · jolly"} · ${o.load} turni nei 3 giorni vicini</span>`}
-        ${o.score?`<span style="font-size:.82rem;color:var(--bad)">Problemi: ${[...o.w.holes.map(esc),...o.w.to.map(t=>"per "+esc(resName(o.pid))+": "+t),...o.w.from.map(t=>"per "+esc(resName(c.pid))+": "+t)].join("; ")}</span>`:`<span class="okline" style="font-size:.85rem">Rispetta tutte le regole</span>`}
+    return `<div class="stack" style="gap:8px"><div class="alerts bad"><strong>${esc(resName(c.pid))} è in turno: ${slotLabel(c)}</strong><span style="font-size:.85rem">L'indisponibilità inserita va in conflitto con questo turno.${pend?` Richiesta già inviata, in attesa.`:""}</span></div>
+     ${opts.map((o,oi)=>{ const probs=[...o.w.holes.map(esc),...o.w.to.map(t=>"per "+esc(resName(o.pid))+": "+t),...o.w.from.map(t=>"per "+esc(resName(c.pid))+": "+t)];
+       const night=(o.x.extra||[]).filter(e=>e.taker!==null&&e.giver!==o.pid);
+       return `<div class="cand" style="cursor:default;grid-template-columns:minmax(0,1fr)"><span class="stack" style="gap:5px">
+        <span>${optText(c,o)}</span>
+        ${night.map(e=>`<span style="font-size:.82rem">+ ${slotLabel(e)} da ${esc(resName(e.giver))} a ${esc(resName(e.taker))} (monto/smonto)</span>`).join("")}
+        ${o.leave?"":`<span class="muted" style="font-size:.8rem">${esc(rotName(mo_rot(mk,o.pid)))}${o.primary?"":" · jolly"} · ${o.load} turni nei 3 giorni vicini${o.kind==="catena"?" · servono le conferme di "+esc(resName(o.pid))+" e "+esc(resName(o.third)):""}</span>`}
+        ${probs.length?`<span style="font-size:.82rem;color:var(--bad)">Problemi: ${probs.join("; ")}</span>`:`<span class="okline" style="font-size:.85rem">Rispetta tutte le regole</span>`}
         <span class="row" style="gap:6px">${o.leave?"":`<button class="btn primary" data-act="planreq" data-c="${ci}" data-o="${oi}">Invia richiesta</button>`}<button class="btn ${UI.confirm==="planapp-"+ci+"-"+oi?"confirm":""}" data-act="planapp" data-c="${ci}" data-o="${oi}">${UI.confirm==="planapp-"+ci+"-"+oi?"Tocca di nuovo: applica subito":"Applica subito"}</button></span>
-      </span></div>`).join(""):`<p class="muted" style="margin:0">Nessun collega può prendere questo turno: va risolto a mano in Turni.</p>`}</div>`; }).join("");
+      </span></div>`; }).join("")}</div>`; }).join("");
   sheet(`<div class="row" style="justify-content:space-between"><h2>Programma un cambio</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
-   <p class="muted" style="margin:0;font-size:.86rem">Proposte ordinate dalla più adatta: prima chi non forza regole, poi le soluzioni che lasciano una postazione scoperta, poi le altre; a parità, chi è nella stessa rotazione e ha meno turni nei giorni vicini. "Invia richiesta" la manda al collega in Cambi; "Applica subito" la inserisce come cambio manuale.</p>${body}`); }
+   <p class="muted" style="margin:0;font-size:.86rem">Prima le soluzioni che rispettano tutte le regole (sostituzione da chi è libero, scambio, cambio di sala a catena), poi quelle che lasciano una postazione scoperta, infine quelle che forzano una regola. "Invia richiesta" la manda in Cambi a chi deve accettare; "Applica subito" la inserisce come cambio manuale.</p>${body}`); }
 function mo_rot(mk,pid){ return (M(mk).rot||{})[pid]; }
 function maybePlan(mk,pid,d){ if(!ADMIN()) return false; const c=conflictsOf(mk,pid,d); if(!c.length) return false; planSheet(mk,c); return true; }
 
@@ -731,15 +778,19 @@ document.addEventListener("click",e=>{
     UI.confirm=null; const now=new Date().toISOString();
     const x={id:uid()+uid(),mk:P.mk,from:c.pid,to:o.pid,a:{d:c.d,k:c.k},b:o.x.b?{...o.x.b}:null,extra:(o.x.extra||[]).map(e=>({d:e.d,k:e.k,giver:e.giver,taker:e.taker})),created:now,by:myPid()||"owner",reason:"indisponibilità"};
     x.to=o.pid; if(o.leave) x.reason="indisponibilità (turno lasciato scoperto)";
+    if(o.kind==="catena"){ x.needs=[o.pid,o.third]; x.acc=[]; }
     if(a==="planapp"){ x.status="accepted"; x.manual=true; x.decided=now; x.forced=[...o.w.holes,...o.w.from.map(t=>"per "+resName(c.pid)+": "+t),...o.w.to.map(t=>"per "+resName(o.pid)+": "+t)]; }
     else { x.status="pending"; x.warn=[...o.w.holes,...o.w.from,...o.w.to]; }
     swWrite(x).then(ok=>{ if(!ok) return; toast(a==="planapp"?"Cambio applicato":"Richiesta inviata a "+resName(o.pid)); closeSheet(); consolidate(); render(); }); return; }
   if(a==="swopen"){ answerSheet(el.dataset.id); return; }
   if(a==="swacc"||a==="swrej"||a==="swcancel"||a==="swinvalid"){ const x=SW[el.dataset.id]; if(!x) return;
     const nx={...x,decided:new Date().toISOString()};
-    if(a==="swacc"){ const w=swapWarnings(x.mk,x); if(!w.ok){nx.status="invalid";} else { nx.status="accepted"; nx.forced=[...w.to.map(t=>"per "+resName(x.to)+": "+t),...w.from.map(t=>"per "+resName(x.from)+": "+t)]; } }
+    if(a==="swacc"){ const w=swapWarnings(x.mk,x);
+      if(!w.ok){nx.status="invalid";}
+      else if(x.needs&&[...new Set([...(x.acc||[]),myPid()])].length<x.needs.length){ nx.acc=[...new Set([...(x.acc||[]),myPid()])]; delete nx.decided; nx.status="pending"; }
+      else { nx.status="accepted"; if(x.needs) nx.acc=[...x.needs]; nx.forced=[...w.holes,...w.to.map(t=>"per "+resName(x.to)+": "+t),...w.from.map(t=>"per "+resName(x.from)+": "+t)]; } }
     else nx.status=a==="swrej"?"rejected":a==="swcancel"?"cancelled":"invalid";
-    swWrite(nx).then(ok=>{ if(ok){ closeSheet(); toast(nx.status==="accepted"?"Cambio accettato: orario aggiornato":nx.status==="rejected"?"Cambio rifiutato":"Richiesta chiusa"); render(); consolidate(); } }); return; }
+    swWrite(nx).then(ok=>{ if(ok){ closeSheet(); toast(nx.status==="accepted"?"Cambio accettato: orario aggiornato":nx.status==="pending"?"Hai accettato: si attende la conferma dell'altro collega":nx.status==="rejected"?"Cambio rifiutato":"Richiesta chiusa"); render(); consolidate(); } }); return; }
   if(a==="clrF"||a==="clrC"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
     clearUnav([UI.sel],a==="clrF"?"F":"C"); toast((a==="clrF"?"Ferie":"Ferie congresso")+" di "+resName(UI.sel)+" eliminate"); render(); return; }
   if(a==="clrone"||a==="clrall"||a==="clrsched"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
