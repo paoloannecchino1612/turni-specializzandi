@@ -552,7 +552,8 @@ function vMese(){ if(!S.residents.length) return monthBar()+noRes();
 function vIndisp(){ if(!S.residents.length) return monthBar()+noRes();
   const mo=M(UI.mk), p=period(UI.mk), me=myPid(); let mode=UI.umode||"T"; if(mode==="R"&&!S.residents.some(r=>canPref(r.id))) mode=UI.umode="T";
   if(!OWNER&&db){ if(!MYUID) return monthBar()+`<div class="panel"><h2>Accedi con il tuo account</h2><p class="muted" style="margin:0">Per compilare le tue indisponibilità accedi con la tua email.</p></div>`;
-    if(!me) return monthBar()+claimPanel("Tocca il tuo nome per collegarlo al tuo account. Serve una volta sola: dopo potrai modificare solo le tue indisponibilità, ferie e congressi."); }
+    if(!me&&!myAnyPid()) return monthBar()+claimPanel("Tocca il tuo nome per collegarlo al tuo account. Serve una volta sola: dopo potrai modificare solo le tue indisponibilità, ferie e congressi."); }
+  const otherYear=!OWNER&&db&&!me&&!!myAnyPid();
   if(!OWNER&&me&&!UI.selTouched) UI.sel=me;
   if(!UI.sel||!S.residents.find(r=>r.id===UI.sel)) UI.sel=S.residents[0].id;
   const ro=db&&!canEditUnav(UI.sel), dl=unavDeadline(UI.mk), closed=todayIso()>dl;
@@ -564,7 +565,7 @@ function vIndisp(){ if(!S.residents.length) return monthBar()+noRes();
   const hint={T:"Tocca un giorno: compaiono i turni previsti quel giorno da segnare come non disponibili.",F:"Tocca i giorni di ferie: si segna l'intera giornata. Tocca di nuovo per togliere.",C:"Tocca i giorni di congresso: si segna l'intera giornata. Tocca di nuovo per togliere.",R:canPref(UI.sel)?"Tocca un giorno e scegli il turno che preferisci (e se vuoi la sala). Il 4° anno viene sistemato per primo, poi il 3°: le preferenze si rispettano se le regole lo permettono; quelle non rispettate vengono segnalate ai gestori.":"Le preferenze di turno sono solo per 3° e 4° anno."}[mode];
   const pr=presence(UI.mk), myRot=mo.rot[UI.sel], lowDays=new Set(pr.filter(x=>x.rot.id===myRot).map(x=>x.d));
   const tot=(id,v)=>Object.entries(mo.unav[id]||{}).filter(([d,u])=>d>=p.first&&d<=p.last&&u===v).length;
-  return monthBar()+(OWNER?"":`<div class="panel" style="gap:4px"><h2>Compila le tue indisponibilità</h2><p class="muted" style="margin:0;font-size:.88rem">Scegli il tuo nome, poi segna i turni in cui non ci sei, le ferie e i congressi. Si salva da solo e tutti vedono le stesse informazioni.</p></div>`)+`
+  return monthBar()+(otherYear?claimPanel(""):"")+(OWNER||otherYear?"":`<div class="panel" style="gap:4px"><h2>Compila le tue indisponibilità</h2><p class="muted" style="margin:0;font-size:.88rem">Scegli il tuo nome, poi segna i turni in cui non ci sei, le ferie e i congressi. Si salva da solo e tutti vedono le stesse informazioni.</p></div>`)+`
   <div class="pickers" role="tablist">${MODES.map(([k,l])=>`<button data-act="umode" data-v="${k}" aria-pressed="${mode===k}">${l}</button>`).join("")}</div>
   <div class="panel"><span class="label">Specializzando</span>
    <div class="pickers">${S.residents.map(r=>`<button data-act="sel" data-id="${r.id}" aria-pressed="${r.id===UI.sel}">${esc(rName(r))}${cnt(r.id)?`<span class="cnt">${cnt(r.id)}</span>`:""}</button>`).join("")}</div></div>
