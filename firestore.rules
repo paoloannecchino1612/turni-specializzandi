@@ -36,9 +36,11 @@ service cloud.firestore {
     }
 
     // collegamento nome-account: ognuno il proprio; il proprietario può scollegare chiunque
+    // collegamento nome-account: ognuno lo crea una sola volta per sé; modificarlo o cancellarlo può solo il proprietario
     match /claims/{uid} {
       allow read: if allowed();
-      allow write: if allowed() && (request.auth.uid == uid || isOwner());
+      allow create: if allowed() && (request.auth.uid == uid || isOwner());
+      allow update, delete: if isOwner();
     }
 
     // cambi turno: tutti gli autorizzati creano e rispondono; solo proprietario e gestori eliminano

@@ -112,7 +112,15 @@ function recomputeUnav(){ const keep={};
 function syncSubs(uids){ const want=new Set(["staff",...uids]);
   for(const u of want) if(!SUBS[u]) SUBS[u]=db.collection(`unav/${u}/m`).limit(1000).onSnapshot(qs=>{ SRC[u]={}; for(const doc of qs.docs){ const x=doc.data(); if(x&&x.mk&&x.pid) SRC[u][doc.id]=x; } recomputeUnav(); if(S&&!layer.innerHTML) render(); },()=>{});
   for(const u in SUBS) if(!want.has(u)){ try{SUBS[u]();}catch(e){} delete SUBS[u]; delete SRC[u]; } }
-function claimPanel(why){ return `<div class="panel"><h2>Chi sei?</h2><p class="muted" style="margin:0;font-size:.88rem">${why}</p>
+/* associazione account → nome: definitiva per lo specializzando, la cambia solo il proprietario */
+function linkPanel(){ const anyFree=S.residents.some(r=>!CLAIMS[r.id]);
+  return `<div class="panel" style="border:2px solid var(--accent)"><h2>Associa l'account: chi sei?</h2>
+   <p style="margin:0;font-size:.9rem">Tocca il tuo cognome e conferma. <strong>La scelta è definitiva</strong>: potrà cambiarla solo chi gestisce il tool. Da quel momento potrai modificare solo le tue indisponibilità e rispondere ai cambi rivolti a te.</p>
+   <div class="pickers">${S.residents.map(r=>{const taken=!!CLAIMS[r.id]; const conf=UI.confirm==="claim-"+r.id;
+     return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""} ${conf?'style="background:var(--accent);color:var(--accent-ink);border-color:var(--accent)"':""}>${conf?"Confermo: sono "+esc(r.name):esc(r.name)}${taken?' <span class="cnt">già associato</span>':""}</button>`;}).join("")}</div>
+   ${anyFree?"":`<p class="muted" style="margin:0">Tutti i nomi sono già associati: se il tuo è stato preso per errore, avvisa chi gestisce il tool.</p>`}</div>`; }
+function claimPanel(why){ return linkPanel(); }
+function claimPanelOld(why){ return `<div class="panel"><h2>Chi sei?</h2><p class="muted" style="margin:0;font-size:.88rem">${why}</p>
   <div class="pickers">${S.residents.map(r=>{const taken=CLAIMS[r.id]&&CLAIMS[r.id]!==MYUID;return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""}>${esc(r.name)}${taken?' <span class="cnt">già collegato</span>':""}</button>`;}).join("")}</div></div>`; }
 function saveUnav(mk,pid){ const k=mk+"_"+pid; if(db&&!canEditUnav(pid)){ toast("Puoi modificare solo le tue indisponibilità"); return; } clearTimeout(uT[k]); setSync("Modifiche in corso…");
   uT[k]=setTimeout(async()=>{ delete uT[k];
@@ -283,7 +291,9 @@ function render(){
   if(!ADMIN()&&(UI.tab==="mese"||UI.tab==="imp")) UI.tab="indisp";
   document.querySelectorAll("#tabs button").forEach(b=>{b.setAttribute("aria-selected",b.dataset.tab===UI.tab); b.hidden=!ADMIN()&&(b.dataset.tab==="mese"||b.dataset.tab==="imp");});
   if(!S){app.innerHTML=`<div class="empty">Caricamento dati…</div>`;return;}
-  app.innerHTML=`<section class="view">${({mese:vMese,indisp:vIndisp,turni:vTurni,cambi:vCambi,imp:vImp}[UI.tab]||vMese)()}</section>`;
+  const needLink=db&&MYUID&&S.residents.length&&!myPid();
+  if(needLink&&!OWNER){ app.innerHTML=`<section class="view">${linkPanel()}</section>`; return; }
+  app.innerHTML=`<section class="view">${needLink?linkPanel():""}${({mese:vMese,indisp:vIndisp,turni:vTurni,cambi:vCambi,imp:vImp}[UI.tab]||vMese)()}</section>`;
 }
 function monthBar(){ const p=period(UI.mk);
   return `<div class="monthbar"><button class="btn icon" data-act="mprev" aria-label="Mese precedente">‹</button>
@@ -616,8 +626,8 @@ document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]"); if(!el) return;
   const a=el.dataset.act;
   if(a==="close"){ if(e.target===el||el.tagName==="BUTTON"){closeSheet();render();} return; }
-  if(!["clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrsched","unlink","swdel","mswgo"].includes(a)) UI.confirm=null;
-  if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString()}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
+  if(!["claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrsched","unlink","swdel","mswgo"].includes(a)) UI.confirm=null;
+  if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString()}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
   if(a==="unlink"){ const pid=el.dataset.id; if(UI.confirm!=="unl-"+pid){UI.confirm="unl-"+pid;render();return;} UI.confirm=null; const u=CLAIMS[pid]; if(!u) return; db.doc("claims/"+u).delete().then(()=>{delete CLAIMS[pid];render();}).catch(()=>toast("Non riesco a scollegare")); return; }
   if(a==="swsend"){ const F=UI.sw||{}, me=myPid(); if(!F.a||!F.to||!me) return; const [ad,ak]=F.a.split("#");
     const x={id:uid()+uid(),mk:UI.mk,from:me,to:F.to,a:{d:ad,k:ak},b:F.b?{d:F.b.split("#")[0],k:F.b.split("#")[1]}:null,extra:(UI.swExtra||[]).map(e=>({d:e.d,k:e.k,giver:e.giver,taker:e.taker})),status:"pending",created:new Date().toISOString()};
