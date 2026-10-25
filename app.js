@@ -221,7 +221,16 @@ function newStat(){return {on:{},tot:0,M:0,P:0,D:0,N:0,we:0,wk:{},wn:{},pc:{},la
 /* abilitazione a notti e guardie: per specializzando (r.nights / r.guards); se non indicata, sì tranne il 1° anno */
 function resOf(pid){ return S.residents.find(r=>r.id===pid); }
 function yearOfRes(r){ return +(r.year||S.groupYear||2); }
-function canDo(pid,s){ if(s!=="N"&&s!=="D") return true; const r=resOf(pid); if(!r) return true; const v=s==="N"?r.nights:r.guards; return v===undefined?yearOfRes(r)!==1:!!v; }
+function canDoR(r,s,st){ if(s!=="N"&&s!=="D") return true; const v=s==="N"?r.nights:r.guards; return v===undefined?+(r.year||(st||S).groupYear||2)!==1:!!v; }
+function canDo(pid,s){ const r=resOf(pid); return r?canDoR(r,s,S):true; }
+/* notti e guardie equilibrate tra gli anni: quota per persona = notti (o guardie) del mese ÷ abilitati presenti di tutti gli anni */
+function nightQuota(mk,sh){ if(!MULTI||!hasLowerYear()) return null; const days=period(mk).days; let need=0, people=0, mine=0, union={};
+  for(const y of YEARS){ const st=yState(y); if(!st) continue; const rot=(((st.months||{})[mk])||{}).rot||{}, ext=new Set((st.externals||[]).map(x=>x.id));
+    const n=(st.residents||[]).filter(r=>rot[r.id]&&!ext.has(rot[r.id])&&canDoR(r,sh,st)).length; people+=n; if(y===CURY) mine=n;
+    (st.posts||[]).forEach(p=>{ const k=normRoom(p.name); if(k&&yearsFor(p).includes(y)&&!union[k]) union[k]=p; }); }
+  for(const d of days){ const t=dayType(d); for(const k in union) if(((union[k].on||{})[t]||[]).includes(sh)) need++; }
+  /* per: massimo a persona; year: quota dell'anno, in proporzione agli abilitati */
+  return people?{per:Math.max(1,Math.ceil(need/people)),year:Math.round(need*mine/people)}:null; }
 function ok(mo,p,pid,d,s,w,cap,forceG){
   if(!canDo(pid,s)) return false;
   { const u=unavOf(mo,pid,d); if(blocked(u,s)&&!(forceG&&u==="G")) return false; }
@@ -262,7 +271,8 @@ function generate(mk,wk,only2){ /* only2: Set di pid a cui si possono dare turni
   const pri=x=>x.s==="N"?0:x.s==="D"?1:(x.t!=="fer"?2:3);
   slots.forEach(x=>x.r=rand()); slots.sort((a,b)=>pri(a)-pri(b)||a.i-b.i||a.r-b.r);
   const pick=(sl,cands,cap,forceG,mcap)=>{ let best=null,bk=null; if(mcap===undefined) mcap=mMain;
-    for(const r of cands){ if(only2&&!only2.has(r.id)) continue; const p=st[r.id]; if(!ok(mo,p,r.id,sl.d,sl.s,sl.w,cap,forceG)) continue; if(mcap&&p.tot>=mcap) continue;
+    for(const r of cands){ if(only2&&!only2.has(r.id)) continue; const p=st[r.id];
+      if(sl.s==="N"&&capN&&(p.N>=capN.per||nDone.N>=capN.year)) continue; if(sl.s==="D"&&capD&&(p.D>=capD.per||nDone.D>=capD.year)) continue; if(!ok(mo,p,r.id,sl.d,sl.s,sl.w,cap,forceG)) continue; if(mcap&&p.tot>=mcap) continue;
       const j=p.jit+rand()*0.5;
       const mp=(sl.s==="M"||sl.s==="P")?p[sl.s]-(sl.s==="M"?p.P:p.M):0, pc=p.pc[sl.post.id]||0, same=p.last[sl.d]===undefined&&p.last[add(sl.d,-1)]===sl.post.id?1:0;
       const key= sl.s==="N"?[p.N,p.tot,j] : sl.s==="D"?[p.we,p.tot,j] : sl.t!=="fer"?[p.we,p.tot,mp,pc+same,j] : [p.tot,mp,pc+same,j];
@@ -270,7 +280,7 @@ function generate(mk,wk,only2){ /* only2: Set di pid a cui si possono dare turni
       if(!best||cmp(key,bk)<0){best=r;bk=key;} }
     return best; };
   const put=(sl,r,more)=>{ const p=st[r.id]; if(more) sched[sl.d][sl.key].push(r.id); else sched[sl.d][sl.key][0]=r.id; p.on[sl.d]=sl.s; p.tot++; p[sl.s]++; p.pc[sl.post.id]=(p.pc[sl.post.id]||0)+1; p.last[sl.d]=sl.post.id;
-    if(sl.t!=="fer")p.we++; p.wk[sl.w]=(p.wk[sl.w]||0)+1; if(sl.s==="N")p.wn[sl.w]=(p.wn[sl.w]||0)+1; };
+    if(sl.t!=="fer")p.we++; p.wk[sl.w]=(p.wk[sl.w]||0)+1; if(sl.s==="N")p.wn[sl.w]=(p.wn[sl.w]||0)+1; if(sl.s==="N"||sl.s==="D") nDone[sl.s]++; };
   /* prima si resta entro i turni ideali (es. 5, con un riposo in settimana), poi si arriva al massimo solo dove serve */
   /* ogni giorno si riempiono per prime le sale/turni finora meno coperti: i buchi si distribuiscono in modo omogeneo */
   /* turni inseriti a mano (fissi): si mettono per primi e il generatore non li tocca */
@@ -278,10 +288,11 @@ function generate(mk,wk,only2){ /* only2: Set di pid a cui si possono dare turni
   slots.forEach(sl=>{ const pre=sl.d+"|"+sl.key+"|", ids=Object.keys(fx).filter(k=>k.startsWith(pre)).sort((a,b)=>+a.split("|").pop()-+b.split("|").pop()).map(k=>fx[k]).filter(pid=>st[pid]);
     ids.forEach((pid,n)=>put(sl,{id:pid},n>0)); });
   /* quota mensile per persona uguale per tutti gli anni: gli anni con anni sotto si fermano lì; le persone in più in TC/RM non la superano mai */
+  const capN=nightQuota(mk,"N"), capD=nightQuota(mk,"D"), nDone={N:0,D:0};
   const fair=fairMonth(mk), mMain=fair&&hasLowerYear()?fair:null, maxCap=S.maxWeek, soft=S.targetWeek||S.maxWeek, fill={}, byDay=days.map(()=>[]);
   slots.forEach(sl=>byDay[sl.i].push(sl));
   for(const [grp,cap] of [["pri",soft],["jol",soft],["pri",maxCap],["jol",maxCap]])
-    for(const pr of [0,1,2,3]) for(const list of byDay){
+    for(const pr of [0,1,2,3]) for(const list of ((pr<2&&(capN||capD))?byDay.map(l=>({l,o:rand()})).sort((a,b)=>a.o-b.o).map(x=>x.l):byDay)){
       const todo=list.filter(sl=>pri(sl)===pr&&!sl.ext&&!sched[sl.d][sl.key][0]);
       todo.forEach(sl=>sl.r=rand());
       todo.sort((a,b)=>(fill[a.key]||0)-(fill[b.key]||0)||a.r-b.r);
