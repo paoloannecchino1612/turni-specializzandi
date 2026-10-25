@@ -64,7 +64,9 @@ function M(mk){ if(!S.months[mk]) S.months[mk]={rot:{},sched:null};
     mo._init=true; }
   return mo; }
 function rotName(id){ if(id==="ALL") return "Tutti"; const r=[...S.rotations,...S.externals].find(x=>x.id===id);return r?r.name:"—";}
-function resName(id){const r=S.residents.find(x=>x.id===id);return r?r.name:"?";}
+function resName(id){ if(id===null||id==="") return "nessuno (scoperto)";
+  return resName0(id); }
+function resName0(id){const r=S.residents.find(x=>x.id===id);return r?r.name:"?";}
 function postOf(id){return S.posts.find(p=>p.id===id);}
 function isExt(rot){return !rot||S.externals.some(x=>x.id===rot);}
 /* chi è fuori sede (es. Bambin Gesù) può essere inserito nei turni dal gestore: conta come jolly */
@@ -284,7 +286,12 @@ function swapWarnings(mk,x){ const before=effSched(mk); if(!before) return {ok:f
     const g=[...dB].filter(d=>!dA.has(d)).sort();
     return {gain:g.filter(d=>!sm(after,d)).map(d=>fmt(d)), smonto:g.filter(d=>sm(after,d)).map(d=>[fmt(d),fmt(add(d,-1))]),
             lose:[...dA].filter(d=>!dB.has(d)).sort().map(d=>fmt(d))}; };
-  return {ok:true, from:diff(x.from), to:diff(x.to), freeFrom:free(x.from), freeTo:free(x.to)}; }
+  /* postazioni che con il cambio restano senza nessuno */
+  const cells=[x.a,...(x.b?[x.b]:[]),...(x.extra||[])], seen=new Set(), holes=[];
+  for(const c of cells){ const key=c.d+"|"+c.k; if(seen.has(key)) continue; seen.add(key);
+    const nb=((before[c.d]||{})[c.k]||[]).filter(v=>!v).length, na=((after[c.d]||{})[c.k]||[]).filter(v=>!v).length;
+    if(na>nb) holes.push(`${slotLabel({d:c.d,k:c.k})} rimane scoperto`); }
+  return {ok:true, holes, from:diff(x.from), to:x.to?diff(x.to):[], freeFrom:free(x.from), freeTo:x.to?free(x.to):{gain:[],smonto:[],lose:[]}}; }
 function freeBox(rows){ const li=[];
   for(const [who,f] of rows){ f.gain.forEach(d=>li.push(`<li><strong>${who}</strong>: giorno libero il ${d}</li>`)); (f.smonto||[]).forEach(([d,n])=>li.push(`<li><strong>${who}</strong>: il ${d} non lavori, ma è lo smonto della notte del ${n}: non è un giorno libero</li>`)); f.lose.forEach(d=>li.push(`<li><strong>${who}</strong>: lavori il ${d}, che prima era libero</li>`)); }
   return `<div class="alerts" style="background:var(--accent-soft)"><strong>Giorni liberi</strong>${li.length?`<ul>${li.join("")}</ul>`:`<span style="font-size:.88rem">Il cambio non cambia i giorni liberi: si scambiano turni nello stesso giorno.</span>`}</div>`; }
@@ -547,7 +554,7 @@ function answerSheet(id){ const x=SW[id], me=myPid(); if(!x) return;
   const body=!w.ok?`<div class="alerts bad">Il cambio non è più possibile: uno dei due turni nel frattempo è cambiato.</div><div class="row"><button class="btn" data-act="swinvalid" data-id="${id}">Chiudi la richiesta</button></div>`
    : `<p style="margin:0">${esc(resName(x.from))} ti cede <strong>${slotLabel(x.a)}</strong>${x.b?` e prende il tuo <strong>${slotLabel(x.b)}</strong>`:", senza nulla in cambio"}.</p>
      ${(x.extra||[]).length?`<div class="alerts" style="background:var(--accent-soft)"><strong>Insieme alla notte si scambiano anche</strong><ul>${x.extra.map(e=>`<li>${slotLabel(e)}: da ${e.giver===me?"te":esc(resName(e.giver))} a ${e.taker===me?"te":esc(resName(e.taker))}</li>`).join("")}</ul></div>`:""}
-     ${(w.from.length||w.to.length)?`<div class="alerts bad"><strong>Attenzione: accettando, il cambio implica che</strong><ul>${w.to.map(t=>`<li><strong>per te</strong>: ${t}</li>`).join("")}${w.from.map(t=>`<li><strong>per ${esc(resName(x.from))}</strong>: ${t}</li>`).join("")}</ul><span style="font-size:.85rem">Premendo Accetto confermi il cambio anche se queste regole non vengono rispettate.</span></div>`:`<div class="okline">Il cambio rispetta tutte le regole.</div>`}
+     ${(w.from.length||w.to.length||w.holes.length)?`<div class="alerts bad"><strong>Attenzione: accettando, il cambio implica che</strong><ul>${w.holes.map(t=>`<li>${t}</li>`).join("")}${w.to.map(t=>`<li><strong>per te</strong>: ${t}</li>`).join("")}${w.from.map(t=>`<li><strong>per ${esc(resName(x.from))}</strong>: ${t}</li>`).join("")}</ul><span style="font-size:.85rem">Premendo Accetto confermi il cambio anche se queste regole non vengono rispettate.</span></div>`:`<div class="okline">Il cambio rispetta tutte le regole.</div>`}
      ${freeBox([["per te",w.freeTo],["per "+esc(resName(x.from)),w.freeFrom]])}
      <div class="row"><button class="btn primary" data-act="swacc" data-id="${id}">Accetto</button><button class="btn danger" data-act="swrej" data-id="${id}">Non accetto</button></div>`;
   sheet(`<div class="row" style="justify-content:space-between"><h2>Richiesta di cambio</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>${body}`); }
@@ -594,25 +601,33 @@ function planOptions(mk,c){ const mo=M(mk), SC=effSched(mk), post=postOf(c.k.spl
   const {pri,jol}=pools(mo,post,c.s), cands=[...pri,...jol].filter(r=>r.id!==c.pid), days=period(mk).days, di=days.indexOf(c.d), out=[];
   const load=pid=>shiftsOf(SC,pid).filter(y=>Math.abs(days.indexOf(y.d)-di)<=3).length;
   for(const r of cands){
-    const tryX=x=>{ x.extra=nightLinks(mk,x); const w=swapWarnings(mk,x); if(!w.ok) return null; return {x,w,score:w.from.length+w.to.length}; };
+    const tryX=(x,keepExtra)=>{ if(!keepExtra) x.extra=nightLinks(mk,x); const w=swapWarnings(mk,x); if(!w.ok) return null; return {x,w,score:(w.from.length+w.to.length)*3+w.holes.length}; }; /* una regola forzata pesa più di un buco */
     let best=tryX({from:c.pid,to:r.id,a:{d:c.d,k:c.k},b:null});
+    /* spostamento: il collega quel giorno lavora in un'altra postazione diurna, la lascia e prende questo turno */
+    for(const y of shiftsOf(SC,r.id)){ if(y.d!==c.d||y.k===c.k||/\|[ND]$/.test(y.k)||/\|[ND]$/.test(c.k)) continue;
+      const o=tryX({from:c.pid,to:r.id,a:{d:c.d,k:c.k},b:null,extra:[{d:y.d,k:y.k,giver:r.id,taker:null}]},true);
+      if(o&&(!best||o.score<best.score)) best=o; }
     for(const y of shiftsOf(SC,r.id)){ const dj=days.indexOf(y.d); if(y.d===c.d||Math.abs(dj-di)>7) continue;
       const o=tryX({from:c.pid,to:r.id,a:{d:c.d,k:c.k},b:{d:y.d,k:y.k}}); if(!o) continue;
       if(!best||o.score<best.score||(o.score===best.score&&!best.x.b)) best=o; }
     if(best) out.push({...best,pid:r.id,primary:pri.includes(r),load:load(r.id)}); }
-  return out.sort((a,b)=>a.score-b.score||(b.primary-a.primary)||a.load-b.load).slice(0,8); }
+  out.sort((a,b)=>a.score-b.score||(b.primary-a.primary)||a.load-b.load);
+  /* ultima opzione: nessuno lo sostituisce */
+  const xs={from:c.pid,to:null,a:{d:c.d,k:c.k},b:null,extra:[]}, ws=swapWarnings(mk,xs);
+  const res=out.slice(0,8); if(ws.ok) res.push({x:xs,w:ws,score:ws.holes.length,pid:null,primary:false,load:0,leave:true});
+  return res; }
 function planSheet(mk,list){ UI.plan={mk,list,opts:list.map(c=>planOptions(mk,c))};
   const body=list.map((c,ci)=>{ const pend=pendingFor(c), opts=UI.plan.opts[ci];
     return `<div class="stack" style="gap:8px"><div class="alerts bad"><strong>${esc(resName(c.pid))} è in turno: ${slotLabel(c)}</strong><span style="font-size:.85rem">L'indisponibilità inserita va in conflitto con questo turno.${pend?` Richiesta già inviata a ${esc(resName(pend.to))}, in attesa.`:""}</span></div>
      ${opts.length?opts.map((o,oi)=>`<div class="cand" style="cursor:default;grid-template-columns:minmax(0,1fr)"><span class="stack" style="gap:4px">
-        <span><strong>${esc(resName(o.pid))}</strong> prende ${slotLabel(c)}${o.x.b?` e in cambio ${esc(resName(c.pid))} prende <strong>${slotLabel(o.x.b)}</strong>`:" (cessione, senza nulla in cambio)"}</span>
-        ${(o.x.extra||[]).map(e=>`<span style="font-size:.82rem">+ ${slotLabel(e)} da ${esc(resName(e.giver))} a ${esc(resName(e.taker))} (monto/smonto)</span>`).join("")}
-        <span class="muted" style="font-size:.8rem">${esc(rotName(mo_rot(mk,o.pid)))}${o.primary?"":" · jolly"} · ${o.load} turni nei 3 giorni vicini</span>
-        ${o.score?`<span style="font-size:.82rem;color:var(--bad)">Forza: ${[...o.w.to.map(t=>"per "+esc(resName(o.pid))+": "+t),...o.w.from.map(t=>"per "+esc(resName(c.pid))+": "+t)].join("; ")}</span>`:`<span class="okline" style="font-size:.85rem">Rispetta tutte le regole</span>`}
-        <span class="row" style="gap:6px"><button class="btn primary" data-act="planreq" data-c="${ci}" data-o="${oi}">Invia richiesta</button><button class="btn ${UI.confirm==="planapp-"+ci+"-"+oi?"confirm":""}" data-act="planapp" data-c="${ci}" data-o="${oi}">${UI.confirm==="planapp-"+ci+"-"+oi?"Tocca di nuovo: applica subito":"Applica subito"}</button></span>
+        <span>${o.leave?`<strong>Nessuno lo sostituisce</strong>: ${esc(resName(c.pid))} viene tolto da ${slotLabel(c)}`:`<strong>${esc(resName(o.pid))}</strong> prende ${slotLabel(c)}${o.x.b?` e in cambio ${esc(resName(c.pid))} prende <strong>${slotLabel(o.x.b)}</strong>`:(o.x.extra||[]).some(e=>e.taker===null)?" (spostamento dalla sua postazione)":" (cessione, senza nulla in cambio)"}`}</span>
+        ${(o.x.extra||[]).filter(e=>e.taker!==null).map(e=>`<span style="font-size:.82rem">+ ${slotLabel(e)} da ${esc(resName(e.giver))} a ${esc(resName(e.taker))} (monto/smonto)</span>`).join("")}
+        ${o.leave?"":`<span class="muted" style="font-size:.8rem">${esc(rotName(mo_rot(mk,o.pid)))}${o.primary?"":" · jolly"} · ${o.load} turni nei 3 giorni vicini</span>`}
+        ${o.score?`<span style="font-size:.82rem;color:var(--bad)">Problemi: ${[...o.w.holes.map(esc),...o.w.to.map(t=>"per "+esc(resName(o.pid))+": "+t),...o.w.from.map(t=>"per "+esc(resName(c.pid))+": "+t)].join("; ")}</span>`:`<span class="okline" style="font-size:.85rem">Rispetta tutte le regole</span>`}
+        <span class="row" style="gap:6px">${o.leave?"":`<button class="btn primary" data-act="planreq" data-c="${ci}" data-o="${oi}">Invia richiesta</button>`}<button class="btn ${UI.confirm==="planapp-"+ci+"-"+oi?"confirm":""}" data-act="planapp" data-c="${ci}" data-o="${oi}">${UI.confirm==="planapp-"+ci+"-"+oi?"Tocca di nuovo: applica subito":"Applica subito"}</button></span>
       </span></div>`).join(""):`<p class="muted" style="margin:0">Nessun collega può prendere questo turno: va risolto a mano in Turni.</p>`}</div>`; }).join("");
   sheet(`<div class="row" style="justify-content:space-between"><h2>Programma un cambio</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
-   <p class="muted" style="margin:0;font-size:.86rem">Proposte ordinate dalla più adatta: prima chi non forza regole, poi chi è nella stessa rotazione e ha meno turni nei giorni vicini. "Invia richiesta" la manda al collega in Cambi; "Applica subito" la inserisce come cambio manuale.</p>${body}`); }
+   <p class="muted" style="margin:0;font-size:.86rem">Proposte ordinate dalla più adatta: prima chi non forza regole, poi le soluzioni che lasciano una postazione scoperta, poi le altre; a parità, chi è nella stessa rotazione e ha meno turni nei giorni vicini. "Invia richiesta" la manda al collega in Cambi; "Applica subito" la inserisce come cambio manuale.</p>${body}`); }
 function mo_rot(mk,pid){ return (M(mk).rot||{})[pid]; }
 function maybePlan(mk,pid,d){ if(!ADMIN()) return false; const c=conflictsOf(mk,pid,d); if(!c.length) return false; planSheet(mk,c); return true; }
 
@@ -715,8 +730,9 @@ document.addEventListener("click",e=>{
     if(a==="planapp"&&UI.confirm!=="planapp-"+el.dataset.c+"-"+el.dataset.o){ UI.confirm="planapp-"+el.dataset.c+"-"+el.dataset.o; planSheet(P.mk,P.list); return; }
     UI.confirm=null; const now=new Date().toISOString();
     const x={id:uid()+uid(),mk:P.mk,from:c.pid,to:o.pid,a:{d:c.d,k:c.k},b:o.x.b?{...o.x.b}:null,extra:(o.x.extra||[]).map(e=>({d:e.d,k:e.k,giver:e.giver,taker:e.taker})),created:now,by:myPid()||"owner",reason:"indisponibilità"};
-    if(a==="planapp"){ x.status="accepted"; x.manual=true; x.decided=now; x.forced=[...o.w.from.map(t=>"per "+resName(c.pid)+": "+t),...o.w.to.map(t=>"per "+resName(o.pid)+": "+t)]; }
-    else { x.status="pending"; x.warn=[...o.w.from,...o.w.to]; }
+    x.to=o.pid; if(o.leave) x.reason="indisponibilità (turno lasciato scoperto)";
+    if(a==="planapp"){ x.status="accepted"; x.manual=true; x.decided=now; x.forced=[...o.w.holes,...o.w.from.map(t=>"per "+resName(c.pid)+": "+t),...o.w.to.map(t=>"per "+resName(o.pid)+": "+t)]; }
+    else { x.status="pending"; x.warn=[...o.w.holes,...o.w.from,...o.w.to]; }
     swWrite(x).then(ok=>{ if(!ok) return; toast(a==="planapp"?"Cambio applicato":"Richiesta inviata a "+resName(o.pid)); closeSheet(); consolidate(); render(); }); return; }
   if(a==="swopen"){ answerSheet(el.dataset.id); return; }
   if(a==="swacc"||a==="swrej"||a==="swcancel"||a==="swinvalid"){ const x=SW[el.dataset.id]; if(!x) return;
