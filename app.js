@@ -66,7 +66,9 @@ function M(mk){ if(!S.months[mk]) S.months[mk]={rot:{},sched:null};
 function rotName(id){ if(id==="ALL") return "Tutti"; const r=[...S.rotations,...S.externals].find(x=>x.id===id);return r?r.name:"—";}
 function resName(id){ if(id===null||id==="") return "nessuno (scoperto)";
   return resName0(id); }
-function resName0(id){const r=S.residents.find(x=>x.id===id);return r?r.name:"?";}
+function resName0(id){const r=S.residents.find(x=>x.id===id);return r?rName(r):"?";}
+/* nome mostrato con l'anno di specializzazione davanti, come nel foglio: "(2) Cognome" */
+function rName(r){ const y=r.year||S.groupYear||2; return `(${y}) ${r.name}`; }
 function postOf(id){return S.posts.find(p=>p.id===id);}
 function isExt(rot){return !rot||S.externals.some(x=>x.id===rot);}
 /* chi è fuori sede (es. Bambin Gesù) può essere inserito nei turni dal gestore: conta come jolly */
@@ -88,7 +90,7 @@ function presence(mk,onlyRot){ const mo=M(mk), {days}=period(mk), out=[];
       if(pres<need) out.push({d,rot,pres,n:mem.length,need,away}); } }
   return out; }
 function presenceBox(list){ if(!list.length) return "";
-  return `<div class="alerts bad"><strong>Presenza sotto il ${S.minPresence}% in ${list.length} ${list.length===1?"giorno":"casi"}</strong><ul>${list.slice(0,12).map(x=>`<li>${fmt(x.d)} · ${esc(x.rot.name)}: presenti ${x.pres} su ${x.n} (minimo ${x.need}). Assenti: ${x.away.map(r=>esc(r.name)).join(", ")}</li>`).join("")}${list.length>12?`<li>… e altri ${list.length-12}</li>`:""}</ul></div>`; }
+  return `<div class="alerts bad"><strong>Presenza sotto il ${S.minPresence}% in ${list.length} ${list.length===1?"giorno":"casi"}</strong><ul>${list.slice(0,12).map(x=>`<li>${fmt(x.d)} · ${esc(x.rot.name)}: presenti ${x.pres} su ${x.n} (minimo ${x.need}). Assenti: ${x.away.map(r=>esc(rName(r))).join(", ")}</li>`).join("")}${list.length>12?`<li>… e altri ${list.length-12}</li>`:""}</ul></div>`; }
 function shiftsOfDay(d){ const set=new Set(slotsOfDay(d).map(x=>x.s)); return SH.filter(s=>set.has(s)); }
 function slotsOfDay(d){ const t=dayType(d), out=[]; S.posts.forEach(p=>{ SH.forEach(s=>{ if((p.on[t]||[]).includes(s)) out.push({post:p,s,key:p.id+"|"+s}); }); }); return out; }
 /* chi può coprire una postazione: primari, poi jolly */
@@ -124,11 +126,11 @@ function linkPanel(){ const anyFree=S.residents.some(r=>!CLAIMS[r.id]);
   return `<div class="panel" style="border:2px solid var(--accent)"><h2>Associa l'account: chi sei?</h2>
    <p style="margin:0;font-size:.9rem">Tocca il tuo cognome e conferma. <strong>La scelta è definitiva</strong>: potrà cambiarla solo chi gestisce il tool. Da quel momento potrai modificare solo le tue indisponibilità e rispondere ai cambi rivolti a te.</p>
    <div class="pickers">${S.residents.map(r=>{const taken=!!CLAIMS[r.id]; const conf=UI.confirm==="claim-"+r.id;
-     return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""} ${conf?'style="background:var(--accent);color:var(--accent-ink);border-color:var(--accent)"':""}>${conf?"Confermo: sono "+esc(r.name):esc(r.name)}${taken?' <span class="cnt">già associato</span>':""}</button>`;}).join("")}</div>
+     return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""} ${conf?'style="background:var(--accent);color:var(--accent-ink);border-color:var(--accent)"':""}>${conf?"Confermo: sono "+esc(rName(r)):esc(rName(r))}${taken?' <span class="cnt">già associato</span>':""}</button>`;}).join("")}</div>
    ${anyFree?"":`<p class="muted" style="margin:0">Tutti i nomi sono già associati: se il tuo è stato preso per errore, avvisa chi gestisce il tool.</p>`}</div>`; }
 function claimPanel(why){ return linkPanel(); }
 function claimPanelOld(why){ return `<div class="panel"><h2>Chi sei?</h2><p class="muted" style="margin:0;font-size:.88rem">${why}</p>
-  <div class="pickers">${S.residents.map(r=>{const taken=CLAIMS[r.id]&&CLAIMS[r.id]!==MYUID;return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""}>${esc(r.name)}${taken?' <span class="cnt">già collegato</span>':""}</button>`;}).join("")}</div></div>`; }
+  <div class="pickers">${S.residents.map(r=>{const taken=CLAIMS[r.id]&&CLAIMS[r.id]!==MYUID;return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""}>${esc(rName(r))}${taken?' <span class="cnt">già collegato</span>':""}</button>`;}).join("")}</div></div>`; }
 function saveUnav(mk,pid){ const k=mk+"_"+pid; if(db&&!canEditUnav(pid,mk)){ toast(unavDenyMsg(pid,mk)); return; } clearTimeout(uT[k]); setSync("Modifiche in corso…");
   uT[k]=setTimeout(async()=>{ delete uT[k];
     if(!db){ try{localStorage.setItem("turni.unav",JSON.stringify(UNAV));}catch(e){} setSync("Salvato su questo dispositivo"); return; }
@@ -334,7 +336,7 @@ function vMese(){ if(!S.residents.length) return monthBar()+noRes();
   <div class="panel"><div class="row" style="justify-content:space-between"><h2>Rotazione del mese</h2>
    <div class="row">${opts.map(o=>`<span class="chip">${esc(o.name)} ${count[o.id]||0}</span>`).join("")}</div></div>
    <p class="muted" style="margin:0;font-size:.85rem">Ogni sala è coperta da chi è nella sua rotazione (TC1–4, RM1–5, DEA, Angio 1–2); ${S.rotations.filter(r=>r.jolly).map(r=>esc(r.name)).join(" e ")||"nessuno"} riempie le sale TC e RM scoperte. Notte e Guardia domenica sono turni della sala DEA ma li fanno tutti, tranne chi è fuori sede. Nei mesi nuovi la rotazione viene copiata dal mese precedente.</p>
-   <div class="list">${S.residents.map(r=>`<div class="rotrow"><span class="name-strong">${esc(r.name)}${r.year?` <span class="muted" style="font-weight:400">· ${esc(r.year)}° anno</span>`:""}</span>
+   <div class="list">${S.residents.map(r=>`<div class="rotrow"><span class="name-strong">${esc(rName(r))}</span>
      <select id="rot-${r.id}" data-rot="${r.id}"><option value="">— non assegnato —</option>${opts.map(o=>`<option value="${o.id}" ${mo.rot[r.id]===o.id?"selected":""}>${esc(o.name)}</option>`).join("")}</select>
 </div>`).join("")}</div>
   </div>${presenceBox(presence(UI.mk))}`; }
@@ -356,7 +358,7 @@ function vIndisp(){ if(!S.residents.length) return monthBar()+noRes();
   return monthBar()+(OWNER?"":`<div class="panel" style="gap:4px"><h2>Compila le tue indisponibilità</h2><p class="muted" style="margin:0;font-size:.88rem">Scegli il tuo nome, poi segna i turni in cui non ci sei, le ferie e i congressi. Si salva da solo e tutti vedono le stesse informazioni.</p></div>`)+`
   <div class="pickers" role="tablist">${MODES.map(([k,l])=>`<button data-act="umode" data-v="${k}" aria-pressed="${mode===k}">${l}</button>`).join("")}</div>
   <div class="panel"><span class="label">Specializzando</span>
-   <div class="pickers">${S.residents.map(r=>`<button data-act="sel" data-id="${r.id}" aria-pressed="${r.id===UI.sel}">${esc(r.name)}${cnt(r.id)?`<span class="cnt">${cnt(r.id)}</span>`:""}</button>`).join("")}</div></div>
+   <div class="pickers">${S.residents.map(r=>`<button data-act="sel" data-id="${r.id}" aria-pressed="${r.id===UI.sel}">${esc(rName(r))}${cnt(r.id)?`<span class="cnt">${cnt(r.id)}</span>`:""}</button>`).join("")}</div></div>
   <div class="panel"><div class="row" style="justify-content:space-between"><h2>${esc(resName(UI.sel))} · ${MODES.find(x=>x[0]===mode)[1]}</h2><span class="row" style="gap:6px"><span class="chip">${esc(rotName(mo.rot[UI.sel]))}</span><span class="chip tag-F">${tot(UI.sel,"F")} ferie</span><span class="chip tag-C">${tot(UI.sel,"C")} congr.</span></span></div>
    ${dlBox}
    <p class="muted" style="margin:0;font-size:.85rem">${ro?(UI.sel===myPid()?`Sola lettura: il termine per ${monthName(UI.mk)} è scaduto.`:`Stai guardando le voci di ${esc(resName(UI.sel))}: puoi modificare solo le tue.`):hint}</p>
@@ -388,7 +390,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
        <button class="btn ${UI.confirm==="genwk"?"confirm":""}" data-act="genwk">${UI.confirm==="genwk"?"Tocca di nuovo: sovrascrive questa parte":cur===""?"Genera il mese":"Genera la settimana"}</button></div>
        <p class="muted" style="margin:0;font-size:.82rem">Generando una settimana, le altre restano come sono e vengono considerate per equità, riposi, monto e smonto.</p>
        <div class="row" style="gap:8px"><button class="btn" data-act="extlink">Turni degli altri anni da link</button><label class="btn">Turni degli altri anni da file<input type="file" id="extfile" accept=".xlsx,.xls,.csv" hidden></label>${Object.keys(mo.ext||{}).length?`<span class="chip">${Object.keys(mo.ext).length} turni coperti da altri anni</span>${clrBtn("clrext","Rimuovi")}`:""}</div>`; })():""}
-    ${noRot.length?`<p class="muted" style="margin:0;font-size:.85rem">Senza rotazione questo mese: ${noRot.map(r=>esc(r.name)).join(", ")}.</p>`:""}</div>`;
+    ${noRot.length?`<p class="muted" style="margin:0;font-size:.85rem">Senza rotazione questo mese: ${noRot.map(r=>esc(rName(r))).join(", ")}.</p>`:""}</div>`;
   if(!mo.generated&&!ADMIN()) return head+`<div class="panel empty"><h2>Turni non ancora pubblicati</h2><p>Appena verranno generati li vedrai qui.</p></div>`;
   if(!mo.sched) return head+`<div class="panel empty"><h2>Pronto per generare</h2><p>Controlla rotazioni e indisponibilità, poi scegli sopra se generare tutto il mese o una settimana. Potrai cambiare a mano ogni turno toccandolo.</p><p>Se alcuni turni sono già decisi, inseriscili prima a mano: la generazione non li tocca.</p><button class="btn" data-act="manualstart">Inserisci turni a mano</button></div>`;
   const draft=!mo.generated?`<div class="alerts"><strong>Bozza: turni non ancora generati</strong><span style="font-size:.84rem">Tocca una casella per inserire un turno a mano. I colleghi non vedono ancora niente; i turni inseriti a mano (segnati «fisso») restano invariati quando generi.</span></div>`:"";
@@ -420,16 +422,16 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
     const x=pid?per[pid]:null;
     const lab={M:"Mattina",P:"Pomeriggio",N:"Notte",D:"Guardia",S:"Smonto",F:"Ferie",C:"Ferie congresso",X:"Indisponibile"};
     const cls={M:"sh-M",P:"sh-P",N:"sh-N",D:"sh-D",S:"",F:"tag-F",C:"tag-C",X:""};
-    body=`<div class="panel"><label class="stack" style="gap:4px"><span class="label">Nome</span><select id="whoSel" data-who="1"><option value="">Scegli…</option>${S.residents.map(r=>`<option value="${r.id}" ${pid===r.id?"selected":""}>${esc(r.name)}</option>`).join("")}</select></label>
+    body=`<div class="panel"><label class="stack" style="gap:4px"><span class="label">Nome</span><select id="whoSel" data-who="1"><option value="">Scegli…</option>${S.residents.map(r=>`<option value="${r.id}" ${pid===r.id?"selected":""}>${esc(rName(r))}</option>`).join("")}</select></label>
      ${pid?`<div class="row" style="gap:6px"><span class="chip">${esc(rotName(mo.rot[pid]))}</span><span class="chip">${x.tot} turni</span><span class="chip sh-M">${x.M} M</span><span class="chip sh-P">${x.P} P</span><span class="chip sh-N">${x.N} N</span><span class="chip sh-D">${x.D} G</span><span class="chip">${x.sab||0} sabati</span><span class="chip">${x.fes||0} dom/festivi</span></div>`:""}</div>
      ${pid?(rows.length?`<div class="scroll"><table class="grid"><thead><tr><th class="sticky">Giorno</th><th>Turno</th><th>Sala</th><th>Orario</th></tr></thead><tbody>${rows.map(r=>`<tr class="${dayType(r.d)==="sab"?"we":""} ${dayType(r.d)==="fes"?"fes":""}"><td class="date sticky">${fmt(r.d)}</td><td><span class="chip ${cls[r.s]}">${lab[r.s]}</span>${r.s==="N"?' <span class="muted" style="font-size:.78rem">monto</span>':""}${r.sw?' <span style="color:var(--accent);font-weight:700">↔</span>':""}</td><td>${r.txt||""}</td><td class="num">${r.h?esc(r.h):""}</td></tr>`).join("")}</tbody></table></div>`:`<div class="panel empty"><p>Nessun turno per ${esc(resName(pid))} in questo mese.</p></div>`):`<div class="panel empty"><p>Scegli un nome per vedere solo i suoi turni.</p></div>`}`;
   } else if(UI.view==="persone"){
     body=`<div class="scroll"><table class="grid"><thead><tr><th class="sticky">Specializzando</th>${p.days.map(d=>`<th class="code" style="${dayType(d)==="fes"?"color:var(--bad)":dayType(d)==="sab"?"color:var(--accent)":""}">${DOW[isoDow(d)][0]}<br>${+d.slice(8)}</th>`).join("")}</tr></thead><tbody>
-     ${people.map(r=>`<tr><td class="sticky"><span class="name-strong">${esc(r.name)}</span><br><span class="muted" style="font-size:.75rem">${esc(rotName(mo.rot[r.id]))}</span></td>${p.days.map(d=>{const c=code(mo,per,r.id,d);return c==="N"?`<td class="code monto"><div class="mn"><span class="mt">monto</span><span class="nt">Notte</span></div></td>`:`<td class="code ${c}">${label(c,where[r.id+"|"+d])}</td>`;}).join("")}</tr>`).join("")}</tbody></table></div>
+     ${people.map(r=>`<tr><td class="sticky"><span class="name-strong">${esc(rName(r))}</span><br><span class="muted" style="font-size:.75rem">${esc(rotName(mo.rot[r.id]))}</span></td>${p.days.map(d=>{const c=code(mo,per,r.id,d);return c==="N"?`<td class="code monto"><div class="mn"><span class="mt">monto</span><span class="nt">Notte</span></div></td>`:`<td class="code ${c}">${label(c,where[r.id+"|"+d])}</td>`;}).join("")}</tr>`).join("")}</tbody></table></div>
      <div class="legend"><span><span class="chip sh-M">Mattina</span></span><span><span class="chip sh-P">Pomeriggio</span></span><span><span class="chip sh-N">Notte</span></span><span><span class="chip sh-D">Guardia dom/festivi</span></span><span><span class="chip tag-F">Ferie</span></span><span><span class="chip tag-C">Congresso</span></span><span>monto = giorno della notte, non si lavora di giorno · smonto = giorno dopo, non si lavora</span><span>✕ = indisponibile</span><span>G = guardia domenica</span></div>`;
   } else {
     body=`<div class="scroll"><table class="grid"><thead><tr><th class="sticky">Specializzando</th><th>Rotazione</th><th>Totale</th><th>Mattine</th><th>Pomeriggi</th><th>Guardie</th><th>Notti</th><th>Sabati</th><th>Dom/festivi</th><th>Max/sett.</th><th>Sett. oltre ${S.targetWeek}</th><th>Sale</th></tr></thead><tbody>
-     ${people.map(r=>{const x=per[r.id];return `<tr><td class="sticky name-strong">${esc(r.name)}</td><td>${esc(rotName(mo.rot[r.id]))}</td><td class="num">${x.tot}</td><td class="num">${x.M}</td><td class="num">${x.P}</td><td class="num">${x.D}</td><td class="num">${x.N}</td><td class="num">${x.sab||0}</td><td class="num">${x.fes||0}</td><td class="num">${Math.max(0,...Object.values(x.wk))}</td><td class="num">${Object.values(x.wk).filter(v=>v>S.targetWeek).length||""}</td><td style="white-space:nowrap;font-size:.78rem">${Object.entries(x.pc).sort((a,b)=>a[0].localeCompare(b[0],"it",{numeric:true})).map(([k,v])=>`${esc(k)} ${v}`).join(" · ")}</td></tr>`;}).join("")}</tbody></table></div>`;
+     ${people.map(r=>{const x=per[r.id];return `<tr><td class="sticky name-strong">${esc(rName(r))}</td><td>${esc(rotName(mo.rot[r.id]))}</td><td class="num">${x.tot}</td><td class="num">${x.M}</td><td class="num">${x.P}</td><td class="num">${x.D}</td><td class="num">${x.N}</td><td class="num">${x.sab||0}</td><td class="num">${x.fes||0}</td><td class="num">${Math.max(0,...Object.values(x.wk))}</td><td class="num">${Object.values(x.wk).filter(v=>v>S.targetWeek).length||""}</td><td style="white-space:nowrap;font-size:.78rem">${Object.entries(x.pc).sort((a,b)=>a[0].localeCompare(b[0],"it",{numeric:true})).map(([k,v])=>`${esc(k)} ${v}`).join(" · ")}</td></tr>`;}).join("")}</tbody></table></div>`;
   }
   if(UI.view==="conti"){ const cov={}; p.days.forEach(d=>{ for(const k in (SC[d]||{})){ const c=cov[k]||(cov[k]={f:0,n:0}); (SC[d][k]||[]).forEach(x=>{c.n++; if(x)c.f++;}); } });
     const shown=S.posts.filter(x=>SH.some(s=>cov[x.id+"|"+s]));
@@ -446,7 +448,7 @@ function vImp(){
   const mg=S.managers||[];
   const mgPanel=`<div class="panel"><h2>Gestori</h2>
    <p class="muted" style="margin:0;font-size:.85rem">${OWNER?"I gestori possono usare tutte le funzioni come te: rotazioni, impostazioni, generazione e modifica dei turni, cambi manuali e cambi da inserire. Non possono modificare le indisponibilità degli altri, scegliere i gestori o scollegare gli account. Si possono scegliere solo specializzandi che hanno già collegato il nome.":"Questo elenco lo modifica solo il proprietario del tool."}</p>
-   <div class="pickers">${S.residents.filter(r=>CLAIMS[r.id]||mg.includes(r.id)).map(r=>`<button ${OWNER?`data-act="mgr" data-id="${r.id}"`:"disabled"} aria-pressed="${mg.includes(r.id)}">${esc(r.name)}</button>`).join("")||`<span class="muted">Nessuno ha ancora collegato il nome.</span>`}</div></div>`;
+   <div class="pickers">${S.residents.filter(r=>CLAIMS[r.id]||mg.includes(r.id)).map(r=>`<button ${OWNER?`data-act="mgr" data-id="${r.id}"`:"disabled"} aria-pressed="${mg.includes(r.id)}">${esc(rName(r))}</button>`).join("")||`<span class="muted">Nessuno ha ancora collegato il nome.</span>`}</div></div>`;
   const reqPanel=OWNER&&REQS.length?`<div class="panel" style="border:2px solid var(--accent)"><h2>Richieste di accesso <span class="chip">${REQS.length}</span></h2>
    <div class="list">${REQS.map(r=>`<div class="item"><span class="stack" style="gap:2px"><span class="name-strong">${esc(r.email)}</span><span class="muted" style="font-size:.78rem">${new Date(r.at).toLocaleString("it-IT",{dateStyle:"short",timeStyle:"short"})}</span></span><span class="row" style="gap:6px"><button class="btn primary" data-act="reqok" data-id="${esc(r.id)}">Approva</button><button class="btn danger" data-act="reqno" data-id="${esc(r.id)}">Rifiuta</button></span></div>`).join("")}</div></div>`:"";
   const allowPanel=OWNER?`<div class="panel"><h2>Email autorizzate</h2><p class="muted" style="margin:0;font-size:.85rem">Solo queste email possono entrare nell'app (tu entri sempre). Una per riga. Dopo averle salvate, manda il link ai colleghi: si registrano con la stessa email e una password a scelta.</p>
@@ -456,7 +458,7 @@ function vImp(){
    <input type="file" id="impfile" accept=".json,application/json"></div>`:"";
   return reqPanel+mgPanel+allowPanel+linkedPanel()+importPanel+`
   <div class="panel"><h2>Specializzandi</h2>
-   <form class="row" id="addform"><input id="newname" placeholder="Cognome Nome" style="flex:1 1 12em" autocomplete="off"><select id="newyear" aria-label="Anno"><option value="">Anno</option>${[1,2,3,4].map(y=>`<option>${y}</option>`).join("")}</select><button class="btn primary" type="submit">Aggiungi</button></form>
+   <form class="row" id="addform"><input id="newname" placeholder="Cognome Nome" style="flex:1 1 12em" autocomplete="off"><select id="newyear" aria-label="Anno">${[1,2,3,4].map(y=>`<option ${y===2?"selected":""}>${y}° anno</option>`).join("")}</select><button class="btn primary" type="submit">Aggiungi</button></form>
    <div class="list">${S.residents.map(r=>`<div class="item"><input id="rname-${r.id}" data-rname="${r.id}" value="${esc(r.name)}" aria-label="Nome" style="font-weight:600;width:100%"><button class="btn danger ${UI.confirm==="del-"+r.id?"confirm":""}" data-act="del" data-id="${r.id}">${UI.confirm==="del-"+r.id?"Conferma":"Rimuovi"}</button></div>`).join("")||`<p class="muted" style="margin:0">Ancora nessuno.</p>`}</div></div>
   <div class="panel"><div class="row" style="justify-content:space-between"><h2>Postazioni da coprire</h2><button class="btn" data-act="addpost">Aggiungi postazione</button></div>
    <p class="muted" style="margin:0;font-size:.85rem">Una persona per turno. "Dom/festivi" comprende anche i festivi infrasettimanali.</p>
@@ -510,7 +512,7 @@ function vCambi(){ if(!S.residents.length) return monthBar()+noRes();
         UI.swPrev=w; }
       h+=`<div class="panel"><h2>Chiedi un cambio</h2>
        <label class="stack" style="gap:4px"><span class="label">Il tuo turno</span><select id="swA" data-sw="a"><option value="">Scegli…</option>${mine.map(x=>`<option value="${x.d}#${x.k}" ${F.a===x.d+"#"+x.k?"selected":""}>${slotLabel(x)}</option>`).join("")}</select></label>
-       <label class="stack" style="gap:4px"><span class="label">Collega</span><select id="swTo" data-sw="to"><option value="">Scegli…</option>${others.map(r=>`<option value="${r.id}" ${F.to===r.id?"selected":""}>${esc(r.name)} · ${esc(rotName(mo.rot[r.id]))}</option>`).join("")}</select></label>
+       <label class="stack" style="gap:4px"><span class="label">Collega</span><select id="swTo" data-sw="to"><option value="">Scegli…</option>${others.map(r=>`<option value="${r.id}" ${F.to===r.id?"selected":""}>${esc(rName(r))} · ${esc(rotName(mo.rot[r.id]))}</option>`).join("")}</select></label>
        <label class="stack" style="gap:4px"><span class="label">In cambio prendi</span><select id="swB" data-sw="b" ${F.to?"":"disabled"}><option value="">Niente: cedo il turno</option>${theirs.map(x=>`<option value="${x.d}#${x.k}" ${F.b===x.d+"#"+x.k?"selected":""}>${slotLabel(x)}</option>`).join("")}</select></label>
        ${linkHtml?`<span class="label">Turni collegati alla notte</span>${linkHtml}`:""}
        ${prev}
@@ -531,7 +533,7 @@ function vCambi(){ if(!S.residents.length) return monthBar()+noRes();
   h+=`<div class="panel"><h2>Storico cambi di ${monthName(mk)}</h2>${done.length?`<div class="stack" style="gap:8px">${done.map(x=>swCard(x,false,false,ADMIN()&&(x.status!=="accepted"||x.applied))).join("")}</div>`:`<p class="muted" style="margin:0">Nessun cambio per ora.</p>`}</div>`;
   return h; }
 function linkedPanel(){ let h=""; if(OWNER){ const linked=S.residents.filter(r=>CLAIMS[r.id]);
-    h+=`<div class="panel"><h2>Account collegati</h2><p class="muted" style="margin:0;font-size:.85rem">${linked.length} su ${S.residents.length}. Se qualcuno ha toccato il nome sbagliato, scollegalo.</p>${linked.length?`<div class="list">${linked.map(r=>`<div class="item"><span class="name-strong">${esc(r.name)}</span><button class="btn danger ${UI.confirm==="unl-"+r.id?"confirm":""}" data-act="unlink" data-id="${r.id}">${UI.confirm==="unl-"+r.id?"Conferma":"Scollega"}</button></div>`).join("")}</div>`:""}</div>`; } return h; }
+    h+=`<div class="panel"><h2>Account collegati</h2><p class="muted" style="margin:0;font-size:.85rem">${linked.length} su ${S.residents.length}. Se qualcuno ha toccato il nome sbagliato, scollegalo.</p>${linked.length?`<div class="list">${linked.map(r=>`<div class="item"><span class="name-strong">${esc(rName(r))}</span><button class="btn danger ${UI.confirm==="unl-"+r.id?"confirm":""}" data-act="unlink" data-id="${r.id}">${UI.confirm==="unl-"+r.id?"Conferma":"Scollega"}</button></div>`).join("")}</div>`:""}</div>`; } return h; }
 function warnBox(w,me,other){ return `<div class="alerts"><strong>Il cambio forza queste regole</strong><ul>${w.from.map(t=>`<li><strong>per te</strong>: ${t}</li>`).join("")}${w.to.map(t=>`<li><strong>per ${esc(resName(other))}</strong>: ${t}</li>`).join("")}</ul><span style="font-size:.85rem">${esc(resName(other))} vedrà questo avviso e dovrà confermarlo.</span></div>`; }
 /* cambio inserito direttamente da un gestore: niente richiesta, si applica subito e finisce nello storico e nei cambi da inserire */
 function manualPanel(mk,SC,mo){ const F=UI.msw=UI.msw||{}; const inG=S.residents.filter(r=>inGem(mo,r.id));
@@ -548,9 +550,9 @@ function manualPanel(mk,SC,mo){ const F=UI.msw=UI.msw||{}; const inG=S.residents
        +freeBox([["per "+esc(resName(F.from)),w.freeFrom],["per "+esc(resName(F.to)),w.freeTo]]); }
   const sel=(id,key,opts,cur,ph,dis)=>`<select id="${id}" data-msw="${key}" ${dis?"disabled":""}><option value="">${ph}</option>${opts.map(([v,l])=>`<option value="${v}" ${cur===v?"selected":""}>${l}</option>`).join("")}</select>`;
   return `<div class="panel"><h2>Inserisci un cambio manuale</h2><p class="muted" style="margin:0;font-size:.85rem">Solo per i gestori: il cambio si applica subito, senza chiedere conferma agli specializzandi, e compare nello storico e nei cambi da inserire.</p>
-   <label class="stack" style="gap:4px"><span class="label">Chi cede</span>${sel("mswFrom","from",inG2.map(r=>[r.id,esc(r.name)]),F.from,"Scegli…")}</label>
+   <label class="stack" style="gap:4px"><span class="label">Chi cede</span>${sel("mswFrom","from",inG2.map(r=>[r.id,esc(rName(r))]),F.from,"Scegli…")}</label>
    <label class="stack" style="gap:4px"><span class="label">Il turno che cede</span>${sel("mswA","a",shA.map(x=>[x.d+"#"+x.k,slotLabel(x)]),F.a,"Scegli…",!F.from)}</label>
-   <label class="stack" style="gap:4px"><span class="label">A chi</span>${sel("mswTo","to",S.residents.filter(r=>r.id!==F.from&&(inGem(mo,r.id)||isBG(mo.rot[r.id]))).map(r=>[r.id,esc(r.name)+(isBG(mo.rot[r.id])?" · Bambin Gesù":"")]),F.to,"Scegli…")}</label>
+   <label class="stack" style="gap:4px"><span class="label">A chi</span>${sel("mswTo","to",S.residents.filter(r=>r.id!==F.from&&(inGem(mo,r.id)||isBG(mo.rot[r.id]))).map(r=>[r.id,esc(rName(r))+(isBG(mo.rot[r.id])?" · Bambin Gesù":"")]),F.to,"Scegli…")}</label>
    <label class="stack" style="gap:4px"><span class="label">In cambio prende</span>${sel("mswB","b",shB.map(x=>[x.d+"#"+x.k,slotLabel(x)]),F.b,"Niente: cessione del turno",!F.to)}</label>
    ${links?`<span class="label">Turni collegati alla notte</span>${links}`:""}${prev}
    <div class="row"><button class="btn primary ${UI.confirm==="mswgo"?"confirm":""}" data-act="mswgo" ${ok?"":"disabled"}>${UI.confirm==="mswgo"?"Tocca di nuovo per applicare":"Applica il cambio"}</button></div></div>`; }
@@ -759,7 +761,7 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
     if(blocked(u,s)) return u==="F"?"in ferie":u==="C"?"a congresso":"indisponibile"; if(p.on[d]&&!arr.includes(pid)) return p.on[d]==="N"?"giorno di monto (ha la notte)":s==="N"?`già di ${SHN[p.on[d]].toLowerCase()}, sarebbe il monto`:`già di ${SHN[p.on[d]].toLowerCase()}`;
     if(p.on[add(d,-1)]==="N") return "giorno di smonto"; if(s==="N"&&p.on[add(d,1)]) return "lavora nel giorno di smonto";
     if(!arr.includes(pid)&&(p.wk[w]||0)>=S.maxWeek) return `già ${p.wk[w]} turni in settimana`; return ""; };
-  const btn=(r,i,cur,tag)=>{const y=why(r.id), isCur=cur===r.id;return `<button class="cand ${isCur?"cur":""}" data-act="assign" data-i="${i}" data-id="${r.id}"><span><span class="name-strong">${esc(r.name)}</span>${tag?` <span class="muted" style="font-size:.78rem">· ${esc(rotName(mo.rot[r.id]))}</span>`:""}${y&&!isCur?`<br><span class="why">${y}</span>`:""}</span><span class="chip">${per[r.id].tot} turni · ${per[r.id].N} N</span></button>`;};
+  const btn=(r,i,cur,tag)=>{const y=why(r.id), isCur=cur===r.id;return `<button class="cand ${isCur?"cur":""}" data-act="assign" data-i="${i}" data-id="${r.id}"><span><span class="name-strong">${esc(rName(r))}</span>${tag?` <span class="muted" style="font-size:.78rem">· ${esc(rotName(mo.rot[r.id]))}</span>`:""}${y&&!isCur?`<br><span class="why">${y}</span>`:""}</span><span class="chip">${per[r.id].tot} turni · ${per[r.id].N} N</span></button>`;};
   sheet(`<div class="row" style="justify-content:space-between"><div><h2>${esc(post.name)} · ${SHN[s]}</h2><span class="muted">${fmt(d,true)} · ${esc(S.hours[s])}</span></div><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
    ${arr.map((cur,i)=>`<div class="stack" style="gap:6px"><span class="label">${cur?`Ora: ${esc(resName(cur))}`:"Scoperto"}</span>
      ${cov!=="ALL"?`<span class="groupname">Rotazione ${esc(rotName(cov))}</span>`:`<span class="groupname">Tutti gli specializzandi</span>`}
@@ -779,9 +781,9 @@ async function exportXlsx(){
   const people=S.residents.filter(r=>inGem(mo,r.id)||(SC&&shiftsOf(SC,r.id).length));
   const lab=(c,w)=>c==="S"?"Smonto":c==="X"?"indisp.":c==="F"?"ferie":c==="C"?"congresso":c==="D"?"Guardia domenica":c==="N"?"Monto (notte)":c?`${w} ${c}`:"";
   const t2=[["Specializzando","Rotazione",...p.days.map(d=>`${DOW[isoDow(d)]} ${+d.slice(8)}/${+d.slice(5,7)}`)]];
-  people.forEach(r=>t2.push([r.name,rotName(mo.rot[r.id]),...p.days.map(d=>lab(code(mo,per,r.id,d),where[r.id+"|"+d]))]));
+  people.forEach(r=>t2.push([rName(r),rotName(mo.rot[r.id]),...p.days.map(d=>lab(code(mo,per,r.id,d),where[r.id+"|"+d]))]));
   const t3=[["Specializzando","Rotazione","Totale","Mattine","Pomeriggi","Guardie domenica","Notti","Sabati","Domeniche/festivi"]];
-  people.forEach(r=>{const x=per[r.id];t3.push([r.name,rotName(mo.rot[r.id]),x.tot,x.M,x.P,x.D,x.N,x.sab||0,x.fes||0]);});
+  people.forEach(r=>{const x=per[r.id];t3.push([rName(r),rotName(mo.rot[r.id]),x.tot,x.M,x.P,x.D,x.N,x.sab||0,x.fes||0]);});
   t3.push([]); t3.push([`Orari: mattina ${S.hours.M}, pomeriggio ${S.hours.P}, guardia domenica ${S.hours.D}, notte ${S.hours.N}. Periodo ${fmt(p.first)} – ${fmt(p.last)}.`]);
   const wb=XLSX.utils.book_new();
   const s1=XLSX.utils.aoa_to_sheet(t1); s1["!cols"]=[{wch:11},{wch:13},...cols.map(()=>({wch:18}))];
@@ -946,7 +948,7 @@ document.addEventListener("change",e=>{
   if(t.dataset.lim){ S[t.dataset.lim]=Math.max(0,parseInt(t.value)||0); persist(); }
 });
 document.addEventListener("submit",e=>{ if(e.target.id!=="addform")return; e.preventDefault();
-  const n=document.getElementById("newname").value.trim(), y=document.getElementById("newyear").value; if(!n)return;
+  const n=document.getElementById("newname").value.trim(), y=parseInt(document.getElementById("newyear").value)||2; if(!n)return;
   S.residents.push({id:uid(),name:n,year:y}); sortRes(S.residents); persist(); render(); setTimeout(()=>document.getElementById("newname").focus(),0); });
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&layer.innerHTML){closeSheet();render();}});
 

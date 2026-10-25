@@ -21,6 +21,8 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 - `accessRequests/{uid}` `{email, at}`: richieste di accesso di chi non è autorizzato; il proprietario le approva (aggiunge l'email ad `access/allow`) o le rifiuta in Impostazioni.
 - `access/allow` `{emails}`: email autorizzate. `roles/managers` `{uids}`: gestori (sincronizzato dall'app). `roles/owner`: leggibile solo dal proprietario (serve all'app per riconoscerlo).
 
+- I nomi si mostrano con l'anno davanti, "(2) Cognome" (`rName`: `r.year` o, se vuoto, 2: il gruppo del proprietario è il 2° anno). Niente gestione multi-anno nell'app (scelta del proprietario).
+
 ## Permessi
 - Proprietario: tutto; unico che gestisce email autorizzate, gestori, scollegamento account.
 - Gestori: impostazioni, rotazioni, generazione/modifica turni, cambi manuali, cambi da inserire, pulizia storico, indisponibilità di tutti (anche dopo la scadenza).
