@@ -39,6 +39,9 @@ service cloud.firestore {
     match /config/{doc} { allow read: if allowed(); allow write: if isOwner() || (allowed() && ((doc == "main" && mgrList("uids")) || (doc != "main" && mgrList(doc)))); }
     // anni che coprono ogni sala: elenco unico, lo modificano il proprietario e i gestori di qualsiasi anno
     match /config/years { allow read: if allowed(); allow write: if isOwner() || (allowed() && isManager()); }
+    // storico delle bozze: hist/y<anno>_<mese>/v/<id>, solo proprietario e gestori di quell'anno
+    function histMgr(key) { let yk = key.split('_')[0]; return (yk == "y2" && mgrList("uids")) || (yk != "y2" && mgrList(yk)); }
+    match /hist/{key}/v/{id} { allow read, write: if isOwner() || (allowed() && histMgr(key)); }
     match /planner/{doc} { allow read: if allowed(); allow write: if isOwner() || (allowed() && ((doc == "state" && mgrList("uids")) || (doc != "state" && mgrList(doc)))); }
 
     // indisponibilità: ognuno scrive solo le proprie; il proprietario anche quelle degli altri e lo spazio "staff"
