@@ -700,6 +700,11 @@ function maybePlan(mk,pid,d){ if(!ADMIN()) return false; const c=conflictsOf(mk,
 /* ---------- turni coperti dagli altri anni (import dal foglio "BOZZA ORARI") ---------- */
 /* mo.ext: "giorno|postId|turno" → ["(3) Rossi", …]; quei turni non vengono assegnati ai nostri e non sono buchi */
 function extCovered(mo,d,key){ return !!(mo.ext||{})[d+"|"+key] && !(mo.fixed||{})[d+"|"+key+"|0"]; }
+/* allinea l'orario già presente: i turni coperti da altri anni restano vuoti (non buchi), gli altri tornano da coprire */
+function syncExt(mo){ if(!mo.sched) return;
+  for(const d in mo.sched) for(const k in mo.sched[d]){ const a=mo.sched[d][k];
+    if(extCovered(mo,d,k)){ if(!a.some(x=>x)) mo.sched[d][k]=[]; }
+    else if(!a.length) mo.sched[d][k]=[null]; } }
 function normRoom(x){ return String(x||"").toLowerCase().replace(/\(.*?\)/g,"").replace(/angiografia/g,"angio").replace(/[^a-z0-9]/g,""); }
 /* foglio: riga 1 = giorni ("LUN 05"), colonna A = sala (le righe sotto senza nome sono la stessa sala),
    prima della riga "POMERIGGIO" mattina, dopo pomeriggio; riga "NOTTE" = notti; domenica e festivi DEA = guardia */
@@ -850,7 +855,7 @@ document.addEventListener("click",e=>{
     swWrite(nx).then(ok=>{ if(ok){ closeSheet(); toast(nx.status==="accepted"?"Cambio accettato: orario aggiornato":nx.status==="pending"?"Hai accettato: si attende la conferma dell'altro collega":nx.status==="rejected"?"Cambio rifiutato":"Richiesta chiusa"); render(); consolidate(); } }); return; }
   if(a==="clrF"||a==="clrC"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
     clearUnav([UI.sel],a==="clrF"?"F":"C"); toast((a==="clrF"?"Ferie":"Ferie congresso")+" di "+resName(UI.sel)+" eliminate"); render(); return; }
-  if(a==="clrext"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null; const mo=M(UI.mk); mo.ext={}; persist(); render(); toast("Turni degli altri anni rimossi"+(mo.generated?": rigenera per usare quei turni":"")); return; }
+  if(a==="clrext"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null; const mo=M(UI.mk); mo.ext={}; syncExt(mo); persist(); render(); toast("Turni degli altri anni rimossi: quei turni tornano da coprire"+(mo.generated?" (rigenera per assegnarli)":"")); return; }
   if(a==="extlink"){ sheet(`<div class="row" style="justify-content:space-between"><h2>Turni degli altri anni</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
      <label class="stack" style="gap:4px"><span class="label">Link del foglio Google</span><input id="extUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/…" value="${esc(S.extSheetUrl||"")}"></label>
      <p class="muted" style="margin:0;font-size:.84rem">Apri la scheda del mese giusto e copia il link dalla barra degli indirizzi (contiene <code>gid=</code>). Se il link non indica la scheda, si usa quella chiamata «${esc(monthName(UI.mk))}». Il foglio deve essere condiviso come «Chiunque abbia il link può visualizzare».</p>
@@ -869,7 +874,7 @@ document.addEventListener("click",e=>{
     }).catch(err=>{ el.disabled=false; el.textContent="Leggi il foglio";
       const box=document.getElementById("extErr"); if(box) box.textContent="Non riesco a leggere il foglio ("+err.message+"). Controlla che sia condiviso come «Chiunque abbia il link può visualizzare», oppure scaricalo in Excel e usa «da file»."; });
     return; }
-  if(a==="extsave"){ const mo=M(UI.mk), r=UI.extRes; if(!r) return; mo.ext=r.map; UI.extRes=null; UI.extWb=null; persist(); closeSheet(); render();
+  if(a==="extsave"){ const mo=M(UI.mk), r=UI.extRes; if(!r) return; mo.ext=r.map; syncExt(mo); UI.extRes=null; UI.extWb=null; persist(); closeSheet(); render();
     toast(`${Object.keys(r.map).length} turni coperti da altri anni salvati`+(mo.generated?": rigenera per applicarli":"")); return; }
   if(a==="clrone"||a==="clrall"||a==="clrsched"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
     if(a==="clrsched"){ const mo=M(UI.mk); mo.sched=null; mo.generated=null; mo.fixed={}; toast("Turni eliminati"); }
