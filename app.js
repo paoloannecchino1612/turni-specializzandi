@@ -387,7 +387,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
       return `<div class="row" style="gap:8px"><label class="row" style="gap:6px"><span class="label">Genera</span><select id="genWk" data-genwk="1"><option value="" ${cur===""?"selected":""}>Tutto il mese</option>${Array.from({length:nw},(_,w)=>`<option value="${w}" ${String(cur)===String(w)?"selected":""}>Settimana ${w+1}: ${fmt(p.days[w*7])} – ${fmt(p.days[w*7+6])}${filled(w)?" ✓":""}</option>`).join("")}</select></label>
        <button class="btn ${UI.confirm==="genwk"?"confirm":""}" data-act="genwk">${UI.confirm==="genwk"?"Tocca di nuovo: sovrascrive questa parte":cur===""?"Genera il mese":"Genera la settimana"}</button></div>
        <p class="muted" style="margin:0;font-size:.82rem">Generando una settimana, le altre restano come sono e vengono considerate per equità, riposi, monto e smonto.</p>
-       <div class="row" style="gap:8px"><label class="btn">Carica turni degli altri anni<input type="file" id="extfile" accept=".xlsx,.xls,.csv" hidden></label>${Object.keys(mo.ext||{}).length?`<span class="chip">${Object.keys(mo.ext).length} turni coperti da altri anni</span>${clrBtn("clrext","Rimuovi")}`:""}</div>`; })():""}
+       <div class="row" style="gap:8px"><button class="btn" data-act="extlink">Turni degli altri anni da link</button><label class="btn">da file<input type="file" id="extfile" accept=".xlsx,.xls,.csv" hidden></label>${Object.keys(mo.ext||{}).length?`<span class="chip">${Object.keys(mo.ext).length} turni coperti da altri anni</span>${clrBtn("clrext","Rimuovi")}`:""}</div>`; })():""}
     ${noRot.length?`<p class="muted" style="margin:0;font-size:.85rem">Senza rotazione questo mese: ${noRot.map(r=>esc(r.name)).join(", ")}.</p>`:""}</div>`;
   if(!mo.generated&&!ADMIN()) return head+`<div class="panel empty"><h2>Turni non ancora pubblicati</h2><p>Appena verranno generati li vedrai qui.</p></div>`;
   if(!mo.sched) return head+`<div class="panel empty"><h2>Pronto per generare</h2><p>Controlla rotazioni e indisponibilità, poi scegli sopra se generare tutto il mese o una settimana. Potrai cambiare a mano ogni turno toccandolo.</p><p>Se alcuni turni sono già decisi, inseriscili prima a mano: la generazione non li tocca.</p><button class="btn" data-act="manualstart">Inserisci turni a mano</button></div>`;
@@ -851,6 +851,24 @@ document.addEventListener("click",e=>{
   if(a==="clrF"||a==="clrC"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
     clearUnav([UI.sel],a==="clrF"?"F":"C"); toast((a==="clrF"?"Ferie":"Ferie congresso")+" di "+resName(UI.sel)+" eliminate"); render(); return; }
   if(a==="clrext"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null; const mo=M(UI.mk); mo.ext={}; persist(); render(); toast("Turni degli altri anni rimossi"+(mo.generated?": rigenera per usare quei turni":"")); return; }
+  if(a==="extlink"){ sheet(`<div class="row" style="justify-content:space-between"><h2>Turni degli altri anni</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
+     <label class="stack" style="gap:4px"><span class="label">Link del foglio Google</span><input id="extUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/…" value="${esc(S.extSheetUrl||"")}"></label>
+     <p class="muted" style="margin:0;font-size:.84rem">Apri la scheda del mese giusto e copia il link dalla barra degli indirizzi (contiene <code>gid=</code>). Se il link non indica la scheda, si usa quella chiamata «${esc(monthName(UI.mk))}». Il foglio deve essere condiviso come «Chiunque abbia il link può visualizzare».</p>
+     <p id="extErr" style="margin:0;font-size:.85rem;color:var(--bad)"></p>
+     <div class="row"><button class="btn primary" data-act="extfetch">Leggi il foglio</button><button class="btn" data-act="close">Annulla</button></div>`); return; }
+  if(a==="extfetch"){ const url=(document.getElementById("extUrl")||{}).value||"", id=(url.match(/\/d\/([A-Za-z0-9_-]{20,})/)||[])[1], gid=(url.match(/[#&?]gid=(\d+)/)||[])[1];
+    if(!id){ toast("Link non valido: deve essere un link di Google Fogli"); return; }
+    if(typeof XLSX==="undefined"){toast("Libreria Excel non caricata, riprova tra poco");return;}
+    S.extSheetUrl=url.trim(); persist();
+    const mn=monthName(UI.mk), title=mn.charAt(0).toUpperCase()+mn.slice(1);
+    const src=`https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&headers=0&`+(gid?`gid=${gid}`:`sheet=${encodeURIComponent(title)}`);
+    el.disabled=true; el.textContent="Lettura in corso…";
+    fetch(src).then(r=>{ if(!r.ok) throw new Error("HTTP "+r.status); return r.text(); }).then(txt=>{
+      if(/^\s*</.test(txt)) throw new Error("accesso negato");
+      UI.extWb=XLSX.read(txt,{type:"string",raw:true}); const n=UI.extWb.SheetNames[0]; extPreview(n);
+    }).catch(err=>{ el.disabled=false; el.textContent="Leggi il foglio";
+      const box=document.getElementById("extErr"); if(box) box.textContent="Non riesco a leggere il foglio ("+err.message+"). Controlla che sia condiviso come «Chiunque abbia il link può visualizzare», oppure scaricalo in Excel e usa «da file»."; });
+    return; }
   if(a==="extsave"){ const mo=M(UI.mk), r=UI.extRes; if(!r) return; mo.ext=r.map; UI.extRes=null; UI.extWb=null; persist(); closeSheet(); render();
     toast(`${Object.keys(r.map).length} turni coperti da altri anni salvati`+(mo.generated?": rigenera per applicarli":"")); return; }
   if(a==="clrone"||a==="clrall"||a==="clrsched"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
