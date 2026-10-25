@@ -498,6 +498,9 @@ function vCambi(){ if(!S.residents.length) return monthBar()+noRes();
       if(out.length) h+=`<div class="panel"><h2>In attesa di risposta</h2><div class="stack" style="gap:8px">${out.map(x=>swCard(x,false,true)).join("")}</div></div>`;
     }
   }
+  if(ADMIN()&&SC){ const cf=conflictsOf(mk);
+    if(cf.length) h+=`<div class="panel" style="border:2px solid var(--bad)"><h2>Conflitti da risolvere <span class="chip">${cf.length}</span></h2><p class="muted" style="margin:0;font-size:.85rem">Turni assegnati a chi poi ha segnato indisponibilità, ferie o congresso.</p>
+      <div class="list">${cf.map(c=>{const pend=pendingFor(c);return `<div class="item"><span class="stack" style="gap:2px"><span class="name-strong">${esc(resName(c.pid))}</span><span style="font-size:.85rem">${slotLabel(c)}</span>${pend?`<span class="muted" style="font-size:.78rem">Richiesta inviata a ${esc(resName(pend.to))}</span>`:""}</span><button class="btn primary" data-act="planc" data-id="${c.pid}~${c.d}">Programma un cambio</button></div>`;}).join("")}</div></div>`; }
   if(ADMIN()&&SC) h+=manualPanel(mk,SC,mo);
   if(ADMIN()){ const acc=Object.values(SW).filter(x=>x.status==="accepted"), nuovi=acc.filter(x=>!x.reported);
     h+=`<div class="panel"><div class="row" style="justify-content:space-between"><h2>Cambi da inserire nell'orario ufficiale</h2><span class="chip ${nuovi.length?"tag-C":""}">${nuovi.length} nuovi</span></div>
@@ -532,7 +535,7 @@ function manualPanel(mk,SC,mo){ const F=UI.msw=UI.msw||{}; const inG=S.residents
    <div class="row"><button class="btn primary ${UI.confirm==="mswgo"?"confirm":""}" data-act="mswgo" ${ok?"":"disabled"}>${UI.confirm==="mswgo"?"Tocca di nuovo per applicare":"Applica il cambio"}</button></div></div>`; }
 function swCard(x,inbox,mineOut,canDel){ const st={pending:["In attesa","chip"],accepted:[x.manual?"Inserito":"Accettato","chip tag-F"],rejected:["Rifiutato","chip"],cancelled:["Annullato","chip"],invalid:["Non più valido","chip"]}[x.status]||["?","chip"];
   const txt=`<strong>${esc(resName(x.from))}</strong> cede <span class="name-strong">${slotLabel(x.a)}</span> a <strong>${esc(resName(x.to))}</strong>${x.b?` e prende <span class="name-strong">${slotLabel(x.b)}</span>`:" senza nulla in cambio"}${(x.extra||[]).map(e=>`<br><span style="font-size:.85rem">+ ${slotLabel(e)} passa da ${esc(resName(e.giver))} a ${esc(resName(e.taker))} (monto/smonto)</span>`).join("")}`;
-  const manual=x.manual?`<span class="muted" style="font-size:.8rem">Inserito dal gestore${x.by&&x.by!=="owner"?" "+esc(resName(x.by)):""}</span>`:"";
+  const manual=x.manual?`<span class="muted" style="font-size:.8rem">Inserito dal gestore${x.by&&x.by!=="owner"?" "+esc(resName(x.by)):""}${x.reason?" · per "+esc(x.reason):""}</span>`:(x.reason?`<span class="muted" style="font-size:.8rem">Proposto dal gestore per ${esc(x.reason)} di ${esc(resName(x.from))}</span>`:"");
   const forced=x.status==="accepted"&&x.forced&&x.forced.length?`<span class="muted" style="font-size:.8rem">Accettato forzando: ${x.forced.map(esc).join("; ")}</span>`:"";
   return `<div class="cand" style="cursor:default;grid-template-columns:minmax(0,1fr) auto"><span class="stack" style="gap:3px"><span>${txt}</span>${manual}${forced}</span><span class="stack" style="gap:6px;align-items:flex-end"><span class="${st[1]}">${st[0]}</span>${inbox?`<button class="btn primary" data-act="swopen" data-id="${x.id}">Rispondi</button>`:""}${mineOut?`<button class="btn danger" data-act="swcancel" data-id="${x.id}">Annulla</button>`:""}${canDel?`<button class="btn danger ${UI.confirm==="swdel-"+x.id?"confirm":""}" data-act="swdel" data-id="${x.id}" title="${x.status==="accepted"?"Elimina solo la voce: l'orario resta com'è":"Elimina dallo storico"}">${UI.confirm==="swdel-"+x.id?(x.status==="accepted"?"Conferma (l'orario non cambia)":"Conferma"):"Elimina"}</button>`:""}</span></div>`; }
 function showText(txt,list){ sheet(`<div class="row" style="justify-content:space-between"><h2>Cambi da inserire</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
@@ -578,6 +581,41 @@ async function consolidate(){ if(!ADMIN()||!S||!db) return; let changed=false;
     await swWrite({...x,applied:true,stale:!ok}); }
   if(changed){ persist(); render(); } }
 
+
+/* ---------- programma un cambio: indisponibilità in conflitto con un turno già assegnato ---------- */
+function conflictsOf(mk,onlyPid,onlyDay){ const mo=M(mk), SC=effSched(mk), out=[]; if(!SC) return out;
+  for(const r of S.residents){ if(onlyPid&&r.id!==onlyPid) continue;
+    for(const x of shiftsOf(SC,r.id)){ if(onlyDay&&x.d!==onlyDay) continue; const s=x.k.split("|")[1];
+      if(blocked(unavOf(mo,r.id,x.d),s)) out.push({pid:r.id,d:x.d,k:x.k,s}); } }
+  return out.sort((a,b)=>a.d.localeCompare(b.d)); }
+function pendingFor(c){ return Object.values(SW).find(x=>x.status==="pending"&&x.from===c.pid&&x.a.d===c.d&&x.a.k===c.k); }
+/* proposte: chi può prendere il turno, in cessione o in scambio, ordinate per regole forzate e carico */
+function planOptions(mk,c){ const mo=M(mk), SC=effSched(mk), post=postOf(c.k.split("|")[0]); if(!SC||!post) return [];
+  const {pri,jol}=pools(mo,post,c.s), cands=[...pri,...jol].filter(r=>r.id!==c.pid), days=period(mk).days, di=days.indexOf(c.d), out=[];
+  const load=pid=>shiftsOf(SC,pid).filter(y=>Math.abs(days.indexOf(y.d)-di)<=3).length;
+  for(const r of cands){
+    const tryX=x=>{ x.extra=nightLinks(mk,x); const w=swapWarnings(mk,x); if(!w.ok) return null; return {x,w,score:w.from.length+w.to.length}; };
+    let best=tryX({from:c.pid,to:r.id,a:{d:c.d,k:c.k},b:null});
+    for(const y of shiftsOf(SC,r.id)){ const dj=days.indexOf(y.d); if(y.d===c.d||Math.abs(dj-di)>7) continue;
+      const o=tryX({from:c.pid,to:r.id,a:{d:c.d,k:c.k},b:{d:y.d,k:y.k}}); if(!o) continue;
+      if(!best||o.score<best.score||(o.score===best.score&&!best.x.b)) best=o; }
+    if(best) out.push({...best,pid:r.id,primary:pri.includes(r),load:load(r.id)}); }
+  return out.sort((a,b)=>a.score-b.score||(b.primary-a.primary)||a.load-b.load).slice(0,8); }
+function planSheet(mk,list){ UI.plan={mk,list,opts:list.map(c=>planOptions(mk,c))};
+  const body=list.map((c,ci)=>{ const pend=pendingFor(c), opts=UI.plan.opts[ci];
+    return `<div class="stack" style="gap:8px"><div class="alerts bad"><strong>${esc(resName(c.pid))} è in turno: ${slotLabel(c)}</strong><span style="font-size:.85rem">L'indisponibilità inserita va in conflitto con questo turno.${pend?` Richiesta già inviata a ${esc(resName(pend.to))}, in attesa.`:""}</span></div>
+     ${opts.length?opts.map((o,oi)=>`<div class="cand" style="cursor:default;grid-template-columns:minmax(0,1fr)"><span class="stack" style="gap:4px">
+        <span><strong>${esc(resName(o.pid))}</strong> prende ${slotLabel(c)}${o.x.b?` e in cambio ${esc(resName(c.pid))} prende <strong>${slotLabel(o.x.b)}</strong>`:" (cessione, senza nulla in cambio)"}</span>
+        ${(o.x.extra||[]).map(e=>`<span style="font-size:.82rem">+ ${slotLabel(e)} da ${esc(resName(e.giver))} a ${esc(resName(e.taker))} (monto/smonto)</span>`).join("")}
+        <span class="muted" style="font-size:.8rem">${esc(rotName(mo_rot(mk,o.pid)))}${o.primary?"":" · jolly"} · ${o.load} turni nei 3 giorni vicini</span>
+        ${o.score?`<span style="font-size:.82rem;color:var(--bad)">Forza: ${[...o.w.to.map(t=>"per "+esc(resName(o.pid))+": "+t),...o.w.from.map(t=>"per "+esc(resName(c.pid))+": "+t)].join("; ")}</span>`:`<span class="okline" style="font-size:.85rem">Rispetta tutte le regole</span>`}
+        <span class="row" style="gap:6px"><button class="btn primary" data-act="planreq" data-c="${ci}" data-o="${oi}">Invia richiesta</button><button class="btn ${UI.confirm==="planapp-"+ci+"-"+oi?"confirm":""}" data-act="planapp" data-c="${ci}" data-o="${oi}">${UI.confirm==="planapp-"+ci+"-"+oi?"Tocca di nuovo: applica subito":"Applica subito"}</button></span>
+      </span></div>`).join(""):`<p class="muted" style="margin:0">Nessun collega può prendere questo turno: va risolto a mano in Turni.</p>`}</div>`; }).join("");
+  sheet(`<div class="row" style="justify-content:space-between"><h2>Programma un cambio</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
+   <p class="muted" style="margin:0;font-size:.86rem">Proposte ordinate dalla più adatta: prima chi non forza regole, poi chi è nella stessa rotazione e ha meno turni nei giorni vicini. "Invia richiesta" la manda al collega in Cambi; "Applica subito" la inserisce come cambio manuale.</p>${body}`); }
+function mo_rot(mk,pid){ return (M(mk).rot||{})[pid]; }
+function maybePlan(mk,pid,d){ if(!ADMIN()) return false; const c=conflictsOf(mk,pid,d); if(!c.length) return false; planSheet(mk,c); return true; }
+
 /* ---------- sheets ---------- */
 const layer=document.getElementById("layer");
 function sheet(html){layer.innerHTML=`<div class="scrim" data-act="close"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;}
@@ -588,6 +626,7 @@ function daySheet(d){ const mo=M(UI.mk), u=unavOf(mo,UI.sel,d), avail=shiftsOfDa
    <span class="muted">Turni previsti il ${fmt(d)}. ${esc(resName(UI.sel))} non è disponibile per:</span>
    <div class="pickers">${avail.map(s=>`<button data-act="u" data-v="${s}" aria-pressed="${!FULL[u]&&u.includes(s)}">${SHN[s]} <span class="cnt">${esc(S.hours[s])}</span></button>`).join("")||`<span class="muted">Nessun turno previsto.</span>`}
    <button data-act="u" data-v="G" aria-pressed="${u==="G"}">Tutta la giornata</button></div>
+   ${ADMIN()&&conflictsOf(UI.mk,UI.sel,d).length?`<div class="alerts bad"><strong>${esc(resName(UI.sel))} è già in turno: ${conflictsOf(UI.mk,UI.sel,d).map(c=>slotLabel(c)).join(", ")}</strong><button class="btn primary" data-act="planday" data-d="${d}">Programma un cambio</button></div>`:""}
    <div class="row"><button class="btn" data-act="u" data-v="">Disponibile</button><button class="btn primary" data-act="close">Fatto</button></div>`);
   layer.dataset.d=d; }
 function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf(postId), arr=mo.sched[d][k], {per}=derive(UI.mk);
@@ -640,7 +679,7 @@ document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]"); if(!el) return;
   const a=el.dataset.act;
   if(a==="close"){ if(e.target===el||el.tagName==="BUTTON"){closeSheet();render();} return; }
-  if(!["claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrsched","unlink","swdel","mswgo"].includes(a)) UI.confirm=null;
+  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrsched","unlink","swdel","mswgo"].includes(a)) UI.confirm=null;
   if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString()}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
   if(a==="unlink"){ const pid=el.dataset.id; if(UI.confirm!=="unl-"+pid){UI.confirm="unl-"+pid;render();return;} UI.confirm=null; const u=CLAIMS[pid]; if(!u) return; db.doc("claims/"+u).delete().then(()=>{delete CLAIMS[pid];render();}).catch(()=>toast("Non riesco a scollegare")); return; }
   if(a==="swsend"){ const F=UI.sw||{}, me=myPid(); if(!F.a||!F.to||!me) return; const [ad,ak]=F.a.split("#");
@@ -670,6 +709,15 @@ document.addEventListener("click",e=>{
     const w=swapWarnings(UI.mk,x); if(!w.ok){toast("Cambio non possibile");return;}
     x.forced=[...w.from.map(t=>"per "+resName(x.from)+": "+t),...w.to.map(t=>"per "+resName(x.to)+": "+t)];
     swWrite(x).then(okk=>{ if(okk){ UI.msw={}; toast("Cambio applicato"); consolidate(); render(); } }); return; }
+  if(a==="planday"){ const d=el.dataset.d; if(!maybePlan(UI.mk,UI.sel,d)) toast("Nessun conflitto"); return; }
+  if(a==="planc"){ const [pid,d]=el.dataset.id.split("~"); if(!maybePlan(UI.mk,pid,d)) toast("Conflitto già risolto"); return; }
+  if(a==="planreq"||a==="planapp"){ const P=UI.plan; if(!P) return; const c=P.list[+el.dataset.c], o=P.opts[+el.dataset.c][+el.dataset.o]; if(!c||!o) return;
+    if(a==="planapp"&&UI.confirm!=="planapp-"+el.dataset.c+"-"+el.dataset.o){ UI.confirm="planapp-"+el.dataset.c+"-"+el.dataset.o; planSheet(P.mk,P.list); return; }
+    UI.confirm=null; const now=new Date().toISOString();
+    const x={id:uid()+uid(),mk:P.mk,from:c.pid,to:o.pid,a:{d:c.d,k:c.k},b:o.x.b?{...o.x.b}:null,extra:(o.x.extra||[]).map(e=>({d:e.d,k:e.k,giver:e.giver,taker:e.taker})),created:now,by:myPid()||"owner",reason:"indisponibilità"};
+    if(a==="planapp"){ x.status="accepted"; x.manual=true; x.decided=now; x.forced=[...o.w.from.map(t=>"per "+resName(c.pid)+": "+t),...o.w.to.map(t=>"per "+resName(o.pid)+": "+t)]; }
+    else { x.status="pending"; x.warn=[...o.w.from,...o.w.to]; }
+    swWrite(x).then(ok=>{ if(!ok) return; toast(a==="planapp"?"Cambio applicato":"Richiesta inviata a "+resName(o.pid)); closeSheet(); consolidate(); render(); }); return; }
   if(a==="swopen"){ answerSheet(el.dataset.id); return; }
   if(a==="swacc"||a==="swrej"||a==="swcancel"||a==="swinvalid"){ const x=SW[el.dataset.id]; if(!x) return;
     const nx={...x,decided:new Date().toISOString()};
@@ -689,7 +737,7 @@ document.addEventListener("click",e=>{
   if(a==="day"&&db&&!canEditUnav(UI.sel)){ toast(unavDenyMsg(UI.sel)); return; }
   if(a==="day"){ const mode=UI.umode||"T"; if(mode==="T"){daySheet(el.dataset.d);return;}
     const mo=M(UI.mk), d=el.dataset.d; mo.unav[UI.sel]={...(mo.unav[UI.sel]||{})};
-    if(unavOf(mo,UI.sel,d)===mode) delete mo.unav[UI.sel][d]; else mo.unav[UI.sel][d]=mode; saveUnav(UI.mk,UI.sel); render(); return; }
+    if(unavOf(mo,UI.sel,d)===mode) delete mo.unav[UI.sel][d]; else mo.unav[UI.sel][d]=mode; saveUnav(UI.mk,UI.sel); render(); maybePlan(UI.mk,UI.sel,d); return; }
   if(a==="umode"){UI.umode=el.dataset.v;render();return;}
   if(a==="u"){ const d=layer.dataset.d, mo=M(UI.mk), v=el.dataset.v; mo.unav[UI.sel]={...(mo.unav[UI.sel]||{})};
     let u=unavOf(mo,UI.sel,d);

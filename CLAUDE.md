@@ -38,6 +38,7 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 - Il generatore distribuisce in modo omogeneo sale e mattina/pomeriggio; i buchi vanno distribuiti uniformemente (li coprono altri anni).
 - Chi è al Bambin Gesù non entra mai nei turni generati, ma i gestori possono assegnarlo a mano.
 - Cambi: il collega deve accettare; se il cambio forza una regola appare un avviso esplicito (Accetto / Non accetto) con anche i giorni liberi guadagnati/persi; per le notti si propone di scambiare anche il turno di monto/smonto.
+- Se un gestore inserisce un'indisponibilità/ferie/congresso su un giorno in cui la persona ha già un turno, l'app apre "Programma un cambio": propone colleghi (cessione o scambio entro ±7 giorni) ordinati per regole forzate, rotazione e carico; si può inviare la richiesta (pending, in Cambi) o applicarla subito (cambio manuale). In Cambi c'è il riquadro "Conflitti da risolvere".
 - Colori: Mattina arancione, Pomeriggio blu, Notte viola, Guardia rosso, Ferie verde, Congresso giallo.
 
 ## Contesto
