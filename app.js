@@ -382,8 +382,9 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   if(!mo.sched&&!ADMIN()) return head+`<div class="panel empty"><h2>Turni non ancora pubblicati</h2><p>Appena verranno generati li vedrai qui.</p></div>`;
   if(!mo.sched) return head+`<div class="panel empty"><h2>Pronto per generare</h2><p>Controlla rotazioni e indisponibilità, poi scegli sopra se generare tutto il mese o una settimana. Potrai cambiare a mano ogni turno toccandolo.</p></div>`;
   let alerts="";
+  let holesBox="";
   if(holes.length&&ADMIN()){ const g={}; holes.forEach(h=>{const k=fmt(h.d);(g[k]=g[k]||[]).push(`${h.post} ${h.s}`);});
-    alerts+=`<div class="alerts bad"><strong>${holes.length} turni scoperti</strong><span style="font-size:.84rem">Non c'è nessuno disponibile entro i limiti. Puoi alzare il massimo settimanale, togliere postazioni oppure coprirli a mano.</span><ul>${Object.entries(g).slice(0,10).map(([k,v])=>`<li>${k}: ${v.join(", ")}</li>`).join("")}${Object.keys(g).length>10?`<li>… e altri ${Object.keys(g).length-10} giorni</li>`:""}</ul></div>`; }
+    holesBox=`<div class="alerts bad"><strong>${holes.length} turni scoperti</strong><span style="font-size:.84rem">Non c'è nessuno disponibile entro i limiti. Puoi alzare il massimo settimanale, togliere postazioni oppure coprirli a mano.</span><ul>${Object.entries(g).slice(0,10).map(([k,v])=>`<li>${k}: ${v.join(", ")}</li>`).join("")}${Object.keys(g).length>10?`<li>… e altri ${Object.keys(g).length-10} giorni</li>`:""}</ul></div>`; }
   if(issues.length) alerts+=`<div class="alerts"><strong>Da controllare</strong><ul>${issues.slice(0,15).map(i=>`<li>${esc(i)}</li>`).join("")}</ul></div>`;
   const pr=presence(UI.mk); alerts+=presenceBox(pr);
   if(ADMIN()&&!holes.length&&!issues.length&&!pr.length) alerts=`<div class="okline">Tutte le postazioni coperte, nessun conflitto.</div>`;
@@ -421,7 +422,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
     const shown=S.posts.filter(x=>SH.some(s=>cov[x.id+"|"+s]));
     const pct=c=>c?`${Math.round(c.f/c.n*100)}% <span class="muted">(${c.f}/${c.n})</span>`:"";
     body+=`<h3 style="margin-top:6px">Copertura per sala</h3><div class="scroll"><table class="grid"><thead><tr><th class="sticky">Sala</th>${SH.map(s=>`<th><span class="chip sh-${s}">${SHN[s]}</span></th>`).join("")}</tr></thead><tbody>${shown.map(x=>`<tr><td class="sticky name-strong">${esc(x.name)}</td>${SH.map(s=>`<td class="num">${pct(cov[x.id+"|"+s])}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`; }
-  return head+alerts+tabs+body;
+  return head+alerts+tabs+body+holesBox;
 }
 function code(mo,per,pid,d){ const p=per[pid]; if(p&&p.on[d]) return p.on[d]; if(p&&p.on[add(d,-1)]==="N") return "S"; const u=unavOf(mo,pid,d); return u==="G"?"X":u==="F"?"F":u==="C"?"C":""; }
 function label(c,postName){ if(c==="S")return "smonto"; if(c==="X")return "✕"; if(c==="F")return "ferie"; if(c==="C")return "congr."; if(c==="D")return "G"; if(c==="N")return "monto"; if(c)return esc(postName||"")+" "+c; return ""; }
