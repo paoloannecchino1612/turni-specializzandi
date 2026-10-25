@@ -21,7 +21,8 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 - `accessRequests/{uid}` `{email, at}`: richieste di accesso di chi non è autorizzato; il proprietario le approva (aggiunge l'email ad `access/allow`) o le rifiuta in Impostazioni.
 - `access/allow` `{emails}`: email autorizzate. `roles/managers` `{uids}`: gestori (sincronizzato dall'app). `roles/owner`: leggibile solo dal proprietario (serve all'app per riconoscerlo).
 
-- I nomi si mostrano con l'anno davanti, "(2) Cognome" (`rName`: `r.year` o, se vuoto, 2: il gruppo del proprietario è il 2° anno). Niente gestione multi-anno nell'app (scelta del proprietario).
+- I nomi si mostrano con l'anno davanti, "(2) Cognome" (`rName`: `r.year`, poi `S.groupYear`, poi 2: il gruppo del proprietario è il 2° anno).
+- **Più anni (opzionale, reversibile)**: interruttore del proprietario in Impostazioni (solo dal 2° anno), salvato come `multiYear` in `config/main`. Spento = app identica a prima. Il 2° anno usa sempre `config/main` + `planner/state`; gli altri `config/yN` + `planner/yN` (creati all'attivazione copiando sale/rotazioni/limiti, nomi da "Elenco Spec": (2)→3°, (3)→4°, 1° vuoto; `groupYear`). Selettore anno in alto (`CURY`, `switchYear`); ogni anno ha i suoi gestori (`roles/managers` = `{uids` (2°), `y1`, `y3`, `y4}`, regole Firestore per documento). Cascata 4→3→2→1: `EXT(mo)` unisce `mo.ext` (foglio) e i turni degli anni superiori (`autoExt`, abbinati per nome sala normalizzato). Cambi filtrati per anno (`SWALL` → `SW`). "Chi sei?" mostra i nomi di tutti gli anni. Punto di ripristino del codice: branch `backup-prima-degli-anni`.
 
 ## Permessi
 - Proprietario: tutto; unico che gestisce email autorizzate, gestori, scollegamento account.

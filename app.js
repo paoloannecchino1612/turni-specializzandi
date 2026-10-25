@@ -23,8 +23,40 @@ const DEFAULT={
 let S=null, db=null, docRef=null, downloads=null, OWNER=false;
 /* gestori: specializzandi scelti dal proprietario che possono usare tutte le funzioni di gestione */
 function ADMIN(){ return OWNER||(!!S&&(S.managers||[]).includes(myPid())); }
-const SW={}, CLAIMS={}; let ALLOW=[], lastRoles="", REQS=[];
-function syncRoles(){ if(!OWNER||!db||!S) return; const uids=[...new Set((S.managers||[]).map(p=>CLAIMS[p]).filter(Boolean))].sort(); const k=JSON.stringify(uids); if(k===lastRoles) return; lastRoles=k; db.doc("roles/managers").set({uids}).catch(()=>{lastRoles="";}); } let MYUID=null, USER=null;
+const SW={}, SWALL={}, CLAIMS={}; let ALLOW=[], lastRoles="", REQS=[];
+/* ---------- più anni (opzionale e reversibile) ----------
+   l'anno 2 usa i documenti di sempre (config/main, planner/state); gli altri config/yN e planner/yN.
+   Si attiva con S.multiYear nel config dell'anno 2: spento, l'app è identica a prima. */
+const YEARS=[1,2,3,4], RAW={}; let CURY=2, MULTI=false, RAWV=0, REBUILD=null, YAUTO=false;
+function yDocs(y){ return y===2?{cfg:"config/main",mon:"planner/state"}:{cfg:"config/y"+y,mon:"planner/y"+y}; }
+const PARSED={};
+function yState(y){ if(y===CURY&&S) return S; const r=RAW[y]; if(!r||r.cfg===undefined||r.mon===undefined) return null;
+  const key=(r.cfg||"")+"\u0001"+(r.mon||""); if(PARSED[y]&&PARSED[y].key===key) return PARSED[y].st;
+  let st=null; try{ const c=r.cfg?JSON.parse(r.cfg):null, m=r.mon?JSON.parse(r.mon):null; if(c) st={...c,months:(m&&m.months)||{}}; }catch(e){}
+  PARSED[y]={key,st}; return st; }
+function yearOfPid(pid){ for(const y of YEARS){ const st=yState(y); if(st&&(st.residents||[]).some(r=>r.id===pid)) return y; } return null; }
+function myAnyPid(){ if(!MYUID) return null; for(const pid in CLAIMS) if(CLAIMS[pid]===MYUID&&(MULTI?yearOfPid(pid):S&&S.residents.some(r=>r.id===pid))) return pid; return null; }
+/* cambi: si mostrano solo quelli dell'anno che si sta guardando */
+function filterSW(){ for(const k in SW) delete SW[k]; const ids=new Set(S?S.residents.map(r=>r.id):[]);
+  for(const k in SWALL){ const x=SWALL[k]; if(!MULTI||ids.has(x.from)||ids.has(x.to)) SW[k]=x; } }
+/* cascata: i turni degli anni superiori (4 → 3 → 2 → 1) contano come "coperti da altri anni" per l'anno che si guarda */
+const EXTC={key:null,map:{}};
+function autoExt(mk){ const out={};
+  for(const y of YEARS){ if(y<=CURY) continue; const st=yState(y); const m2=st&&st.months&&st.months[mk]; if(!m2||!m2.sched) continue;
+    const mine={}; S.posts.forEach(p=>mine[normRoom(p.name)]=p); const pmap={}; (st.posts||[]).forEach(p=>pmap[p.id]=mine[normRoom(p.name)]);
+    const nm={}; (st.residents||[]).forEach(r=>nm[r.id]=`(${r.year||st.groupYear||y}) ${r.name}`);
+    for(const d in m2.sched) for(const k in m2.sched[d]){ const [pid,sh]=k.split("|"), my=pmap[pid]; if(!my||!((my.on||{})[dayType(d)]||[]).includes(sh)) continue;
+      (m2.sched[d][k]||[]).forEach(x=>{ if(!x||!nm[x]) return; const kk=d+"|"+my.id+"|"+sh; (out[kk]=out[kk]||[]).push(nm[x]); }); } }
+  return out; }
+function EXT(mo){ const own=mo.ext||{}; if(!MULTI||!S) return own;
+  const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+S.posts.map(p=>p.id+":"+p.name).join(",");
+  if(EXTC.key!==key){ EXTC.key=key; EXTC.map=autoExt(mo.mk); }
+  const auto=EXTC.map; if(!Object.keys(auto).length) return own;
+  const out={...auto}; for(const k in own) out[k]=[...(auto[k]||[]),...own[k]]; return out; }
+function syncRoles(){ if(!OWNER||!db||!S) return; const uidsOf=st=>[...new Set(((st&&st.managers)||[]).map(p=>CLAIMS[p]).filter(Boolean))].sort();
+  const st2=yState(2); if(!st2) return; const doc={uids:uidsOf(st2)};
+  if(MULTI){ for(const y of [1,3,4]){ const st=yState(y); if(!st) return; doc["y"+y]=uidsOf(st); } }
+  const k=JSON.stringify(doc); if(k===lastRoles) return; lastRoles=k; db.doc("roles/managers").set(doc).catch(()=>{lastRoles="";}); } let MYUID=null, USER=null;
 const UNAV={}; /* mk → pid → {data: codice} — un documento per specializzando e mese */
 function UN(mk){return UNAV[mk]||(UNAV[mk]={});}
 const now=new Date();
@@ -59,6 +91,7 @@ function M(mk){ if(!S.months[mk]) S.months[mk]={rot:{},sched:null};
   const mo=S.months[mk]; mo.rot=mo.rot||{};
   if(Object.prototype.propertyIsEnumerable.call(mo,"unav")){ const old=mo.unav||{}; delete mo.unav; for(const pid in old) if(!UN(mk)[pid]) UN(mk)[pid]=old[pid]; }
   Object.defineProperty(mo,"unav",{value:UN(mk),enumerable:false,configurable:true,writable:true});
+  Object.defineProperty(mo,"mk",{value:mk,enumerable:false,configurable:true,writable:true});
   if(!mo._init){ const [y,m]=mk.split("-").map(Number), prev=S.months[mkOf(y,m-1)];
     if(prev&&prev.rot) for(const r of S.residents) if(!mo.rot[r.id]&&prev.rot[r.id]) mo.rot[r.id]=prev.rot[r.id];
     mo._init=true; }
@@ -122,11 +155,12 @@ function syncSubs(uids){ const want=new Set(["staff",...uids]);
   for(const u of want) if(!SUBS[u]) SUBS[u]=db.collection(`unav/${u}/m`).limit(1000).onSnapshot(qs=>{ SRC[u]={}; for(const doc of qs.docs){ const x=doc.data(); if(x&&x.mk&&x.pid) SRC[u][doc.id]=x; } recomputeUnav(); if(S&&!layer.innerHTML) render(); },()=>{});
   for(const u in SUBS) if(!want.has(u)){ try{SUBS[u]();}catch(e){} delete SUBS[u]; delete SRC[u]; } }
 /* associazione account → nome: definitiva per lo specializzando, la cambia solo il proprietario */
-function linkPanel(){ const anyFree=S.residents.some(r=>!CLAIMS[r.id]);
+function linkPanel(){ const groups=MULTI?YEARS.map(y=>[y,((yState(y)||{}).residents)||[]]).filter(g=>g[1].length):[[null,S.residents]];
+  const anyFree=groups.some(g=>g[1].some(r=>!CLAIMS[r.id]));
   return `<div class="panel" style="border:2px solid var(--accent)"><h2>Associa l'account: chi sei?</h2>
    <p style="margin:0;font-size:.9rem">Tocca il tuo cognome e conferma. <strong>La scelta è definitiva</strong>: potrà cambiarla solo chi gestisce il tool. Da quel momento potrai modificare solo le tue indisponibilità e rispondere ai cambi rivolti a te.</p>
-   <div class="pickers">${S.residents.map(r=>{const taken=!!CLAIMS[r.id]; const conf=UI.confirm==="claim-"+r.id;
-     return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""} ${conf?'style="background:var(--accent);color:var(--accent-ink);border-color:var(--accent)"':""}>${conf?"Confermo: sono "+esc(rName(r)):esc(rName(r))}${taken?' <span class="cnt">già associato</span>':""}</button>`;}).join("")}</div>
+   ${groups.map(([gy,list])=>`${gy?`<span class="groupname">${gy}° anno</span>`:""}<div class="pickers">${list.map(r=>{const taken=!!CLAIMS[r.id]; const conf=UI.confirm==="claim-"+r.id;
+     return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""} ${conf?'style="background:var(--accent);color:var(--accent-ink);border-color:var(--accent)"':""}>${conf?"Confermo: sono "+esc(rName(r)):esc(rName(r))}${taken?' <span class="cnt">già associato</span>':""}</button>`;}).join("")}</div>`).join("")}
    ${anyFree?"":`<p class="muted" style="margin:0">Tutti i nomi sono già associati: se il tuo è stato preso per errore, avvisa chi gestisce il tool.</p>`}</div>`; }
 function claimPanel(why){ return linkPanel(); }
 function claimPanelOld(why){ return `<div class="panel"><h2>Chi sei?</h2><p class="muted" style="margin:0;font-size:.88rem">${why}</p>
@@ -232,7 +266,7 @@ function generate(mk,wk){
   for(const grp of ["pri","jol"]) for(const sl of slots){ if(sl.ext||sched[sl.d][sl.key][0]) continue;
     const r=pick(sl,pools(mo,sl.post,sl.s)[grp],S.maxWeek,true); if(r){ put(sl,r); st[r.id].g=(st[r.id].g||0)+1; } }
   /* chi è in rotazione TC/RM ed è libero (entro i turni ideali) va comunque in TC/RM come persona in più, nella sala meno affollata */
-  const cnt=(d,k)=>(sched[d][k]||[]).filter(x=>x).length+((mo.ext||{})[d+"|"+k]||[]).length;
+  const cnt=(d,k)=>(sched[d][k]||[]).filter(x=>x).length+(EXT(mo)[d+"|"+k]||[]).length;
   byDay.forEach(list=>{ if(!list.length) return; const {d,i,w,t}=list[0]; if(t==="fes") return;
     const people=S.residents.filter(r=>inGem(mo,r.id)).map(r=>({r,o:rand()})).sort((a,b)=>a.o-b.o).map(x=>x.r);
     for(const r of people){ const rot=mo.rot[r.id], p=st[r.id];
@@ -337,13 +371,34 @@ function myPid(){ if(!MYUID||!S) return null; for(const pid in CLAIMS) if(CLAIMS
 
 /* ---------- render ---------- */
 const app=document.getElementById("app");
+function yearBar(){ if(!MULTI) return ""; return `<div class="pickers" style="margin-bottom:2px">${YEARS.map(y=>`<button data-act="year" data-v="${y}" aria-pressed="${y===CURY}">${y}° anno</button>`).join("")}</div>`; }
+function switchYear(y){ if(!db||y===CURY||!REBUILD) return true; if(saveT||saving){ toast("Attendi il salvataggio e riprova"); return false; }
+  CURY=y; docRef=db.doc(yDocs(y).mon); cfgRef=db.doc(yDocs(y).cfg); S=null; UI.who=null; UI.sel=null; UI.confirm=null; EXTC.key=null;
+  try{ localStorage.setItem("turni.year",String(y)); }catch(e){}
+  REBUILD(); if(!S) render(); return true; }
+/* all'avvio con più anni: si apre l'anno di chi entra (una volta) */
+function autoYear(){ if(!MULTI||YAUTO||!MYUID) return; const pid=Object.keys(CLAIMS).find(p=>CLAIMS[p]===MYUID);
+  let y=pid?yearOfPid(pid):null; if(!y){ try{ y=+localStorage.getItem("turni.year")||null; }catch(e){} }
+  if(pid&&!y) return; /* dati degli anni non ancora arrivati */
+  YAUTO=true; if(y&&YEARS.includes(y)&&y!==CURY) switchYear(y); }
+/* nomi per anno ricavati dal foglio "Elenco Spec" (anno accademico 2026/27: (2)→3°, (3)→4°) */
+const YSEED={1:[],3:["Alcini","Avenoso","Battistella","Breccia","Capone","De Blasi","De Filippis","Del Prete","Della Valle","Di Certo","Kosta","Marino","Mastrodonato","Monterisi","Pica","Pozzebon","Quarta G.","Quatrale","Seri","Sparagna","Spinilli","Tancredi","Tomassetti","Trogu","Villa"],
+  4:["Ariano","Azzaro","Cerquiglini","Chianura","Cigliese","Collura","Corinto","D'Aniello","Di Maio","Ferrari","Fiorillo","Gulotta","Imbemba","Isufi","Lia","Marzano","Morettoni","Napoletano","Parisi","Pentassuglia","Quarta A.","Sama","Villone","Zhang"]};
+async function enableYears(){ if(!OWNER||!db||CURY!==2) return; const base=JSON.parse(splitS().cfg);
+  for(const y of [1,3,4]){ const snap=await db.doc(yDocs(y).cfg).get(); if(snap.exists) continue;
+    const residents=YSEED[y].map(n=>({id:uid(),name:n,year:y})); sortRes(residents);
+    const cfg={...base,residents,managers:[],groupYear:y}; delete cfg.multiYear;
+    const at=new Date().toISOString();
+    await db.doc(yDocs(y).cfg).set({state:JSON.stringify(cfg),updated:at}); await db.doc(yDocs(y).mon).set({state:JSON.stringify({months:{}}),updated:at}); }
+  S.multiYear=true; persist(); }
 function render(){
   if(!ADMIN()&&(UI.tab==="mese"||UI.tab==="imp")) UI.tab="turni";
   document.querySelectorAll("#tabs button").forEach(b=>{b.setAttribute("aria-selected",b.dataset.tab===UI.tab); b.hidden=!ADMIN()&&(b.dataset.tab==="mese"||b.dataset.tab==="imp");});
   if(!S){app.innerHTML=`<div class="empty">Caricamento dati…</div>`;return;}
-  const needLink=db&&MYUID&&S.residents.length&&!myPid();
+  const yLoaded=!MULTI||YEARS.every(y=>yState(y)||(RAW[y]&&RAW[y].cfg===null));
+  const needLink=db&&MYUID&&yLoaded&&(MULTI||S.residents.length)&&!myAnyPid();
   if(needLink&&!OWNER){ app.innerHTML=`<section class="view">${linkPanel()}</section>`; return; }
-  app.innerHTML=`<section class="view">${needLink?linkPanel():""}${({mese:vMese,indisp:vIndisp,turni:vTurni,cambi:vCambi,imp:vImp}[UI.tab]||vMese)()}</section>`;
+  app.innerHTML=`<section class="view">${yearBar()}${needLink?linkPanel():""}${({mese:vMese,indisp:vIndisp,turni:vTurni,cambi:vCambi,imp:vImp}[UI.tab]||vMese)()}</section>`;
 }
 /* mese il cui periodo (primo lunedì → ultima domenica) contiene la data di oggi */
 function todayMk(){ const t=new Date(), today=ymd(new Date(Date.UTC(t.getFullYear(),t.getMonth(),t.getDate())));
@@ -439,7 +494,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
      ${p.days.map((d,i)=>{const t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
        if(!arr) return `<td class="cell none">·</td>`;
-       const ex=(mo.ext||{})[d+"|"+c.k], exh=ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"";
+       const ex=EXT(mo)[d+"|"+c.k], exh=ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"";
        if(!arr.length) return `<td class="cell" style="cursor:default" title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
        return `<td class="cell ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(ex||arr.some(v=>v)?"":`<span class="hole">scoperto</span>`)).join("")}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
   } else if(UI.view==="nome"){
@@ -485,7 +540,9 @@ function vImp(){
    <div class="row"><button class="btn primary" data-act="allowsave">Salva elenco</button><span class="muted" style="font-size:.85rem">${ALLOW.length} email autorizzate</span></div></div>`:"";
   const importPanel=OWNER?`<div class="panel"><h2>Importa dati</h2><p class="muted" style="margin:0;font-size:.85rem">Carica il file di esportazione dal vecchio tool (.json): sostituisce impostazioni e turni e aggiunge indisponibilità e cambi. I collegamenti nome-account vanno rifatti.</p>
    <input type="file" id="impfile" accept=".json,application/json"></div>`:"";
-  return reqPanel+mgPanel+allowPanel+linkedPanel()+importPanel+`
+  const yearsPanel=OWNER&&db&&CURY===2?`<div class="panel"><h2>Più anni</h2><p class="muted" style="margin:0;font-size:.85rem">${S.multiYear?"Attivo: in alto scegli l'anno. Ogni anno ha nomi, sale, rotazioni e gestori propri (si impostano qui, scegliendo l'anno). Si genera a cascata: prima il 4°, poi il 3° vede i turni del 4° come già coperti, e così via. Disattivando, l'app torna com'era: i dati degli altri anni restano salvati e ricompaiono se lo riattivi.":"Aggiunge 1°, 3° e 4° anno, ognuno con i propri dati. I vostri dati (2° anno) non vengono toccati e disattivando si torna esattamente a come è ora. Nomi presi da «Elenco Spec»: (2)→3° anno, (3)→4° anno; il 1° anno è vuoto."}</p>
+   <div class="row"><button class="btn ${UI.confirm==="years"?"confirm":S.multiYear?"danger":"primary"}" data-act="years">${UI.confirm==="years"?"Tocca di nuovo per confermare":S.multiYear?"Disattiva più anni":"Attiva più anni"}</button></div></div>`:"";
+  return reqPanel+yearsPanel+mgPanel+allowPanel+linkedPanel()+importPanel+`
   <div class="panel"><h2>Specializzandi</h2>
    <form class="row" id="addform"><input id="newname" placeholder="Cognome Nome" style="flex:1 1 12em" autocomplete="off"><select id="newyear" aria-label="Anno">${[1,2,3,4].map(y=>`<option ${y===2?"selected":""}>${y}° anno</option>`).join("")}</select><button class="btn primary" type="submit">Aggiungi</button></form>
    <div class="list">${S.residents.map(r=>`<div class="item"><input id="rname-${r.id}" data-rname="${r.id}" value="${esc(r.name)}" aria-label="Nome" style="font-weight:600;width:100%"><button class="btn danger ${UI.confirm==="del-"+r.id?"confirm":""}" data-act="del" data-id="${r.id}">${UI.confirm==="del-"+r.id?"Conferma":"Rimuovi"}</button></div>`).join("")||`<p class="muted" style="margin:0">Ancora nessuno.</p>`}</div></div>
@@ -732,8 +789,8 @@ function maybePlan(mk,pid,d){ if(!ADMIN()) return false; const c=conflictsOf(mk,
 /* mo.ext: "giorno|postId|turno" → ["(3) Rossi", …]; quei turni non vengono assegnati ai nostri e non sono buchi */
 /* TC e RM possono avere più persone: lì un altro anno non toglie il nostro posto (resta da coprire con priorità bassa, ma vuoto non è un buco) */
 function multiPost(p){ return !!p&&(p.cover==="TC"||p.cover==="RM"); }
-function extCovered(mo,d,key){ return !!(mo.ext||{})[d+"|"+key] && !multiPost(postOf(key.split("|")[0])) && !(mo.fixed||{})[d+"|"+key+"|0"]; }
-function extHas(mo,d,key){ return !!(mo.ext||{})[d+"|"+key]; }
+function extCovered(mo,d,key){ return !!EXT(mo)[d+"|"+key] && !multiPost(postOf(key.split("|")[0])) && !(mo.fixed||{})[d+"|"+key+"|0"]; }
+function extHas(mo,d,key){ return !!EXT(mo)[d+"|"+key]; }
 /* allinea l'orario già presente: i turni coperti da altri anni restano vuoti (non buchi), gli altri tornano da coprire */
 function syncExt(mo){ if(!mo.sched) return;
   for(const d in mo.sched) for(const k in mo.sched[d]){ const a=mo.sched[d][k];
@@ -795,7 +852,7 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
     if(!arr.includes(pid)&&(p.wk[w]||0)>=S.maxWeek) return `già ${p.wk[w]} turni in settimana`; return ""; };
   const btn=(r,i,cur,tag)=>{const y=why(r.id), isCur=cur===r.id;return `<button class="cand ${isCur?"cur":""}" data-act="assign" data-i="${i}" data-id="${r.id}"><span><span class="name-strong">${esc(rName(r))}</span>${tag?` <span class="muted" style="font-size:.78rem">· ${esc(rotName(mo.rot[r.id]))}</span>`:""}${y&&!isCur?`<br><span class="why">${y}</span>`:""}</span><span class="chip">${per[r.id].tot} turni · ${per[r.id].N} N</span></button>`;};
   sheet(`<div class="row" style="justify-content:space-between"><div><h2>${esc(post.name)} · ${SHN[s]}</h2><span class="muted">${fmt(d,true)} · ${esc(S.hours[s])}</span></div><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
-   ${(mo.ext||{})[d+"|"+k]?`<p class="muted" style="margin:0;font-size:.84rem">Altri anni: ${mo.ext[d+"|"+k].map(esc).join(", ")}</p>`:""}
+   ${EXT(mo)[d+"|"+k]?`<p class="muted" style="margin:0;font-size:.84rem">Altri anni: ${EXT(mo)[d+"|"+k].map(esc).join(", ")}</p>`:""}
    ${[...arr,...(multiPost(post)&&arr.some(x=>x)?[undefined]:[])].map((cur,i)=>`<div class="stack" style="gap:6px"><span class="label">${cur===undefined?"Aggiungi un'altra persona":cur?`Ora: ${esc(resName(cur))}`:"Scoperto"}</span>
      ${cov!=="ALL"?`<span class="groupname">Rotazione ${esc(rotName(cov))}</span>`:`<span class="groupname">Tutti gli specializzandi</span>`}
      ${pri.map(r=>btn(r,i,cur,cov==="ALL")).join("")||`<p class="muted" style="margin:0">Nessuno in questa rotazione.</p>`}
@@ -810,7 +867,7 @@ async function exportXlsx(){
   if(typeof XLSX==="undefined"){toast("Libreria Excel non caricata, riprova tra poco");return;}
   const SC=effSched(UI.mk)||{}, cols=columns(SC,p);
   const t1=[["Data","Giorno",...cols.map(c=>`${c.post.name} ${c.s==="D"||c.s==="N"?"":SHN[c.s]+" "}(${S.hours[c.s]})`.replace("  "," "))]];
-  p.days.forEach(d=>t1.push([d.split("-").reverse().join("/"),DOW[isoDow(d)]+(dayType(d)==="fes"&&isoDow(d)!==6?" (festivo)":""),...cols.map(c=>{const a=(SC[d]||{})[c.k], ex=(mo.ext||{})[d+"|"+c.k]||[];return a?[...a.map(x=>x?resName(x):ex.length?"":"SCOPERTO").filter(x=>x),...ex].join(", "):"";})]));
+  p.days.forEach(d=>t1.push([d.split("-").reverse().join("/"),DOW[isoDow(d)]+(dayType(d)==="fes"&&isoDow(d)!==6?" (festivo)":""),...cols.map(c=>{const a=(SC[d]||{})[c.k], ex=EXT(mo)[d+"|"+c.k]||[];return a?[...a.map(x=>x?resName(x):ex.length?"":"SCOPERTO").filter(x=>x),...ex].join(", "):"";})]));
   const people=S.residents.filter(r=>inGem(mo,r.id)||(SC&&shiftsOf(SC,r.id).length));
   const lab=(c,w)=>c==="S"?"Smonto":c==="X"?"indisp.":c==="F"?"ferie":c==="C"?"congresso":c==="D"?"Guardia domenica":c==="N"?"Monto (notte)":c?`${w} ${c}`:"";
   const t2=[["Specializzando","Rotazione",...p.days.map(d=>`${DOW[isoDow(d)]} ${+d.slice(8)}/${+d.slice(5,7)}`)]];
@@ -838,8 +895,8 @@ document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]"); if(!el) return;
   const a=el.dataset.act;
   if(a==="close"){ if(e.target===el||el.tagName==="BUTTON"){closeSheet();render();} return; }
-  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrsched","clrext","refresh","unlink","swdel","mswgo"].includes(a)) UI.confirm=null;
-  if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString()}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
+  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrsched","clrext","refresh","years","unlink","swdel","mswgo"].includes(a)) UI.confirm=null;
+  if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString()}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} const y=MULTI?yearOfPid(pid):null; if(y&&y!==CURY) switchYear(y); UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
   if(a==="unlink"){ const pid=el.dataset.id; if(UI.confirm!=="unl-"+pid){UI.confirm="unl-"+pid;render();return;} UI.confirm=null; const u=CLAIMS[pid]; if(!u) return; db.doc("claims/"+u).delete().then(()=>{delete CLAIMS[pid];render();}).catch(()=>toast("Non riesco a scollegare")); return; }
   if(a==="swsend"){ const F=UI.sw||{}, me=myPid(); if(!F.a||!F.to||!me) return; const [ad,ak]=F.a.split("#");
     const x={id:uid()+uid(),mk:UI.mk,from:me,to:F.to,a:{d:ad,k:ak},b:F.b?{d:F.b.split("#")[0],k:F.b.split("#")[1]}:null,extra:(UI.swExtra||[]).map(e=>({d:e.d,k:e.k,giver:e.giver,taker:e.taker})),status:"pending",created:new Date().toISOString()};
@@ -891,6 +948,10 @@ document.addEventListener("click",e=>{
   if(a==="clrF"||a==="clrC"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
     clearUnav([UI.sel],a==="clrF"?"F":"C"); toast((a==="clrF"?"Ferie":"Ferie congresso")+" di "+resName(UI.sel)+" eliminate"); render(); return; }
   if(a==="clrext"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null; const mo=M(UI.mk); mo.ext={}; syncExt(mo); persist(); render(); toast("Turni degli altri anni rimossi: quei turni tornano da coprire"+(mo.generated?" (rigenera per assegnarli)":"")); return; }
+  if(a==="year"){ switchYear(+el.dataset.v); render(); return; }
+  if(a==="years"){ if(UI.confirm!=="years"){UI.confirm="years";render();return;} UI.confirm=null;
+    if(S.multiYear){ S.multiYear=false; persist(); toast("Più anni disattivato: dati degli altri anni conservati"); render(); return; }
+    el.disabled=true; el.textContent="Creazione degli anni…"; enableYears().then(()=>{ toast("Più anni attivo: scegli l'anno in alto"); render(); }).catch(e=>{ toast("Errore: "+(e.message||e)); render(); }); return; }
   if(a==="refresh"){ if(UI.confirm!=="refresh"){UI.confirm="refresh";render();return;} UI.confirm=null;
     const r=refreshSched(UI.mk); persist(); render(); toast(`Turni aggiornati: ${r.removed} tolti per indisponibilità, ${r.added} nuovi assegnati`); return; }
   if(a==="extlink"){ sheet(`<div class="row" style="justify-content:space-between"><h2>Turni degli altri anni</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
@@ -1001,24 +1062,33 @@ render();
   OWNER = u1 ? await u1.isOwner().catch(()=>false) : !db;
   USER=u1; MYUID = u1 ? await u1.id().catch(()=>null) : null;
   if(db){ docRef=db.doc("planner/state"); cfgRef=db.doc("config/main");
-    let rawCfg, rawMon; /* undefined = non ancora arrivato */
-    const rebuild=()=>{ if(rawCfg===undefined||rawMon===undefined) return; if(S&&(saveT||saving)) return;
+    /* RAW[anno] = {cfg, mon} come arrivano dal database (undefined = non ancora arrivato) */
+    const rebuild=()=>{ const R=RAW[CURY]||{}, rawCfg=R.cfg, rawMon=R.mon; if(rawCfg===undefined||rawMon===undefined) return; if(S&&(saveT||saving)) return;
       const mon=rawMon?JSON.parse(rawMon):null, cfg=rawCfg?JSON.parse(rawCfg):(mon?(({months,...c})=>c)(mon):null);
       S=load(cfg?JSON.stringify({...cfg,months:(mon&&mon.months)||{}}):null);
       const sp=splitS(); lastCfg=rawCfg?sp.cfg:""; lastMon=rawMon&&!(!rawCfg&&mon&&mon.residents)?sp.mon:"";
       setSync(cfg?"Salvato":OWNER?"Nessun dato ancora":"In attesa dei dati");
       if(OWNER&&(migrated||!rawCfg&&cfg)){migrated=false;persist();}
-      consolidate(); syncRoles(); if(!layer.innerHTML) render(); };
-    cfgRef.onSnapshot(snap=>{ const raw=snap.exists?snap.data().state:null; if(raw===rawCfg) return; rawCfg=raw; rebuild(); },()=>setSync("Connessione persa: ricarica la pagina"));
-    docRef.onSnapshot(snap=>{ const raw=snap.exists?snap.data().state:null; if(raw===rawMon) return; rawMon=raw; rebuild(); },()=>setSync("Connessione persa: ricarica la pagina"));
-    db.collection("swaps").limit(1000).onSnapshot(qs=>{ for(const k in SW) delete SW[k];
-      for(const doc of qs.docs){ const x=doc.data(); if(x&&x.id&&x.a) SW[x.id]=x; }
-      consolidate(); if(S&&!layer.innerHTML) render(); }, ()=>{});
+      checkMulti(); filterSW(); consolidate(); syncRoles(); autoYear(); if(!layer.innerHTML) render(); };
+    REBUILD=rebuild;
+    const subY={};
+    const watchYear=y=>{ if(subY[y]) return; subY[y]=true; RAW[y]=RAW[y]||{}; const d=yDocs(y);
+      const on=k=>snap=>{ const raw=snap.exists?snap.data().state:null; if(raw===RAW[y][k]) return; RAW[y][k]=raw; RAWV++;
+        if(y===CURY) rebuild(); else { if(y===2) checkMulti(); syncRoles(); autoYear(); if(S&&!layer.innerHTML) render(); } };
+      db.doc(d.cfg).onSnapshot(on("cfg"),()=>setSync("Connessione persa: ricarica la pagina"));
+      db.doc(d.mon).onSnapshot(on("mon"),()=>setSync("Connessione persa: ricarica la pagina")); };
+    /* più anni acceso/spento: lo decide il config dell'anno 2 */
+    const checkMulti=()=>{ const st2=yState(2); const on=!!(st2&&st2.multiYear); if(on===MULTI) return; MULTI=on; EXTC.key=null;
+      if(MULTI) YEARS.forEach(watchYear); else if(CURY!==2) switchYear(2); filterSW(); };
+    watchYear(2);
+    db.collection("swaps").limit(1000).onSnapshot(qs=>{ for(const k in SWALL) delete SWALL[k];
+      for(const doc of qs.docs){ const x=doc.data(); if(x&&x.id&&x.a) SWALL[x.id]=x; }
+      filterSW(); consolidate(); if(S&&!layer.innerHTML) render(); }, ()=>{});
     /* claims/<account> = {pid}: ognuno può scrivere solo il proprio; se due account scelgono lo stesso nome vale il primo */
     db.collection("claims").limit(500).onSnapshot(qs=>{ for(const k in CLAIMS) delete CLAIMS[k];
       const list=qs.docs.map(doc=>({u:doc.id,...(doc.data()||{})})).filter(x=>x.pid).sort((a,b)=>(a.at||"").localeCompare(b.at||""));
       for(const x of list) if(!CLAIMS[x.pid]) CLAIMS[x.pid]=x.u;
-      syncSubs(list.map(x=>x.u)); recomputeUnav(); syncRoles(); if(S&&!layer.innerHTML) render(); }, ()=>{});
+      syncSubs(list.map(x=>x.u)); recomputeUnav(); syncRoles(); autoYear(); if(S&&!layer.innerHTML) render(); }, ()=>{});
     syncSubs([]);
     if(OWNER) db.collection("accessRequests").limit(200).onSnapshot(qs=>{ REQS=qs.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.email).sort((a,b)=>(a.at||"").localeCompare(b.at||"")); 
       const t=document.querySelector('#tabs button[data-tab="imp"]'); if(t) t.textContent=REQS.length?`Impostazioni (${REQS.length})`:"Impostazioni";

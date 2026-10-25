@@ -11,11 +11,13 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/access/allow)
         && request.auth.token.email.lower() in get(/databases/$(database)/documents/access/allow).data.emails);
     }
-    function isManager() {
+    // gestori: "uids" = 2° anno (documenti di sempre), "y1"/"y3"/"y4" = gestori degli altri anni
+    function mgrList(k) {
       return signedIn()
         && exists(/databases/$(database)/documents/roles/managers)
-        && request.auth.uid in get(/databases/$(database)/documents/roles/managers).data.uids;
+        && request.auth.uid in get(/databases/$(database)/documents/roles/managers).data.get(k, []);
     }
+    function isManager() { return mgrList("uids") || mgrList("y1") || mgrList("y3") || mgrList("y4"); }
     function isAdmin() { return isOwner() || (allowed() && isManager()); }
 
     // serve all'app per sapere se chi entra è il proprietario
@@ -33,8 +35,9 @@ service cloud.firestore {
     }
 
     // impostazioni del tool e turni dei mesi: tutti leggono, proprietario e gestori scrivono
-    match /config/{doc} { allow read: if allowed(); allow write: if isAdmin(); }
-    match /planner/{doc} { allow read: if allowed(); allow write: if isAdmin(); }
+    // ogni anno: config/main + planner/state (2° anno), config/yN + planner/yN (altri anni); scrive il proprietario o i gestori di quell'anno
+    match /config/{doc} { allow read: if allowed(); allow write: if isOwner() || (allowed() && ((doc == "main" && mgrList("uids")) || (doc != "main" && mgrList(doc)))); }
+    match /planner/{doc} { allow read: if allowed(); allow write: if isOwner() || (allowed() && ((doc == "state" && mgrList("uids")) || (doc != "state" && mgrList(doc)))); }
 
     // indisponibilità: ognuno scrive solo le proprie; il proprietario anche quelle degli altri e lo spazio "staff"
     // si accettano modifiche fino a 2 giorni prima del primo lunedì del mese (doc = "AAAA-MM_pid"); dopo solo proprietario e gestori, che possono modificare anche quelle degli altri
