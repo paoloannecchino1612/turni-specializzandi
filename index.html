@@ -51,7 +51,7 @@ section.view{padding-top:16px;display:flex;flex-direction:column;gap:16px}
 .monthbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .monthbar .name{font-family:var(--f-display);font-weight:700;font-size:1.15rem;min-width:9.5em;text-align:center;text-transform:capitalize}
 .period{font-family:var(--f-mono);font-size:.82rem;color:var(--muted)}
-button.btn{font:600 .88rem var(--f-body);border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:8px 12px;cursor:pointer}
+button.btn,label.btn{display:inline-block;font:600 .88rem var(--f-body);border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:8px 12px;cursor:pointer}
 button.btn:hover{border-color:var(--accent)}
 button.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 button.btn.danger{color:var(--bad)}
@@ -192,7 +192,7 @@ body{margin:0;font-size:15px} img{max-width:100%} [hidden]{display:none!importan
 <div id="layer"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script type="module" src="fb.js?v=20"></script>
-<script type="module" src="app.js?v=20"></script>
+<script type="module" src="fb.js?v=21"></script>
+<script type="module" src="app.js?v=21"></script>
 <script>if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});</script>
 </body></html>
