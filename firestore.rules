@@ -1,0 +1,50 @@
+rules_version = '2';
+// Regole di sicurezza del database. Prima di pubblicarle nella console di Firebase
+// sostituisci EMAIL_PROPRIETARIO con la tua email (tutta in minuscolo).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null && request.auth.token.email_verified == true; }
+    function isOwner() { return signedIn() && request.auth.token.email.lower() == "EMAIL_PROPRIETARIO"; }
+    function allowed() {
+      return isOwner() || (signedIn()
+        && exists(/databases/$(database)/documents/access/allow)
+        && request.auth.token.email.lower() in get(/databases/$(database)/documents/access/allow).data.emails);
+    }
+    function isManager() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/roles/managers)
+        && request.auth.uid in get(/databases/$(database)/documents/roles/managers).data.uids;
+    }
+    function isAdmin() { return isOwner() || (allowed() && isManager()); }
+
+    // serve all'app per sapere se chi entra è il proprietario
+    match /roles/owner { allow read, write: if isOwner(); }
+    // elenco gestori (uid), lo scrive solo il proprietario
+    match /roles/managers { allow read: if allowed(); allow write: if isOwner(); }
+    // email autorizzate: ognuno può leggere l'elenco per sapere se è ammesso, solo il proprietario lo modifica
+    match /access/allow { allow read: if signedIn(); allow write: if isOwner(); }
+
+    // impostazioni del tool e turni dei mesi: tutti leggono, proprietario e gestori scrivono
+    match /config/{doc} { allow read: if allowed(); allow write: if isAdmin(); }
+    match /planner/{doc} { allow read: if allowed(); allow write: if isAdmin(); }
+
+    // indisponibilità: ognuno scrive solo le proprie; il proprietario anche quelle degli altri e lo spazio "staff"
+    match /unav/{uid}/m/{doc} {
+      allow read: if allowed();
+      allow write: if allowed() && (request.auth.uid == uid || isOwner());
+    }
+
+    // collegamento nome-account: ognuno il proprio; il proprietario può scollegare chiunque
+    match /claims/{uid} {
+      allow read: if allowed();
+      allow write: if allowed() && (request.auth.uid == uid || isOwner());
+    }
+
+    // cambi turno: tutti gli autorizzati creano e rispondono; solo proprietario e gestori eliminano
+    match /swaps/{id} {
+      allow read, create, update: if allowed();
+      allow delete: if isAdmin();
+    }
+  }
+}
