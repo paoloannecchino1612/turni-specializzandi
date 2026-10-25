@@ -208,6 +208,9 @@ function generate(mk,wk){
     if(sl.t!=="fer")p.we++; p.wk[sl.w]=(p.wk[sl.w]||0)+1; if(sl.s==="N")p.wn[sl.w]=(p.wn[sl.w]||0)+1; };
   /* prima si resta entro i turni ideali (es. 5, con un riposo in settimana), poi si arriva al massimo solo dove serve */
   /* ogni giorno si riempiono per prime le sale/turni finora meno coperti: i buchi si distribuiscono in modo omogeneo */
+  /* turni inseriti a mano (fissi): si mettono per primi e il generatore non li tocca */
+  const fx=mo.fixed||{};
+  slots.forEach(sl=>{ const pid=fx[sl.d+"|"+sl.key+"|0"]; if(pid&&st[pid]) put(sl,{id:pid}); });
   const soft=S.targetWeek||S.maxWeek, fill={}, byDay=days.map(()=>[]);
   slots.forEach(sl=>byDay[sl.i].push(sl));
   for(const [grp,cap] of [["pri",soft],["jol",soft],["pri",S.maxWeek],["jol",S.maxWeek]])
@@ -261,7 +264,7 @@ function nightLinks(mk,x){ const base=effSched(mk); if(!base) return []; const s
   for(const m of moves) for(const day of [m.d,add(m.d,1)])
     for(const z of shiftsOf(sc,m.taker)) if(z.d===day&&!(z.d===m.d&&z.k.endsWith("|N"))) out.push({d:z.d,k:z.k,giver:m.taker,taker:m.other,night:m.d,same:day===m.d});
   return out; }
-function effSched(mk){ const mo=M(mk); if(!mo.sched) return null; const sc=clone(mo.sched), mark=new Set();
+function effSched(mk){ const mo=M(mk); if(!mo.sched||(!mo.generated&&!ADMIN())) return null; const sc=clone(mo.sched), mark=new Set();
   for(const x of swapsOf(mk)){ if(x.status!=="accepted") continue;
     if(!x.applied) applySwap(sc,x);
     for(const e of (x.extra||[])) if(((sc[e.d]||{})[e.k]||[]).includes(e.taker)) mark.add(e.d+"|"+e.k);
@@ -376,23 +379,24 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   const conf=UI.confirm==="gen";
   const noRot=S.residents.filter(r=>!mo.rot[r.id]);
   const head=monthBar()+`<div class="panel"><div class="row" style="justify-content:space-between">
-    <div class="stack" style="gap:2px"><h2>Turni del mese</h2><span class="muted" style="font-size:.82rem">${mo.sched?`Generati il ${new Date(mo.generated).toLocaleString("it-IT",{dateStyle:"short",timeStyle:"short"})}`:"Non ancora generati"}</span></div>
-    <div class="row">${!ADMIN()?(mo.sched?`<button class="btn primary" data-act="xlsx">Scarica Excel</button>`:""):mo.sched?`<button class="btn primary" data-act="xlsx">Scarica Excel</button>${clrBtn("clrsched","Elimina tutti i turni")}`:""}</div></div>
+    <div class="stack" style="gap:2px"><h2>Turni del mese</h2><span class="muted" style="font-size:.82rem">${mo.generated?`Generati il ${new Date(mo.generated).toLocaleString("it-IT",{dateStyle:"short",timeStyle:"short"})}`:"Non ancora generati"}</span></div>
+    <div class="row">${!ADMIN()?(mo.generated?`<button class="btn primary" data-act="xlsx">Scarica Excel</button>`:""):mo.sched?`<button class="btn primary" data-act="xlsx">Scarica Excel</button>${clrBtn("clrsched","Elimina tutti i turni")}`:""}</div></div>
     ${ADMIN()?(()=>{ const nw=p.days.length/7, cur=UI.genWk??"";
       const filled=w=>p.days.slice(w*7,w*7+7).some(d=>Object.values((mo.sched||{})[d]||{}).some(a=>a.some(x=>x)));
       return `<div class="row" style="gap:8px"><label class="row" style="gap:6px"><span class="label">Genera</span><select id="genWk" data-genwk="1"><option value="" ${cur===""?"selected":""}>Tutto il mese</option>${Array.from({length:nw},(_,w)=>`<option value="${w}" ${String(cur)===String(w)?"selected":""}>Settimana ${w+1}: ${fmt(p.days[w*7])} – ${fmt(p.days[w*7+6])}${filled(w)?" ✓":""}</option>`).join("")}</select></label>
        <button class="btn ${UI.confirm==="genwk"?"confirm":""}" data-act="genwk">${UI.confirm==="genwk"?"Tocca di nuovo: sovrascrive questa parte":cur===""?"Genera il mese":"Genera la settimana"}</button></div>
        <p class="muted" style="margin:0;font-size:.82rem">Generando una settimana, le altre restano come sono e vengono considerate per equità, riposi, monto e smonto.</p>`; })():""}
     ${noRot.length?`<p class="muted" style="margin:0;font-size:.85rem">Senza rotazione questo mese: ${noRot.map(r=>esc(r.name)).join(", ")}.</p>`:""}</div>`;
-  if(!mo.sched&&!ADMIN()) return head+`<div class="panel empty"><h2>Turni non ancora pubblicati</h2><p>Appena verranno generati li vedrai qui.</p></div>`;
-  if(!mo.sched) return head+`<div class="panel empty"><h2>Pronto per generare</h2><p>Controlla rotazioni e indisponibilità, poi scegli sopra se generare tutto il mese o una settimana. Potrai cambiare a mano ogni turno toccandolo.</p></div>`;
+  if(!mo.generated&&!ADMIN()) return head+`<div class="panel empty"><h2>Turni non ancora pubblicati</h2><p>Appena verranno generati li vedrai qui.</p></div>`;
+  if(!mo.sched) return head+`<div class="panel empty"><h2>Pronto per generare</h2><p>Controlla rotazioni e indisponibilità, poi scegli sopra se generare tutto il mese o una settimana. Potrai cambiare a mano ogni turno toccandolo.</p><p>Se alcuni turni sono già decisi, inseriscili prima a mano: la generazione non li tocca.</p><button class="btn" data-act="manualstart">Inserisci turni a mano</button></div>`;
+  const draft=!mo.generated?`<div class="alerts"><strong>Bozza: turni non ancora generati</strong><span style="font-size:.84rem">Tocca una casella per inserire un turno a mano. I colleghi non vedono ancora niente; i turni inseriti a mano (segnati «fisso») restano invariati quando generi.</span></div>`:"";
   let alerts="";
   let holesBox="";
-  if(holes.length&&ADMIN()){ const g={}; holes.forEach(h=>{const k=fmt(h.d);(g[k]=g[k]||[]).push(`${h.post} ${h.s}`);});
+  if(holes.length&&ADMIN()&&mo.generated){ const g={}; holes.forEach(h=>{const k=fmt(h.d);(g[k]=g[k]||[]).push(`${h.post} ${h.s}`);});
     holesBox=`<div class="alerts bad"><strong>${holes.length} turni scoperti</strong><span style="font-size:.84rem">Non c'è nessuno disponibile entro i limiti. Puoi alzare il massimo settimanale, togliere postazioni oppure coprirli a mano.</span><ul>${Object.entries(g).slice(0,10).map(([k,v])=>`<li>${k}: ${v.join(", ")}</li>`).join("")}${Object.keys(g).length>10?`<li>… e altri ${Object.keys(g).length-10} giorni</li>`:""}</ul></div>`; }
   if(issues.length) alerts+=`<div class="alerts"><strong>Da controllare</strong><ul>${issues.slice(0,15).map(i=>`<li>${esc(i)}</li>`).join("")}</ul></div>`;
   const pr=presence(UI.mk); alerts+=presenceBox(pr);
-  if(ADMIN()&&!holes.length&&!issues.length&&!pr.length) alerts=`<div class="okline">Tutte le postazioni coperte, nessun conflitto.</div>`;
+  if(ADMIN()&&mo.generated&&!holes.length&&!issues.length&&!pr.length) alerts=`<div class="okline">Tutte le postazioni coperte, nessun conflitto.</div>`;
   const tabs=`<div class="pickers"><button data-act="view" data-v="nome" aria-pressed="${UI.view==="nome"}">Per nome</button><button data-act="view" data-v="giorni" aria-pressed="${UI.view==="giorni"}">Per giorno</button><button data-act="view" data-v="persone" aria-pressed="${UI.view==="persone"}">Per specializzando</button><button data-act="view" data-v="conti" aria-pressed="${UI.view==="conti"}">Conteggi</button></div>`;
   let body="";
   const people=S.residents.filter(r=>inGem(mo,r.id)||(SC&&shiftsOf(SC,r.id).length));
@@ -402,7 +406,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
      ${p.days.map((d,i)=>{const t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
        if(!arr) return `<td class="cell none">·</td>`;
-       return `<td class="cell ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map(pid=>pid?`<span class="who">${esc(resName(pid))}</span>`:`<span class="hole">scoperto</span>`).join("")}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
+       return `<td class="cell ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:`<span class="hole">scoperto</span>`).join("")}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
   } else if(UI.view==="nome"){
     if(!UI.who) UI.who=myPid()||"";
     const pid=UI.who, rows=[];
@@ -427,7 +431,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
     const shown=S.posts.filter(x=>SH.some(s=>cov[x.id+"|"+s]));
     const pct=c=>c?`${Math.round(c.f/c.n*100)}% <span class="muted">(${c.f}/${c.n})</span>`:"";
     body+=`<h3 style="margin-top:6px">Copertura per sala</h3><div class="scroll"><table class="grid"><thead><tr><th class="sticky">Sala</th>${SH.map(s=>`<th><span class="chip sh-${s}">${SHN[s]}</span></th>`).join("")}</tr></thead><tbody>${shown.map(x=>`<tr><td class="sticky name-strong">${esc(x.name)}</td>${SH.map(s=>`<td class="num">${pct(cov[x.id+"|"+s])}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`; }
-  return head+alerts+tabs+body+holesBox;
+  return head+draft+alerts+tabs+body+holesBox;
 }
 function code(mo,per,pid,d){ const p=per[pid]; if(p&&p.on[d]) return p.on[d]; if(p&&p.on[add(d,-1)]==="N") return "S"; const u=unavOf(mo,pid,d); return u==="G"?"X":u==="F"?"F":u==="C"?"C":""; }
 function label(c,postName){ if(c==="S")return "smonto"; if(c==="X")return "✕"; if(c==="F")return "ferie"; if(c==="C")return "congr."; if(c==="D")return "G"; if(c==="N")return "monto"; if(c)return esc(postName||"")+" "+c; return ""; }
@@ -805,7 +809,7 @@ document.addEventListener("click",e=>{
   if(a==="clrF"||a==="clrC"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
     clearUnav([UI.sel],a==="clrF"?"F":"C"); toast((a==="clrF"?"Ferie":"Ferie congresso")+" di "+resName(UI.sel)+" eliminate"); render(); return; }
   if(a==="clrone"||a==="clrall"||a==="clrsched"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
-    if(a==="clrsched"){ const mo=M(UI.mk); mo.sched=null; mo.generated=null; toast("Turni eliminati"); }
+    if(a==="clrsched"){ const mo=M(UI.mk); mo.sched=null; mo.generated=null; mo.fixed={}; toast("Turni eliminati"); }
     else { const mode=UI.umode||"T"; clearUnav(a==="clrone"?[UI.sel]:S.residents.map(r=>r.id),mode); toast(a==="clrone"?"Eliminate per "+resName(UI.sel):"Eliminate per tutti"); }
     persist(); render(); return; }
   if(a==="mtoday"){UI.mk=todayMk();render();return;}
@@ -833,7 +837,10 @@ document.addEventListener("click",e=>{
   if(a==="view"){UI.view=el.dataset.v;render();return;}
   if(a==="cell"){cellSheet(el.dataset.d,el.dataset.k);return;}
   if(a==="assign"){ const mo=M(UI.mk), d=layer.dataset.d, k=layer.dataset.k, i=+el.dataset.i, id=el.dataset.id||null;
-    mo.sched[d][k][i]=id; persist(); closeSheet(); render(); return; }
+    mo.sched[d][k][i]=id; mo.fixed=mo.fixed||{}; if(id) mo.fixed[d+"|"+k+"|"+i]=id; else delete mo.fixed[d+"|"+k+"|"+i];
+    persist(); closeSheet(); render(); return; }
+  if(a==="manualstart"){ const mo=M(UI.mk); if(!mo.sched){ const sc={}; period(UI.mk).days.forEach(d=>{ sc[d]={}; slotsOfDay(d).forEach(x=>{ sc[d][x.key]=[null]; }); }); mo.sched=sc; mo.generated=null; }
+    UI.view="giorni"; persist(); render(); return; }
   if(a==="del"){ const id=el.dataset.id; if(UI.confirm!=="del-"+id){UI.confirm="del-"+id;render();return;}
     S.residents=S.residents.filter(r=>r.id!==id); UI.confirm=null; persist(); render(); return; }
   if(a==="addpost"){ S.posts.push({id:uid(),name:"Nuova postazione",cover:"ALL",on:{fer:["M"],sab:[],fes:[]}}); persist(); render(); return; }

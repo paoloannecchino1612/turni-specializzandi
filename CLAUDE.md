@@ -14,7 +14,7 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 
 ## Dati in Firestore
 - `config/main` `{state: JSON}`: specializzandi, rotazioni, esterni (Bambin Gesù, Brescia), postazioni, orari, limiti, gestori (pid).
-- `planner/state` `{state: JSON{months}}`: per mese `rot`, `sched` (giorno → `postId|turno` → [pid]), `generated`, `weeksGen`.
+- `planner/state` `{state: JSON{months}}`: per mese `rot`, `sched` (giorno → `postId|turno` → [pid]), `fixed` (turni fissi), `generated`, `weeksGen`.
 - `unav/{uid}/m/{mk_pid}`: indisponibilità di un account; `unav/staff/m/*` quelle inserite dal proprietario per chi non è associato. Codici: lettere M/P/N/D per turno, `G` giornata intera, `F` ferie, `C` ferie congresso.
 - `claims/{uid}` `{pid}`: associazione account → nome. Definitiva: la crea l'utente una volta, la modifica/cancella solo il proprietario.
 - `swaps/{id}`: cambi turno (`pending|accepted|rejected|cancelled|invalid`, `manual`, `extra` per monto/smonto, `applied`, `reported`).
@@ -37,6 +37,7 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 - Indisponibilità, ferie e congressi di un mese si inseriscono/modificano fino a 2 giorni prima del primo lunedì del periodo; dopo solo proprietario e gestori, che possono modificare anche quelle degli altri (bloccato anche nelle regole Firestore).
 - Presenza minima per rotazione 66% (lun–sab), ridotta solo da ferie e congressi: va segnalata.
 - Il generatore distribuisce in modo omogeneo sale e mattina/pomeriggio; i buchi vanno distribuiti uniformemente (li coprono altri anni).
+- Turni fissi: ogni turno assegnato a mano da un gestore (anche prima della generazione, con "Inserisci turni a mano" che crea una bozza vuota) è salvato in `months[mk].fixed` (`giorno|postId|turno|0` → pid) e il generatore lo piazza per primo senza toccarlo; "Lascia scoperto" lo toglie, "Elimina tutti i turni" li azzera. Finché `generated` è vuoto i non gestori non vedono i turni.
 - Chi è al Bambin Gesù non entra mai nei turni generati, ma i gestori possono assegnarlo a mano.
 - Cambi: il collega deve accettare; se il cambio forza una regola appare un avviso esplicito (Accetto / Non accetto) con anche i giorni liberi guadagnati/persi; per le notti si propone di scambiare anche il turno di monto/smonto.
 - Se un gestore inserisce un'indisponibilità/ferie/congresso su un giorno in cui la persona ha già un turno, l'app apre "Programma un cambio" con proposte in quest'ordine: scambio in giornata mattina↔pomeriggio con un collega già in turno quel giorno (sempre prima, se la persona è disponibile nell'altro turno), sostituzione diretta da un collega libero quel giorno (ev. scambio per bilanciare), cambio di sala a catena (B lascia la sua postazione e prende il turno, un collega libero C prende quella di B; serve l'accettazione di B e C: campi `needs`/`acc` nello swap), spostamento con postazione scoperta, lasciare scoperto. Punteggio: regola forzata = 3, postazione scoperta = 1. Si può inviare la richiesta o applicarla subito. In Cambi c'è il riquadro "Conflitti da risolvere".
