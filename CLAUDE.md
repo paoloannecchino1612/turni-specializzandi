@@ -9,7 +9,7 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 - `fb.js`: login + adattatore che espone `window.claude.use("db"|"user"|"downloads")` con la stessa API del tool originale nato come artefatto Claude. Non cambiare questa interfaccia senza aggiornare `app.js`.
 - `app.js`: tutta la logica (stato, generatore, viste, cambi). Script unico, niente build.
 - `config.js`: valori pubblici di Firebase. `firestore.rules`: regole di sicurezza (l'email del proprietario è un segnaposto `EMAIL_PROPRIETARIO`; le regole vere si pubblicano a mano nella console Firebase).
-- `sw.js`: service worker network-first. **Incrementare la versione della cache (`turni-vN`) a ogni rilascio.**
+- `sw.js`: service worker network-first. **A ogni rilascio incrementare insieme: la cache `turni-vN` in `sw.js` e il parametro `?v=N` di `fb.js`/`app.js` in `index.html` e di `config.js` in `fb.js`** (GitHub Pages fa tenere i file in cache ~10 minuti: senza il parametro il telefono mescola versioni vecchie e nuove).
 - Pubblicare = commit + push su `main`; GitHub Pages aggiorna in ~1 minuto.
 
 ## Dati in Firestore
