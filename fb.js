@@ -106,6 +106,8 @@ async function start(u) {
   if (!u) { showLogin("in"); return; }
   if (!u.emailVerified) { showVerify(u.email); return; }
   if (started) return; started = true;
+  /* il pass di accesso va rinnovato: dopo la conferma dell'email quello vecchio la dà ancora come non confermata */
+  try { await u.getIdToken(true); } catch (e) {}
   OWNER = await checkOwner();
   if (!OWNER) { /* solo le email inserite dal proprietario possono entrare */
     let ok = false; try { const a = await getDoc(fdoc(fs, "access/allow")); ok = a.exists() && (a.data().emails || []).map(x => String(x).toLowerCase()).includes(u.email.toLowerCase()); } catch (e) { ok = false; }
