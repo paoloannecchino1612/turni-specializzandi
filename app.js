@@ -244,7 +244,7 @@ function fairMonth(mk){ if(!MULTI) return null;
   if(!people) return null;
   let demand=0; for(const d of days){ const t=dayType(d); for(const k in union) demand+=((union[k].on||{})[t]||[]).length; }
   return Math.max(1,Math.ceil(demand/people)); }
-function generate(mk,wk){
+function generate(mk,wk,only2){ /* only2: Set di pid a cui si possono dare turni nuovi (aggiorna per rotazione) */
   const mo=M(mk), {days}=period(mk), rand=rng(Date.now()%2147483647), only=wk!==undefined&&wk!==null, base=mo.sched||{};
   const sched={}, st={}, slots=[];
   S.residents.forEach(r=>{st[r.id]=newStat();st[r.id].jit=rand();});
@@ -262,7 +262,7 @@ function generate(mk,wk){
   const pri=x=>x.s==="N"?0:x.s==="D"?1:(x.t!=="fer"?2:3);
   slots.forEach(x=>x.r=rand()); slots.sort((a,b)=>pri(a)-pri(b)||a.i-b.i||a.r-b.r);
   const pick=(sl,cands,cap,forceG,mcap)=>{ let best=null,bk=null; if(mcap===undefined) mcap=mMain;
-    for(const r of cands){ const p=st[r.id]; if(!ok(mo,p,r.id,sl.d,sl.s,sl.w,cap,forceG)) continue; if(mcap&&p.tot>=mcap) continue;
+    for(const r of cands){ if(only2&&!only2.has(r.id)) continue; const p=st[r.id]; if(!ok(mo,p,r.id,sl.d,sl.s,sl.w,cap,forceG)) continue; if(mcap&&p.tot>=mcap) continue;
       const j=p.jit+rand()*0.5;
       const mp=(sl.s==="M"||sl.s==="P")?p[sl.s]-(sl.s==="M"?p.P:p.M):0, pc=p.pc[sl.post.id]||0, same=p.last[sl.d]===undefined&&p.last[add(sl.d,-1)]===sl.post.id?1:0;
       const key= sl.s==="N"?[p.N,p.tot,j] : sl.s==="D"?[p.we,p.tot,j] : sl.t!=="fer"?[p.we,p.tot,mp,pc+same,j] : [p.tot,mp,pc+same,j];
@@ -297,7 +297,7 @@ function generate(mk,wk){
   /* chi è in rotazione TC/RM ed è libero (entro i turni ideali) va comunque in TC/RM come persona in più, nella sala meno affollata */
   const ours=(d,k)=>(sched[d][k]||[]).filter(x=>x).length, cnt=(d,k)=>ours(d,k)+othersIn(mo,d,k), Y=curYear();
   byDay.forEach(list=>{ if(!list.length) return; const {d,i,w,t}=list[0]; if(t==="fes") return;
-    const people=S.residents.filter(r=>inGem(mo,r.id)).map(r=>({r,o:rand()})).sort((a,b)=>a.o-b.o).map(x=>x.r);
+    const people=S.residents.filter(r=>inGem(mo,r.id)&&(!only2||only2.has(r.id))).map(r=>({r,o:rand()})).sort((a,b)=>a.o-b.o).map(x=>x.r);
     for(const r of people){ const rot=mo.rot[r.id], p=st[r.id]; if(fair&&p.tot>=fair) continue;
       const posts=S.posts.filter(x=>multiPost(x)&&x.cover===rot&&postActive(x)); if(!posts.length) continue;
       /* prima le sale vuote, poi le meno affollate; a parità si bilancia mattina/pomeriggio e la sala */
@@ -312,12 +312,12 @@ function generate(mk,wk){
    più di un'altra si sposta una persona, preferendo i più giovani (1°, poi 2°, 3°, 4° anno). Si spostano solo i turni che
    si possono modificare: dell'anno che si guarda; con più anni attivo, il proprietario anche quelli degli altri anni.
    I turni fissi (inseriti a mano) non si spostano. */
-function rebalanceRooms(mk){ const days=period(mk).days, sch={}, posts={}, fixedOf={}, mon={}, Ys=MULTI?YEARS:[CURY];
+function rebalanceRooms(mk,onlyPids,onlyCover){ const days=period(mk).days, sch={}, posts={}, fixedOf={}, mon={}, Ys=MULTI?YEARS:[CURY];
   for(const y of Ys){ const st=y===CURY?S:yState(y); if(!st) continue; const m=(st.months||{})[mk]; if(!m||!m.sched) continue;
     sch[y]=y===CURY?m.sched:JSON.parse(JSON.stringify(m.sched)); fixedOf[y]=m.fixed||{}; mon[y]=st; posts[y]={};
     (st.posts||[]).forEach(p=>{ posts[y][normRoom(p.name)]=p; }); }
   const canMove=y=>y===CURY||(OWNER&&MULTI), yearOf=y=>(y===CURY?curYear():y);
-  const groups={}; S.posts.filter(p=>multiPost(p)).forEach(p=>{ (groups[p.cover]=groups[p.cover]||[]).push(normRoom(p.name)); });
+  const groups={}; S.posts.filter(p=>multiPost(p)&&(!onlyCover||p.cover===onlyCover||isJolly(onlyCover))).forEach(p=>{ (groups[p.cover]=groups[p.cover]||[]).push(normRoom(p.name)); });
   const sheetExt=MULTI?{}:(M(mk).ext||{});
   let moved=0; const changed=new Set();
   for(const d of days){ const t=dayType(d); if(t==="fes") continue;
@@ -332,7 +332,7 @@ function rebalanceRooms(mk){ const days=period(mk).days, sch={}, posts={}, fixed
         const targets=[...rooms].sort((a,b)=>tot[a]-tot[b]);
         let done=false;
         for(const B of targets){ if(tot[A]-tot[B]<2) break;
-          const cand=occ[A].filter(o=>{ if(!canMove(o.y)||fixedOf[o.y][d+"|"+o.key+"|"+o.i]===o.pid) return false;
+          const cand=occ[A].filter(o=>{ if(onlyPids&&!(o.y===CURY&&onlyPids.has(o.pid))) return false; if(!canMove(o.y)||fixedOf[o.y][d+"|"+o.key+"|"+o.i]===o.pid) return false;
               const pb=posts[o.y][B]; if(!pb||!((pb.on||{})[t]||[]).includes(sh)||!(yearsFor(pb).includes(yearOf(o.y))||!MULTI)) return false;
               if(occ[B].some(x=>x.y===o.y)&&!sameYearOk(yearOf(o.y))) return false; return true; })
             .sort((a,b)=>yearOf(a.y)-yearOf(b.y));
@@ -348,19 +348,20 @@ function rebalanceRooms(mk){ const days=period(mk).days, sch={}, posts={}, fixed
     db.doc(yDocs(y).mon).set({state:JSON.stringify({months}),updated:new Date().toISOString()}).catch(()=>toast("Non riesco a salvare l'orario del "+y+"° anno")); }
   return moved; }
 /* aggiorna: i turni già assegnati restano (fissi solo per questa generazione), si tolgono quelli in conflitto con indisponibilità/ferie/congressi e si ricopre il resto */
-function refreshSched(mk){ const mo=M(mk); if(!mo.sched) return {removed:0,added:0,covered:0};
+function refreshSched(mk,rot){ const mo=M(mk); if(!mo.sched) return {removed:0,added:0,covered:0,moved:0};
+  const inRot=rot?new Set(S.residents.filter(r=>mo.rot[r.id]===rot).map(r=>r.id)):null;
   const old=clone(mo.sched), keep={}, fx=mo.fixed||{}; let removed=0, covered=0;
   for(const d in old) for(const k in old[d]) (old[d][k]||[]).forEach((pid,i)=>{ if(!pid) return;
-    if(fx[d+"|"+k+"|"+i]===pid){ keep[d+"|"+k+"|"+i]=pid; return; }
+    if(fx[d+"|"+k+"|"+i]===pid||(inRot&&!inRot.has(pid))){ keep[d+"|"+k+"|"+i]=pid; return; }
     if(blocked(unavOf(mo,pid,d),k.split("|")[1])) removed++;
     /* turno ora coperto da un altro anno (DEA, Angio, notti, guardie): si libera e il carico si ridistribuisce */
     else if(extCovered(mo,d,k)) covered++;
     else keep[d+"|"+k+"|"+i]=pid; });
   const saved=mo.fixed, wg=mo.weeksGen; mo.fixed={...keep,...(saved||{})};
-  try{ generate(mk); } finally { mo.fixed=saved||{}; mo.weeksGen=wg; }
+  try{ generate(mk,undefined,inRot); } finally { mo.fixed=saved||{}; mo.weeksGen=wg; }
   let added=0; for(const d in mo.sched) for(const k in mo.sched[d]){ const before=(old[d]||{})[k]||[];
     (mo.sched[d][k]||[]).forEach(pid=>{ if(pid&&!before.includes(pid)) added++; }); }
-  const moved=rebalanceRooms(mk);
+  const moved=rebalanceRooms(mk,inRot,rot);
   return {removed,added,covered,moved}; }
 function derive(mk,override){
   const mo=M(mk), {days}=period(mk), per={}; S.residents.forEach(r=>per[r.id]=newStat());
@@ -551,6 +552,8 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
        <button class="btn ${UI.confirm==="genwk"?"confirm":""}" data-act="genwk">${UI.confirm==="genwk"?"Tocca di nuovo: sovrascrive questa parte":cur===""?"Genera il mese":"Genera la settimana"}</button></div>
        <p class="muted" style="margin:0;font-size:.82rem">Generando una settimana, le altre restano come sono e vengono considerate per equità, riposi, monto e smonto.</p>
        ${mo.generated?`<div class="row" style="gap:8px"><button class="btn ${UI.confirm==="refresh"?"confirm":""}" data-act="refresh">${UI.confirm==="refresh"?"Tocca di nuovo: aggiorna i turni":"Aggiorna l'orario"}</button></div>
+       <div class="row" style="gap:8px"><select id="refRot" data-refrot="1" aria-label="Rotazione"><option value="">Rotazione…</option>${S.rotations.map(r=>`<option value="${r.id}" ${UI.refRot===r.id?"selected":""}>${esc(r.name)}</option>`).join("")}</select><button class="btn ${UI.confirm==="refrot"?"confirm":""}" data-act="refrot" ${UI.refRot?"":"disabled"}>${UI.confirm==="refrot"?"Tocca di nuovo: aggiorna la rotazione":"Aggiorna la rotazione"}</button></div>
+       <p class="muted" style="margin:0;font-size:.82rem">«Aggiorna la rotazione» fa lo stesso solo per chi è nella rotazione scelta: gli altri non vengono toccati.</p>
        <p class="muted" style="margin:0;font-size:.82rem">Tiene fermi i turni già assegnati; toglie quelli in conflitto con indisponibilità, ferie o congressi e quelli ora coperti da altri anni; poi ridistribuisce: ricopre i turni scoperti dando la precedenza a chi ha meno turni e pareggia le persone tra le sale della stessa metodica (TC, RM), spostando prima i più giovani.</p>`:""}
        <div class="row" style="gap:8px"><button class="btn" data-act="extlink">Turni degli altri anni da link</button><label class="btn">Turni degli altri anni da file<input type="file" id="extfile" accept=".xlsx,.xls,.csv" hidden></label>${Object.keys(mo.ext||{}).length?`<span class="chip">${Object.keys(mo.ext).length} turni coperti da altri anni</span>${clrBtn("clrext","Rimuovi")}`:""}</div>`; })():""}
     ${noRot.length?`<p class="muted" style="margin:0;font-size:.85rem">Senza rotazione questo mese: ${noRot.map(r=>esc(rName(r))).join(", ")}.</p>`:""}</div>`;
@@ -985,7 +988,7 @@ document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]"); if(!el) return;
   const a=el.dataset.act;
   if(a==="close"){ if(e.target===el||el.tagName==="BUTTON"){closeSheet();render();} return; }
-  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrsched","clrext","refresh","years","unlink","swdel","mswgo"].includes(a)) UI.confirm=null;
+  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrsched","clrext","refresh","refrot","years","unlink","swdel","mswgo"].includes(a)) UI.confirm=null;
   if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString()}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} const y=MULTI?yearOfPid(pid):null; if(y&&y!==CURY) switchYear(y); UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
   if(a==="unlink"){ const pid=el.dataset.id; if(UI.confirm!=="unl-"+pid){UI.confirm="unl-"+pid;render();return;} UI.confirm=null; const u=CLAIMS[pid]; if(!u) return; db.doc("claims/"+u).delete().then(()=>{delete CLAIMS[pid];render();}).catch(()=>toast("Non riesco a scollegare")); return; }
   if(a==="swsend"){ const F=UI.sw||{}, me=myPid(); if(!F.a||!F.to||!me) return; const [ad,ak]=F.a.split("#");
@@ -1048,6 +1051,8 @@ document.addEventListener("click",e=>{
   if(a==="years"){ if(UI.confirm!=="years"){UI.confirm="years";render();return;} UI.confirm=null;
     if(S.multiYear){ S.multiYear=false; persist(); toast("Più anni disattivato: dati degli altri anni conservati"); render(); return; }
     el.disabled=true; el.textContent="Creazione degli anni…"; enableYears().then(()=>{ toast("Più anni attivo: scegli l'anno in alto"); render(); }).catch(e=>{ toast("Errore: "+(e.message||e)); render(); }); return; }
+  if(a==="refrot"){ if(!UI.refRot) return; if(UI.confirm!=="refrot"){UI.confirm="refrot";render();return;} UI.confirm=null;
+    const r=refreshSched(UI.mk,UI.refRot); persist(); render(); toast(`${rotName(UI.refRot)} aggiornata: ${r.removed} tolti per indisponibilità, ${r.covered} liberati perché coperti da altri anni, ${r.added} nuovi assegnati, ${r.moved} spostati tra sale`); return; }
   if(a==="refresh"){ if(UI.confirm!=="refresh"){UI.confirm="refresh";render();return;} UI.confirm=null;
     const r=refreshSched(UI.mk); persist(); render(); toast(`Orario aggiornato: ${r.removed} tolti per indisponibilità, ${r.covered} liberati perché coperti da altri anni, ${r.added} nuovi assegnati, ${r.moved} spostati tra sale della stessa metodica`); return; }
   if(a==="extlink"){ sheet(`<div class="row" style="justify-content:space-between"><h2>Turni degli altri anni</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
@@ -1134,6 +1139,7 @@ document.addEventListener("change",e=>{
       toast("Dati importati: ricarico"); setTimeout(()=>location.reload(),1200);
     }catch(err){ toast("File non valido o salvataggio non riuscito"); } }; fr.readAsText(t.files[0]); return; }
   if(t.dataset.msw){ const F=UI.msw=UI.msw||{}; const k=t.dataset.msw; F[k]=t.value; if(k==="from") F.a=""; if(k==="to") F.b=""; F.ex={}; UI.confirm=null; render(); return; }
+  if(t.dataset.refrot){ UI.refRot=t.value; UI.confirm=null; render(); return; }
   if(t.dataset.genwk){ UI.genWk=t.value; UI.confirm=null; render(); return; }
   if(t.dataset.who){ UI.who=t.value; render(); return; }
   if(t.dataset.sw){ const F=UI.sw=UI.sw||{}; F[t.dataset.sw]=t.value; if(t.dataset.sw==="to") F.b=""; F.ex={}; UI.swPrev=null; render(); return; }
