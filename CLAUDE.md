@@ -18,6 +18,7 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 - `unav/{uid}/m/{mk_pid}`: indisponibilità di un account; `unav/staff/m/*` quelle inserite dal proprietario per chi non è associato. Codici: lettere M/P/N/D per turno, `G` giornata intera, `F` ferie, `C` ferie congresso.
 - `claims/{uid}` `{pid}`: associazione account → nome. Definitiva: la crea l'utente una volta, la modifica/cancella solo il proprietario.
 - `swaps/{id}`: cambi turno (`pending|accepted|rejected|cancelled|invalid`, `manual`, `extra` per monto/smonto, `applied`, `reported`).
+- `accessRequests/{uid}` `{email, at}`: richieste di accesso di chi non è autorizzato; il proprietario le approva (aggiunge l'email ad `access/allow`) o le rifiuta in Impostazioni.
 - `access/allow` `{emails}`: email autorizzate. `roles/managers` `{uids}`: gestori (sincronizzato dall'app). `roles/owner`: leggibile solo dal proprietario (serve all'app per riconoscerlo).
 
 ## Permessi
