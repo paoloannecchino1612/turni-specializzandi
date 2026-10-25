@@ -244,6 +244,16 @@ function generate(mk,wk){
       const {post,sh}=opts[0], key=post.id+"|"+sh; put({d,i,w,t,post,s:sh,key},r,!!sched[d][key][0]); } });
   mo.sched=sched; mo.generated=new Date().toISOString(); if(only){ mo.weeksGen=mo.weeksGen||{}; mo.weeksGen[wk]=mo.generated; }
 }
+/* aggiorna: i turni già assegnati restano (fissi solo per questa generazione), si tolgono quelli in conflitto con indisponibilità/ferie/congressi e si ricopre il resto */
+function refreshSched(mk){ const mo=M(mk); if(!mo.sched) return {removed:0,added:0};
+  const old=clone(mo.sched), keep={}; let removed=0;
+  for(const d in old) for(const k in old[d]) (old[d][k]||[]).forEach((pid,i)=>{ if(!pid) return;
+    if(blocked(unavOf(mo,pid,d),k.split("|")[1])) removed++; else keep[d+"|"+k+"|"+i]=pid; });
+  const saved=mo.fixed, wg=mo.weeksGen; mo.fixed={...keep,...(saved||{})};
+  try{ generate(mk); } finally { mo.fixed=saved||{}; mo.weeksGen=wg; }
+  let added=0; for(const d in mo.sched) for(const k in mo.sched[d]){ const before=(old[d]||{})[k]||[];
+    (mo.sched[d][k]||[]).forEach(pid=>{ if(pid&&!before.includes(pid)) added++; }); }
+  return {removed,added}; }
 function derive(mk,override){
   const mo=M(mk), {days}=period(mk), per={}; S.residents.forEach(r=>per[r.id]=newStat());
   const holes=[], issues=[], where={}, SC=override||effSched(mk);
@@ -406,6 +416,8 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
       return `<div class="row" style="gap:8px"><label class="row" style="gap:6px"><span class="label">Genera</span><select id="genWk" data-genwk="1"><option value="" ${cur===""?"selected":""}>Tutto il mese</option>${Array.from({length:nw},(_,w)=>`<option value="${w}" ${String(cur)===String(w)?"selected":""}>Settimana ${w+1}: ${fmt(p.days[w*7])} – ${fmt(p.days[w*7+6])}${filled(w)?" ✓":""}</option>`).join("")}</select></label>
        <button class="btn ${UI.confirm==="genwk"?"confirm":""}" data-act="genwk">${UI.confirm==="genwk"?"Tocca di nuovo: sovrascrive questa parte":cur===""?"Genera il mese":"Genera la settimana"}</button></div>
        <p class="muted" style="margin:0;font-size:.82rem">Generando una settimana, le altre restano come sono e vengono considerate per equità, riposi, monto e smonto.</p>
+       ${mo.generated?`<div class="row" style="gap:8px"><button class="btn ${UI.confirm==="refresh"?"confirm":""}" data-act="refresh">${UI.confirm==="refresh"?"Tocca di nuovo: aggiorna i turni":"Aggiorna con le nuove indisponibilità"}</button></div>
+       <p class="muted" style="margin:0;font-size:.82rem">Tiene fermi tutti i turni già assegnati, toglie solo quelli in conflitto con indisponibilità, ferie o congressi e ricopre i turni rimasti scoperti.</p>`:""}
        <div class="row" style="gap:8px"><button class="btn" data-act="extlink">Turni degli altri anni da link</button><label class="btn">Turni degli altri anni da file<input type="file" id="extfile" accept=".xlsx,.xls,.csv" hidden></label>${Object.keys(mo.ext||{}).length?`<span class="chip">${Object.keys(mo.ext).length} turni coperti da altri anni</span>${clrBtn("clrext","Rimuovi")}`:""}</div>`; })():""}
     ${noRot.length?`<p class="muted" style="margin:0;font-size:.85rem">Senza rotazione questo mese: ${noRot.map(r=>esc(rName(r))).join(", ")}.</p>`:""}</div>`;
   if(!mo.generated&&!ADMIN()) return head+`<div class="panel empty"><h2>Turni non ancora pubblicati</h2><p>Appena verranno generati li vedrai qui.</p></div>`;
@@ -826,7 +838,7 @@ document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]"); if(!el) return;
   const a=el.dataset.act;
   if(a==="close"){ if(e.target===el||el.tagName==="BUTTON"){closeSheet();render();} return; }
-  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrsched","clrext","unlink","swdel","mswgo"].includes(a)) UI.confirm=null;
+  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrsched","clrext","refresh","unlink","swdel","mswgo"].includes(a)) UI.confirm=null;
   if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString()}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
   if(a==="unlink"){ const pid=el.dataset.id; if(UI.confirm!=="unl-"+pid){UI.confirm="unl-"+pid;render();return;} UI.confirm=null; const u=CLAIMS[pid]; if(!u) return; db.doc("claims/"+u).delete().then(()=>{delete CLAIMS[pid];render();}).catch(()=>toast("Non riesco a scollegare")); return; }
   if(a==="swsend"){ const F=UI.sw||{}, me=myPid(); if(!F.a||!F.to||!me) return; const [ad,ak]=F.a.split("#");
@@ -879,6 +891,8 @@ document.addEventListener("click",e=>{
   if(a==="clrF"||a==="clrC"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
     clearUnav([UI.sel],a==="clrF"?"F":"C"); toast((a==="clrF"?"Ferie":"Ferie congresso")+" di "+resName(UI.sel)+" eliminate"); render(); return; }
   if(a==="clrext"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null; const mo=M(UI.mk); mo.ext={}; syncExt(mo); persist(); render(); toast("Turni degli altri anni rimossi: quei turni tornano da coprire"+(mo.generated?" (rigenera per assegnarli)":"")); return; }
+  if(a==="refresh"){ if(UI.confirm!=="refresh"){UI.confirm="refresh";render();return;} UI.confirm=null;
+    const r=refreshSched(UI.mk); persist(); render(); toast(`Turni aggiornati: ${r.removed} tolti per indisponibilità, ${r.added} nuovi assegnati`); return; }
   if(a==="extlink"){ sheet(`<div class="row" style="justify-content:space-between"><h2>Turni degli altri anni</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
      <label class="stack" style="gap:4px"><span class="label">Link del foglio Google</span><input id="extUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/…" value="${esc(S.extSheetUrl||"")}"></label>
      <p class="muted" style="margin:0;font-size:.84rem">Apri la scheda del mese giusto e copia il link dalla barra degli indirizzi (contiene <code>gid=</code>). Se il link non indica la scheda, si usa quella chiamata «${esc(monthName(UI.mk))}». Il foglio deve essere condiviso come «Chiunque abbia il link può visualizzare».</p>
