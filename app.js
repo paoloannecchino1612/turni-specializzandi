@@ -173,7 +173,7 @@ function linkPanel(){ const groups=MULTI?YEARS.map(y=>[y,((yState(y)||{}).reside
   return `<div class="panel" style="border:2px solid var(--accent)"><h2>Associa l'account: chi sei?</h2>
    <p style="margin:0;font-size:.9rem">Tocca il tuo cognome e conferma. <strong>La scelta è definitiva</strong>: potrà cambiarla solo chi gestisce il tool. Da quel momento potrai modificare solo le tue indisponibilità e rispondere ai cambi rivolti a te.</p>
    ${groups.map(([gy,list])=>`${gy?`<span class="groupname">${gy}° anno</span>`:""}<div class="pickers">${list.map(r=>{const taken=!!CLAIMS[r.id]; const conf=UI.confirm==="claim-"+r.id;
-     return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""} ${conf?'style="background:var(--accent);color:var(--accent-ink);border-color:var(--accent)"':""}>${conf?"Confermo: sono "+esc(rName(r)):esc(rName(r))}${taken?' <span class="cnt">già associato</span>':""}</button>`;}).join("")}</div>`).join("")}
+     return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""} ${conf?'style="background:var(--accent);color:var(--accent-ink);border-color:var(--accent)"':""}>${conf?"Confermo: sono "+esc(gy?`(${r.year||gy}) ${r.name}`:rName(r)):esc(gy?`(${r.year||gy}) ${r.name}`:rName(r))}${taken?' <span class="cnt">già associato</span>':""}</button>`;}).join("")}</div>`).join("")}
    ${anyFree?"":`<p class="muted" style="margin:0">Tutti i nomi sono già associati: se il tuo è stato preso per errore, avvisa chi gestisce il tool.</p>`}</div>`; }
 /* un account = una sola persona: se è già associato (anche in un altro anno) non si sceglie più */
 function claimPanel(why){ const pid=myAnyPid(); if(!pid) return linkPanel(); const y=MULTI?yearOfPid(pid):null;
