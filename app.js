@@ -308,15 +308,19 @@ function generate(mk,wk){
   mo.sched=sched; mo.generated=new Date().toISOString(); if(only){ mo.weeksGen=mo.weeksGen||{}; mo.weeksGen[wk]=mo.generated; }
 }
 /* aggiorna: i turni già assegnati restano (fissi solo per questa generazione), si tolgono quelli in conflitto con indisponibilità/ferie/congressi e si ricopre il resto */
-function refreshSched(mk){ const mo=M(mk); if(!mo.sched) return {removed:0,added:0};
-  const old=clone(mo.sched), keep={}; let removed=0;
+function refreshSched(mk){ const mo=M(mk); if(!mo.sched) return {removed:0,added:0,covered:0};
+  const old=clone(mo.sched), keep={}, fx=mo.fixed||{}; let removed=0, covered=0;
   for(const d in old) for(const k in old[d]) (old[d][k]||[]).forEach((pid,i)=>{ if(!pid) return;
-    if(blocked(unavOf(mo,pid,d),k.split("|")[1])) removed++; else keep[d+"|"+k+"|"+i]=pid; });
+    if(fx[d+"|"+k+"|"+i]===pid){ keep[d+"|"+k+"|"+i]=pid; return; }
+    if(blocked(unavOf(mo,pid,d),k.split("|")[1])) removed++;
+    /* turno ora coperto da un altro anno (DEA, Angio, notti, guardie): si libera e il carico si ridistribuisce */
+    else if(extCovered(mo,d,k)) covered++;
+    else keep[d+"|"+k+"|"+i]=pid; });
   const saved=mo.fixed, wg=mo.weeksGen; mo.fixed={...keep,...(saved||{})};
   try{ generate(mk); } finally { mo.fixed=saved||{}; mo.weeksGen=wg; }
   let added=0; for(const d in mo.sched) for(const k in mo.sched[d]){ const before=(old[d]||{})[k]||[];
     (mo.sched[d][k]||[]).forEach(pid=>{ if(pid&&!before.includes(pid)) added++; }); }
-  return {removed,added}; }
+  return {removed,added,covered}; }
 function derive(mk,override){
   const mo=M(mk), {days}=period(mk), per={}; S.residents.forEach(r=>per[r.id]=newStat());
   const holes=[], issues=[], where={}, SC=override||effSched(mk);
@@ -503,8 +507,8 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
       return `<div class="row" style="gap:8px"><label class="row" style="gap:6px"><span class="label">Genera</span><select id="genWk" data-genwk="1"><option value="" ${cur===""?"selected":""}>Tutto il mese</option>${Array.from({length:nw},(_,w)=>`<option value="${w}" ${String(cur)===String(w)?"selected":""}>Settimana ${w+1}: ${fmt(p.days[w*7])} – ${fmt(p.days[w*7+6])}${filled(w)?" ✓":""}</option>`).join("")}</select></label>
        <button class="btn ${UI.confirm==="genwk"?"confirm":""}" data-act="genwk">${UI.confirm==="genwk"?"Tocca di nuovo: sovrascrive questa parte":cur===""?"Genera il mese":"Genera la settimana"}</button></div>
        <p class="muted" style="margin:0;font-size:.82rem">Generando una settimana, le altre restano come sono e vengono considerate per equità, riposi, monto e smonto.</p>
-       ${mo.generated?`<div class="row" style="gap:8px"><button class="btn ${UI.confirm==="refresh"?"confirm":""}" data-act="refresh">${UI.confirm==="refresh"?"Tocca di nuovo: aggiorna i turni":"Aggiorna con le nuove indisponibilità"}</button></div>
-       <p class="muted" style="margin:0;font-size:.82rem">Tiene fermi tutti i turni già assegnati, toglie solo quelli in conflitto con indisponibilità, ferie o congressi e ricopre i turni rimasti scoperti.</p>`:""}
+       ${mo.generated?`<div class="row" style="gap:8px"><button class="btn ${UI.confirm==="refresh"?"confirm":""}" data-act="refresh">${UI.confirm==="refresh"?"Tocca di nuovo: aggiorna i turni":"Aggiorna l'orario"}</button></div>
+       <p class="muted" style="margin:0;font-size:.82rem">Tiene fermi i turni già assegnati; toglie quelli in conflitto con indisponibilità, ferie o congressi e quelli ora coperti da altri anni; poi ridistribuisce: ricopre i turni scoperti dando la precedenza a chi ha meno turni.</p>`:""}
        <div class="row" style="gap:8px"><button class="btn" data-act="extlink">Turni degli altri anni da link</button><label class="btn">Turni degli altri anni da file<input type="file" id="extfile" accept=".xlsx,.xls,.csv" hidden></label>${Object.keys(mo.ext||{}).length?`<span class="chip">${Object.keys(mo.ext).length} turni coperti da altri anni</span>${clrBtn("clrext","Rimuovi")}`:""}</div>`; })():""}
     ${noRot.length?`<p class="muted" style="margin:0;font-size:.85rem">Senza rotazione questo mese: ${noRot.map(r=>esc(rName(r))).join(", ")}.</p>`:""}</div>`;
   if(!mo.generated&&!ADMIN()) return head+`<div class="panel empty"><h2>Turni non ancora pubblicati</h2><p>Appena verranno generati li vedrai qui.</p></div>`;
@@ -996,7 +1000,7 @@ document.addEventListener("click",e=>{
     if(S.multiYear){ S.multiYear=false; persist(); toast("Più anni disattivato: dati degli altri anni conservati"); render(); return; }
     el.disabled=true; el.textContent="Creazione degli anni…"; enableYears().then(()=>{ toast("Più anni attivo: scegli l'anno in alto"); render(); }).catch(e=>{ toast("Errore: "+(e.message||e)); render(); }); return; }
   if(a==="refresh"){ if(UI.confirm!=="refresh"){UI.confirm="refresh";render();return;} UI.confirm=null;
-    const r=refreshSched(UI.mk); persist(); render(); toast(`Turni aggiornati: ${r.removed} tolti per indisponibilità, ${r.added} nuovi assegnati`); return; }
+    const r=refreshSched(UI.mk); persist(); render(); toast(`Orario aggiornato: ${r.removed} tolti per indisponibilità, ${r.covered} liberati perché coperti da altri anni, ${r.added} nuovi assegnati`); return; }
   if(a==="extlink"){ sheet(`<div class="row" style="justify-content:space-between"><h2>Turni degli altri anni</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
      <label class="stack" style="gap:4px"><span class="label">Link del foglio Google</span><input id="extUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/…" value="${esc(S.extSheetUrl||"")}"></label>
      <p class="muted" style="margin:0;font-size:.84rem">Apri la scheda del mese giusto e copia il link dalla barra degli indirizzi (contiene <code>gid=</code>). Se il link non indica la scheda, si usa quella chiamata «${esc(monthName(UI.mk))}». Il foglio deve essere condiviso come «Chiunque abbia il link può visualizzare».</p>
