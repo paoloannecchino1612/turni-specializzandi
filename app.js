@@ -204,6 +204,9 @@ function load(raw){ const st=raw?JSON.parse(raw):clone(DEFAULT);
   st.posts.forEach(p=>{ if(!p.on){ p.on={}; DT.forEach(([t])=>p.on[t]=(p.days||[]).includes(t)?[...(p.shifts||[])]:[]); delete p.days; delete p.shifts; migrated=true; } });
   if(!st.posts.some(p=>p.cover==="ANGIO")&&!st._v3){ const d=defPosts(); const add=d.filter(p=>p.id==="DEAMP"||p.cover==="ANGIO"); st.posts.splice(st.posts.findIndex(p=>p.cover==="ALL"),0,...add); migrated=true; }
   st._v3=true;
+  /* rotazioni esterne per anno (niente turni al Gemelli) */
+  if(st.groupYear===4&&!st.externals.some(x=>x.id==="SE")){ st.externals.push({id:"SE",name:"Sede Esterna"}); migrated=true; }
+  if(st.groupYear===3&&!st.externals.some(x=>x.id==="IT")){ st.externals.push({id:"IT",name:"Isola Tiberina"}); migrated=true; }
   if(!st._v4){ st.posts.forEach(p=>{ if(p.id==="DEA"&&p.cover==="ALL") p.name="Guardia domenica"; if(p.id==="NOTTE") p.on.fes=[];
       if(p.cover!=="ALL") p.on.fes=[]; }); st._v4=true; migrated=true; }
   return st; }
@@ -221,6 +224,17 @@ function ok(mo,p,pid,d,s,w,cap,forceG){
   return true; }
 function cmp(a,b){for(let i=0;i<a.length;i++){if(a[i]!==b[i])return a[i]-b[i];}return 0;}
 /* wk = indice della settimana da (ri)generare; senza wk si genera tutto il mese. Le altre settimane restano com'erano e contano per equità e vincoli */
+/* equilibrio tra gli anni (con più anni attivo): un anno che ha anni sotto di sé nella cascata si ferma alla quota
+   media settimanale per persona (turni da coprire in tutte le sale ÷ specializzandi presenti di tutti gli anni), così il resto va agli anni successivi */
+function hasLowerYear(){ return MULTI&&YEARS.some(y=>y<CURY&&(((yState(y)||{}).residents)||[]).length); }
+function fairMonth(mk){ if(!MULTI) return null;
+  const days=period(mk).days, union={}; let people=0;
+  for(const y of YEARS){ const st=yState(y); if(!st) continue; const rot=(((st.months||{})[mk])||{}).rot||{}, ext=new Set((st.externals||[]).map(x=>x.id));
+    people+=(st.residents||[]).filter(r=>rot[r.id]&&!ext.has(rot[r.id])).length;
+    (st.posts||[]).forEach(p=>{ const k=normRoom(p.name); if(k&&yearsFor(p).includes(y)&&!union[k]) union[k]=p; }); }
+  if(!people) return null;
+  let demand=0; for(const d of days){ const t=dayType(d); for(const k in union) demand+=((union[k].on||{})[t]||[]).length; }
+  return Math.max(1,Math.ceil(demand/people)); }
 function generate(mk,wk){
   const mo=M(mk), {days}=period(mk), rand=rng(Date.now()%2147483647), only=wk!==undefined&&wk!==null, base=mo.sched||{};
   const sched={}, st={}, slots=[];
@@ -238,8 +252,8 @@ function generate(mk,wk){
       sched[d][x.key]=[null]; slots.push({d,i,w,t,post:x.post,s:x.s,key:x.key,ext:extHas(mo,d,x.key)}); }); });
   const pri=x=>x.s==="N"?0:x.s==="D"?1:(x.t!=="fer"?2:3);
   slots.forEach(x=>x.r=rand()); slots.sort((a,b)=>pri(a)-pri(b)||a.i-b.i||a.r-b.r);
-  const pick=(sl,cands,cap,forceG)=>{ let best=null,bk=null;
-    for(const r of cands){ const p=st[r.id]; if(!ok(mo,p,r.id,sl.d,sl.s,sl.w,cap,forceG)) continue;
+  const pick=(sl,cands,cap,forceG,mcap)=>{ let best=null,bk=null; if(mcap===undefined) mcap=mMain;
+    for(const r of cands){ const p=st[r.id]; if(!ok(mo,p,r.id,sl.d,sl.s,sl.w,cap,forceG)) continue; if(mcap&&p.tot>=mcap) continue;
       const j=p.jit+rand()*0.5;
       const mp=(sl.s==="M"||sl.s==="P")?p[sl.s]-(sl.s==="M"?p.P:p.M):0, pc=p.pc[sl.post.id]||0, same=p.last[sl.d]===undefined&&p.last[add(sl.d,-1)]===sl.post.id?1:0;
       const key= sl.s==="N"?[p.N,p.tot,j] : sl.s==="D"?[p.we,p.tot,j] : sl.t!=="fer"?[p.we,p.tot,mp,pc+same,j] : [p.tot,mp,pc+same,j];
@@ -254,9 +268,10 @@ function generate(mk,wk){
   const fx=mo.fixed||{};
   slots.forEach(sl=>{ const pre=sl.d+"|"+sl.key+"|", ids=Object.keys(fx).filter(k=>k.startsWith(pre)).sort((a,b)=>+a.split("|").pop()-+b.split("|").pop()).map(k=>fx[k]).filter(pid=>st[pid]);
     ids.forEach((pid,n)=>put(sl,{id:pid},n>0)); });
-  const soft=S.targetWeek||S.maxWeek, fill={}, byDay=days.map(()=>[]);
+  /* quota mensile per persona uguale per tutti gli anni: gli anni con anni sotto si fermano lì; le persone in più in TC/RM non la superano mai */
+  const fair=fairMonth(mk), mMain=fair&&hasLowerYear()?fair:null, maxCap=S.maxWeek, soft=S.targetWeek||S.maxWeek, fill={}, byDay=days.map(()=>[]);
   slots.forEach(sl=>byDay[sl.i].push(sl));
-  for(const [grp,cap] of [["pri",soft],["jol",soft],["pri",S.maxWeek],["jol",S.maxWeek]])
+  for(const [grp,cap] of [["pri",soft],["jol",soft],["pri",maxCap],["jol",maxCap]])
     for(const pr of [0,1,2,3]) for(const list of byDay){
       const todo=list.filter(sl=>pri(sl)===pr&&!sl.ext&&!sched[sl.d][sl.key][0]);
       todo.forEach(sl=>sl.r=rand());
@@ -267,14 +282,14 @@ function generate(mk,wk){
   /* TC/RM dove c'è già un altro anno: si coprono dopo, con chi resta entro i turni ideali */
   for(const grp of ["pri","jol"]) for(const list of byDay){
     const todo=list.filter(sl=>sl.ext&&!sched[sl.d][sl.key][0]); todo.forEach(sl=>sl.r=rand()); todo.sort((a,b)=>(fill[a.key]||0)-(fill[b.key]||0)||a.r-b.r);
-    for(const sl of todo){ const r=pick(sl,pools(mo,sl.post,sl.s)[grp],soft); if(r){ put(sl,r); fill[sl.key]=(fill[sl.key]||0)+1; } } }
+    for(const sl of todo){ const r=pick(sl,pools(mo,sl.post,sl.s)[grp],soft,false,fair); if(r){ put(sl,r); fill[sl.key]=(fill[sl.key]||0)+1; } } }
   for(const grp of ["pri","jol"]) for(const sl of slots){ if(sl.ext||sched[sl.d][sl.key][0]) continue;
-    const r=pick(sl,pools(mo,sl.post,sl.s)[grp],S.maxWeek,true); if(r){ put(sl,r); st[r.id].g=(st[r.id].g||0)+1; } }
+    const r=pick(sl,pools(mo,sl.post,sl.s)[grp],maxCap,true); if(r){ put(sl,r); st[r.id].g=(st[r.id].g||0)+1; } }
   /* chi è in rotazione TC/RM ed è libero (entro i turni ideali) va comunque in TC/RM come persona in più, nella sala meno affollata */
   const cnt=(d,k)=>(sched[d][k]||[]).filter(x=>x).length+(EXT(mo)[d+"|"+k]||[]).length;
   byDay.forEach(list=>{ if(!list.length) return; const {d,i,w,t}=list[0]; if(t==="fes") return;
     const people=S.residents.filter(r=>inGem(mo,r.id)).map(r=>({r,o:rand()})).sort((a,b)=>a.o-b.o).map(x=>x.r);
-    for(const r of people){ const rot=mo.rot[r.id], p=st[r.id];
+    for(const r of people){ const rot=mo.rot[r.id], p=st[r.id]; if(fair&&p.tot>=fair) continue;
       const posts=S.posts.filter(x=>multiPost(x)&&x.cover===rot&&postActive(x)); if(!posts.length) continue;
       /* prima le sale vuote, poi le meno affollate; a parità si bilancia mattina/pomeriggio e la sala */
       const opts=[]; for(const sh of ["M","P"]){ if(!ok(mo,p,r.id,d,sh,w,soft)) continue;
@@ -393,6 +408,7 @@ async function enableYears(){ if(!OWNER||!db||CURY!==2) return; const base=JSON.
   for(const y of [1,3,4]){ const snap=await db.doc(yDocs(y).cfg).get(); if(snap.exists) continue;
     const residents=YSEED[y].map(n=>({id:uid(),name:n,year:y})); sortRes(residents);
     const cfg={...base,residents,managers:[],groupYear:y}; delete cfg.multiYear;
+    if(y===4) cfg.externals=[...(cfg.externals||[]),{id:"SE",name:"Sede Esterna"}]; if(y===3) cfg.externals=[...(cfg.externals||[]),{id:"IT",name:"Isola Tiberina"}];
     const at=new Date().toISOString();
     await db.doc(yDocs(y).cfg).set({state:JSON.stringify(cfg),updated:at}); await db.doc(yDocs(y).mon).set({state:JSON.stringify({months:{}}),updated:at}); }
   S.multiYear=true; persist(); }
