@@ -14,7 +14,7 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 
 ## Dati in Firestore
 - `config/main` `{state: JSON}`: specializzandi, rotazioni, esterni (Bambin Gesù, Brescia), postazioni, orari, limiti, gestori (pid).
-- `planner/state` `{state: JSON{months}}`: per mese `rot`, `sched` (giorno → `postId|turno` → [pid]), `fixed` (turni fissi), `generated`, `weeksGen`.
+- `planner/state` `{state: JSON{months}}`: per mese `rot`, `sched` (giorno → `postId|turno` → [pid]), `fixed` (turni fissi), `ext` (turni coperti da altri anni), `generated`, `weeksGen`.
 - `unav/{uid}/m/{mk_pid}`: indisponibilità di un account; `unav/staff/m/*` quelle inserite dal proprietario per chi non è associato. Codici: lettere M/P/N/D per turno, `G` giornata intera, `F` ferie, `C` ferie congresso.
 - `claims/{uid}` `{pid}`: associazione account → nome. Definitiva: la crea l'utente una volta, la modifica/cancella solo il proprietario.
 - `swaps/{id}`: cambi turno (`pending|accepted|rejected|cancelled|invalid`, `manual`, `extra` per monto/smonto, `applied`, `reported`).
@@ -42,6 +42,8 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 - Cambi: il collega deve accettare; se il cambio forza una regola appare un avviso esplicito (Accetto / Non accetto) con anche i giorni liberi guadagnati/persi; per le notti si propone di scambiare anche il turno di monto/smonto.
 - Se un gestore inserisce un'indisponibilità/ferie/congresso su un giorno in cui la persona ha già un turno, l'app apre "Programma un cambio" con proposte in quest'ordine: scambio in giornata mattina↔pomeriggio con un collega già in turno quel giorno (sempre prima, se la persona è disponibile nell'altro turno), sostituzione diretta da un collega libero quel giorno (ev. scambio per bilanciare), cambio di sala a catena (B lascia la sua postazione e prende il turno, un collega libero C prende quella di B; serve l'accettazione di B e C: campi `needs`/`acc` nello swap), spostamento con postazione scoperta, lasciare scoperto. Punteggio: regola forzata = 3, postazione scoperta = 1. Si può inviare la richiesta o applicarla subito. In Cambi c'è il riquadro "Conflitti da risolvere".
 - Colori: Mattina arancione, Pomeriggio blu, Notte viola, Guardia rosso, Ferie verde, Congresso giallo.
+
+- Turni degli altri anni: in Turni il gestore carica l'Excel/CSV del foglio "BOZZA ORARI" (riga 1 giorni "LUN 05", colonna A sala con righe di continuazione, riga "POMERIGGIO" separa M/P, riga "NOTTE", DEA domenica/festivi = guardia). Si riconoscono solo le sale nostre (per nome normalizzato), si ignorano i nostri specializzandi; salvati in `months[mk].ext` (`giorno|postId|turno` → nomi). Il generatore non assegna quei turni e non sono buchi (`sched` = []), salvo turno fisso.
 
 ## Contesto
 - Esiste anche il foglio Google "BOZZA ORARI" con gli orari di tutti gli anni (nomi come "(anno) Cognome"). L'orario si costruisce a cascata 4° → 3° → 2° → 1° anno dopo quello degli strutturati. Una prova su ottobre (gruppo 1° anno, sale RX/Eco/Senologia + TC/RM) ha mostrato che il generatore riduce i buchi; possibile sviluppo futuro: importare dal foglio i turni degli altri anni come "occupati".

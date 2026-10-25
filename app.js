@@ -193,7 +193,8 @@ function generate(mk,wk){
           if(t!=="fer")p.we++; p.wk[w]=(p.wk[w]||0)+1; if(x.s==="N")p.wn[w]=(p.wn[w]||0)+1; }); });
       return; }
     sched[d]={};
-    slotsOfDay(d).forEach(x=>{ sched[d][x.key]=[null]; slots.push({d,i,w,t,post:x.post,s:x.s,key:x.key}); }); });
+    slotsOfDay(d).forEach(x=>{ if(extCovered(mo,d,x.key)){ sched[d][x.key]=[]; return; }
+      sched[d][x.key]=[null]; slots.push({d,i,w,t,post:x.post,s:x.s,key:x.key}); }); });
   const pri=x=>x.s==="N"?0:x.s==="D"?1:(x.t!=="fer"?2:3);
   slots.forEach(x=>x.r=rand()); slots.sort((a,b)=>pri(a)-pri(b)||a.i-b.i||a.r-b.r);
   const pick=(sl,cands,cap,forceG)=>{ let best=null,bk=null;
@@ -385,7 +386,8 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
       const filled=w=>p.days.slice(w*7,w*7+7).some(d=>Object.values((mo.sched||{})[d]||{}).some(a=>a.some(x=>x)));
       return `<div class="row" style="gap:8px"><label class="row" style="gap:6px"><span class="label">Genera</span><select id="genWk" data-genwk="1"><option value="" ${cur===""?"selected":""}>Tutto il mese</option>${Array.from({length:nw},(_,w)=>`<option value="${w}" ${String(cur)===String(w)?"selected":""}>Settimana ${w+1}: ${fmt(p.days[w*7])} – ${fmt(p.days[w*7+6])}${filled(w)?" ✓":""}</option>`).join("")}</select></label>
        <button class="btn ${UI.confirm==="genwk"?"confirm":""}" data-act="genwk">${UI.confirm==="genwk"?"Tocca di nuovo: sovrascrive questa parte":cur===""?"Genera il mese":"Genera la settimana"}</button></div>
-       <p class="muted" style="margin:0;font-size:.82rem">Generando una settimana, le altre restano come sono e vengono considerate per equità, riposi, monto e smonto.</p>`; })():""}
+       <p class="muted" style="margin:0;font-size:.82rem">Generando una settimana, le altre restano come sono e vengono considerate per equità, riposi, monto e smonto.</p>
+       <div class="row" style="gap:8px"><label class="btn">Carica turni degli altri anni<input type="file" id="extfile" accept=".xlsx,.xls,.csv" hidden></label>${Object.keys(mo.ext||{}).length?`<span class="chip">${Object.keys(mo.ext).length} turni coperti da altri anni</span>${clrBtn("clrext","Rimuovi")}`:""}</div>`; })():""}
     ${noRot.length?`<p class="muted" style="margin:0;font-size:.85rem">Senza rotazione questo mese: ${noRot.map(r=>esc(r.name)).join(", ")}.</p>`:""}</div>`;
   if(!mo.generated&&!ADMIN()) return head+`<div class="panel empty"><h2>Turni non ancora pubblicati</h2><p>Appena verranno generati li vedrai qui.</p></div>`;
   if(!mo.sched) return head+`<div class="panel empty"><h2>Pronto per generare</h2><p>Controlla rotazioni e indisponibilità, poi scegli sopra se generare tutto il mese o una settimana. Potrai cambiare a mano ogni turno toccandolo.</p><p>Se alcuni turni sono già decisi, inseriscili prima a mano: la generazione non li tocca.</p><button class="btn" data-act="manualstart">Inserisci turni a mano</button></div>`;
@@ -406,7 +408,9 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
      ${p.days.map((d,i)=>{const t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
        if(!arr) return `<td class="cell none">·</td>`;
-       return `<td class="cell ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:`<span class="hole">scoperto</span>`).join("")}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
+       const ex=(mo.ext||{})[d+"|"+c.k], exh=ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"";
+       if(!arr.length) return `<td class="cell" style="cursor:default" title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
+       return `<td class="cell ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:`<span class="hole">scoperto</span>`).join("")}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
   } else if(UI.view==="nome"){
     if(!UI.who) UI.who=myPid()||"";
     const pid=UI.who, rows=[];
@@ -693,6 +697,44 @@ function planSheet(mk,list){ UI.plan={mk,list,opts:list.map(c=>planOptions(mk,c)
 function mo_rot(mk,pid){ return (M(mk).rot||{})[pid]; }
 function maybePlan(mk,pid,d){ if(!ADMIN()) return false; const c=conflictsOf(mk,pid,d); if(!c.length) return false; planSheet(mk,c); return true; }
 
+/* ---------- turni coperti dagli altri anni (import dal foglio "BOZZA ORARI") ---------- */
+/* mo.ext: "giorno|postId|turno" → ["(3) Rossi", …]; quei turni non vengono assegnati ai nostri e non sono buchi */
+function extCovered(mo,d,key){ return !!(mo.ext||{})[d+"|"+key] && !(mo.fixed||{})[d+"|"+key+"|0"]; }
+function normRoom(x){ return String(x||"").toLowerCase().replace(/\(.*?\)/g,"").replace(/angiografia/g,"angio").replace(/[^a-z0-9]/g,""); }
+/* foglio: riga 1 = giorni ("LUN 05"), colonna A = sala (le righe sotto senza nome sono la stessa sala),
+   prima della riga "POMERIGGIO" mattina, dopo pomeriggio; riga "NOTTE" = notti; domenica e festivi DEA = guardia */
+function parseExt(rows,mk){
+  const days=period(mk).days, hdr=rows[0]||[], col={}; let last=-1;
+  for(let c=1;c<hdr.length;c++){ const m=String(hdr[c]||"").match(/(\d{1,2})/); if(!m) continue; const n=+m[1];
+    for(let i=last+1;i<days.length;i++) if(D(days[i]).getUTCDate()===n){ col[c]=days[i]; last=i; break; } }
+  const postBy={}; S.posts.forEach(p=>{ postBy[normRoom(p.name)]=p; postBy[normRoom(p.id)]=postBy[normRoom(p.id)]||p; });
+  const nightPost=S.posts.find(p=>Object.values(p.on||{}).some(a=>(a||[]).includes("N")));
+  const ours=new Set(S.residents.map(r=>r.name.trim().toLowerCase()));
+  const map={}, unknown=new Set(); let sec="M", room=null, own=0;
+  for(let r=1;r<rows.length;r++){ const row=rows[r]||[], a=String(row[0]||"").trim();
+    if(/^pomeriggio/i.test(a)){ sec="P"; room=null; continue; }
+    if(a){ if(/^notte/i.test(a)) room={night:true}; else { const p=postBy[normRoom(a)]; room=p?{post:p}:null; if(!p) unknown.add(a); } }
+    if(!room) continue;
+    for(const c in col){ const v=String(row[c]??"").trim(); if(!v) continue; const d=col[c], t=dayType(d);
+      let post=room.night?nightPost:room.post, sh=room.night?"N":sec;
+      if(!room.night&&t==="fes"&&(post.on.fes||[]).includes("D")) sh="D";
+      if(!post||!(post.on[t]||[]).includes(sh)) continue;
+      if(ours.has(v.replace(/^\(\s*\d\s*\)\s*/,"").trim().toLowerCase())){ own++; continue; }
+      const k=d+"|"+post.id+"|"+sh; map[k]=map[k]||[]; if(!map[k].includes(v)) map[k].push(v); } }
+  return {map,unknown:[...unknown],own,cols:Object.keys(col).length}; }
+function extPreview(name){ const wb=UI.extWb; if(!wb) return; const ws=wb.Sheets[name];
+  const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:""}), r=parseExt(rows,UI.mk); UI.extRes=r;
+  const cnt={}; for(const k in r.map){ const [,pid,sh]=k.split("|"), p=postOf(pid), lab=(p?p.name:pid)+" · "+SHN[sh]; cnt[lab]=(cnt[lab]||0)+1; }
+  const n=Object.keys(r.map).length, per=period(UI.mk);
+  sheet(`<div class="row" style="justify-content:space-between"><h2>Turni degli altri anni</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
+   <label class="stack" style="gap:4px"><span class="label">Foglio</span><select id="extsheet">${wb.SheetNames.map(x=>`<option ${x===name?"selected":""}>${esc(x)}</option>`).join("")}</select></label>
+   <p class="muted" style="margin:0;font-size:.86rem">${monthName(UI.mk)} (${fmt(per.first)} – ${fmt(per.days[per.days.length-1])}): riconosciuti ${r.cols} giorni su ${per.days.length}. I turni trovati vengono segnati come coperti: il generatore non li assegna ai nostri e non li conta come scoperti.</p>
+   ${n?`<div class="alerts" style="background:var(--accent-soft)"><strong>${n} turni coperti da altri anni</strong><ul>${Object.entries(cnt).sort().map(([k,v])=>`<li>${esc(k)}: ${v}</li>`).join("")}</ul></div>`:`<div class="alerts bad"><strong>Nessun turno riconosciuto</strong><span style="font-size:.85rem">Controlla di aver scelto il foglio del mese giusto.</span></div>`}
+   ${r.own?`<p class="muted" style="margin:0;font-size:.82rem">${r.own} turni dei nostri specializzandi presenti nel foglio sono stati ignorati.</p>`:""}
+   ${r.unknown.length?`<p class="muted" style="margin:0;font-size:.82rem">Sale non nostre, ignorate: ${r.unknown.map(esc).join(", ")}.</p>`:""}
+   ${r.cols<per.days.length?`<p style="margin:0;font-size:.82rem;color:var(--bad)">Alcuni giorni del mese non sono nel foglio: lì non risulta nessun turno coperto.</p>`:""}
+   <div class="row"><button class="btn primary" data-act="extsave" ${n?"":"disabled"}>Salva${Object.keys(M(UI.mk).ext||{}).length?" (sostituisce quelli caricati prima)":""}</button><button class="btn" data-act="close">Annulla</button></div>`); }
+
 /* ---------- sheets ---------- */
 const layer=document.getElementById("layer");
 function sheet(html){layer.innerHTML=`<div class="scrim" data-act="close"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;}
@@ -728,7 +770,7 @@ async function exportXlsx(){
   if(typeof XLSX==="undefined"){toast("Libreria Excel non caricata, riprova tra poco");return;}
   const SC=effSched(UI.mk)||{}, cols=columns(SC,p);
   const t1=[["Data","Giorno",...cols.map(c=>`${c.post.name} ${c.s==="D"||c.s==="N"?"":SHN[c.s]+" "}(${S.hours[c.s]})`.replace("  "," "))]];
-  p.days.forEach(d=>t1.push([d.split("-").reverse().join("/"),DOW[isoDow(d)]+(dayType(d)==="fes"&&isoDow(d)!==6?" (festivo)":""),...cols.map(c=>{const a=(SC[d]||{})[c.k];return a?a.map(x=>x?resName(x):"SCOPERTO").join(", "):"";})]));
+  p.days.forEach(d=>t1.push([d.split("-").reverse().join("/"),DOW[isoDow(d)]+(dayType(d)==="fes"&&isoDow(d)!==6?" (festivo)":""),...cols.map(c=>{const a=(SC[d]||{})[c.k], ex=(mo.ext||{})[d+"|"+c.k]||[];return a?[...a.map(x=>x?resName(x):"SCOPERTO"),...ex].join(", "):"";})]));
   const people=S.residents.filter(r=>inGem(mo,r.id)||(SC&&shiftsOf(SC,r.id).length));
   const lab=(c,w)=>c==="S"?"Smonto":c==="X"?"indisp.":c==="F"?"ferie":c==="C"?"congresso":c==="D"?"Guardia domenica":c==="N"?"Monto (notte)":c?`${w} ${c}`:"";
   const t2=[["Specializzando","Rotazione",...p.days.map(d=>`${DOW[isoDow(d)]} ${+d.slice(8)}/${+d.slice(5,7)}`)]];
@@ -808,6 +850,9 @@ document.addEventListener("click",e=>{
     swWrite(nx).then(ok=>{ if(ok){ closeSheet(); toast(nx.status==="accepted"?"Cambio accettato: orario aggiornato":nx.status==="pending"?"Hai accettato: si attende la conferma dell'altro collega":nx.status==="rejected"?"Cambio rifiutato":"Richiesta chiusa"); render(); consolidate(); } }); return; }
   if(a==="clrF"||a==="clrC"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
     clearUnav([UI.sel],a==="clrF"?"F":"C"); toast((a==="clrF"?"Ferie":"Ferie congresso")+" di "+resName(UI.sel)+" eliminate"); render(); return; }
+  if(a==="clrext"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null; const mo=M(UI.mk); mo.ext={}; persist(); render(); toast("Turni degli altri anni rimossi"+(mo.generated?": rigenera per usare quei turni":"")); return; }
+  if(a==="extsave"){ const mo=M(UI.mk), r=UI.extRes; if(!r) return; mo.ext=r.map; UI.extRes=null; UI.extWb=null; persist(); closeSheet(); render();
+    toast(`${Object.keys(r.map).length} turni coperti da altri anni salvati`+(mo.generated?": rigenera per applicarli":"")); return; }
   if(a==="clrone"||a==="clrall"||a==="clrsched"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
     if(a==="clrsched"){ const mo=M(UI.mk); mo.sched=null; mo.generated=null; mo.fixed={}; toast("Turni eliminati"); }
     else { const mode=UI.umode||"T"; clearUnav(a==="clrone"?[UI.sel]:S.residents.map(r=>r.id),mode); toast(a==="clrone"?"Eliminate per "+resName(UI.sel):"Eliminate per tutti"); }
@@ -839,7 +884,7 @@ document.addEventListener("click",e=>{
   if(a==="assign"){ const mo=M(UI.mk), d=layer.dataset.d, k=layer.dataset.k, i=+el.dataset.i, id=el.dataset.id||null;
     mo.sched[d][k][i]=id; mo.fixed=mo.fixed||{}; if(id) mo.fixed[d+"|"+k+"|"+i]=id; else delete mo.fixed[d+"|"+k+"|"+i];
     persist(); closeSheet(); render(); return; }
-  if(a==="manualstart"){ const mo=M(UI.mk); if(!mo.sched){ const sc={}; period(UI.mk).days.forEach(d=>{ sc[d]={}; slotsOfDay(d).forEach(x=>{ sc[d][x.key]=[null]; }); }); mo.sched=sc; mo.generated=null; }
+  if(a==="manualstart"){ const mo=M(UI.mk); if(!mo.sched){ const sc={}; period(UI.mk).days.forEach(d=>{ sc[d]={}; slotsOfDay(d).forEach(x=>{ sc[d][x.key]=extCovered(mo,d,x.key)?[]:[null]; }); }); mo.sched=sc; mo.generated=null; }
     UI.view="giorni"; persist(); render(); return; }
   if(a==="del"){ const id=el.dataset.id; if(UI.confirm!=="del-"+id){UI.confirm="del-"+id;render();return;}
     S.residents=S.residents.filter(r=>r.id!==id); UI.confirm=null; persist(); render(); return; }
@@ -852,6 +897,12 @@ document.addEventListener("click",e=>{
 });
 document.addEventListener("change",e=>{
   const t=e.target;
+  if(t.id==="extfile"&&ADMIN()&&t.files&&t.files[0]){ if(typeof XLSX==="undefined"){toast("Libreria Excel non caricata, riprova tra poco");return;}
+    const fr=new FileReader(); fr.onload=()=>{ try{ const wb=XLSX.read(fr.result,{type:"array"}); UI.extWb=wb;
+        const want=monthName(UI.mk).toLowerCase(), name=wb.SheetNames.find(n=>n.trim().toLowerCase()===want)||wb.SheetNames.find(n=>n.toLowerCase().includes(want.split(" ")[0]))||wb.SheetNames[0];
+        extPreview(name); }catch(err){ toast("File non leggibile: "+err.message); } };
+    fr.readAsArrayBuffer(t.files[0]); t.value=""; return; }
+  if(t.id==="extsheet"){ extPreview(t.value); return; }
   if(t.id==="impfile"&&OWNER&&t.files&&t.files[0]){ const fr=new FileReader(); fr.onload=async()=>{ try{
       const x=JSON.parse(fr.result); const at=new Date().toISOString();
       if(x.config) await db.doc("config/main").set({state:typeof x.config==="string"?x.config:JSON.stringify(x.config),updated:at});
