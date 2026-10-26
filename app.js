@@ -39,7 +39,8 @@ const PARSED={};
 let COVY={};
 const COV_DEF={diagsen:[1],radsen1:[1],radsen2:[1],ecocolumbus:[1],eco:[1],rxtorace:[1],rxscheletro:[1],tccolumbus:[3]};
 function yearsFor(p){ const k=normRoom(p.name), v=COVY[k]; return Array.isArray(v)?v:(COV_DEF[k]||YEARS); }
-function postActive(p){ return yearsFor(p).includes(CURY); }
+/* gli anni dell'elenco sono gli anni di corso effettivi del mese (es. in ottobre il vostro gruppo è 1° anno) */
+function postActive(p){ return yearsFor(p).includes(yLab(CURY)); }
 function yState(y){ if(y===CURY&&S) return S; const r=RAW[y]; if(!r||r.cfg===undefined||r.mon===undefined) return null;
   const key=(r.cfg||"")+"\u0001"+(r.mon||""); if(PARSED[y]&&PARSED[y].key===key) return PARSED[y].st;
   let st=null; try{ const c=r.cfg?JSON.parse(r.cfg):null, m=r.mon?JSON.parse(r.mon):null; if(c) st={...c,months:(m&&m.months)||{}}; }catch(e){}
@@ -259,7 +260,7 @@ function canDo(pid,s){ const r=resOf(pid); return r?canDoR(r,s,S):true; }
 function nightQuota(mk,sh){ if(!MULTI||!hasLowerYear()) return null; const days=period(mk).days; let need=0, people=0, mine=0, union={};
   for(const y of YEARS){ const st=yState(y); if(!st) continue; const rot=(((st.months||{})[mk])||{}).rot||{}, ext=new Set((st.externals||[]).map(x=>x.id));
     const n=(st.residents||[]).filter(r=>rot[r.id]&&!ext.has(rot[r.id])&&canDoR(r,sh,st)).length; people+=n; if(y===CURY) mine=n;
-    (st.posts||[]).forEach(p=>{ const k=normRoom(p.name); if(k&&yearsFor(p).includes(y)&&!union[k]) union[k]=p; }); }
+    (st.posts||[]).forEach(p=>{ const k=normRoom(p.name); if(k&&yearsFor(p).includes(yLab(y))&&!union[k]) union[k]=p; }); }
   for(const d of days){ const t=dayType(d); for(const k in union) if(((union[k].on||{})[t]||[]).includes(sh)) need++; }
   /* per: massimo a persona; year: quota dell'anno, in proporzione agli abilitati */
   return people?{per:Math.max(1,Math.ceil(need/people)),year:Math.round(need*mine/people)}:null; }
@@ -337,7 +338,7 @@ function fairMonth(mk){ if(!MULTI) return null;
   const days=period(mk).days, union={}; let people=0;
   for(const y of YEARS){ const st=yState(y); if(!st) continue; const rot=(((st.months||{})[mk])||{}).rot||{}, ext=new Set((st.externals||[]).map(x=>x.id));
     people+=(st.residents||[]).filter(r=>rot[r.id]&&!ext.has(rot[r.id])).length;
-    (st.posts||[]).forEach(p=>{ const k=normRoom(p.name); if(k&&yearsFor(p).includes(y)&&!union[k]) union[k]=p; }); }
+    (st.posts||[]).forEach(p=>{ const k=normRoom(p.name); if(k&&yearsFor(p).includes(yLab(y))&&!union[k]) union[k]=p; }); }
   if(!people) return null;
   let demand=0; for(const d of days){ const t=dayType(d); for(const k in union) demand+=((union[k].on||{})[t]||[]).length; }
   return Math.max(1,Math.ceil(demand/people)); }
@@ -714,7 +715,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   const people=S.residents.filter(r=>inGem(mo,r.id)||(SC&&shiftsOf(SC,r.id).length));
   if(UI.view==="giorni"){
     /* filtro per metodica: sale della rotazione (solo mattina/pomeriggio) oppure notti e guardie */
-    const myY=ADMIN()?null:((MULTI&&myAnyPid()&&yearOfPid(myAnyPid()))||CURY);
+    const myY=ADMIN()?null:yLab((MULTI&&myAnyPid()&&yearOfPid(myAnyPid()))||CURY);
     const F=UI.filt||"", cols=columns(SC,p).filter(c=>myY===null||yearsFor(c.post).includes(myY)).filter(c=>!F||(F==="NG"?(c.s==="N"||c.s==="D"):(c.post.cover===F&&(c.s==="M"||c.s==="P")))), used=S.posts.filter(x=>cols.some(c=>c.post===x));
     body=`<div class="pickers sm" style="margin-bottom:6px"><button data-act="filt" data-v="" aria-pressed="${!F}">Tutte</button>${S.rotations.filter(r=>S.posts.some(x=>x.cover===r.id&&postActive(x))).map(r=>`<button data-act="filt" data-v="${r.id}" aria-pressed="${F===r.id}">${esc(r.name)}</button>`).join("")}<button data-act="filt" data-v="NG" aria-pressed="${F==="NG"}">Notti e guardie</button></div>`;
     body+=`<div class="scroll"><table class="grid"><thead><tr><th class="sticky" rowspan="2">Giorno</th>${used.map(x=>`<th class="roomh" colspan="${cols.filter(c=>c.post===x).length}">${esc(x.name)}</th>`).join("")}</tr>
@@ -777,8 +778,8 @@ function vImp2(){
    <div class="row"><button class="btn ${UI.confirm==="years"?"confirm":S.multiYear?"danger":"primary"}" data-act="years">${UI.confirm==="years"?"Tocca di nuovo per confermare":S.multiYear?"Disattiva più anni":"Attiva più anni"}</button></div></div>`:"";
   const covPanel=ADMIN()&&db?(()=>{ const rows=[], seen=new Set();
     (MULTI?YEARS:[CURY]).forEach(y=>((y===CURY?S:yState(y)||{}).posts||[]).forEach(p=>{ const k=normRoom(p.name); if(!k||seen.has(k)) return; seen.add(k); rows.push({k,name:p.name,p}); }));
-    return `<div class="panel"><h2>Anni che coprono ogni sala</h2><p class="muted" style="margin:0;font-size:.85rem">Elenco unico per tutti gli anni: lo modificate tu e i gestori di qualsiasi anno. Un anno genera turni solo nelle sale dove è segnato (anche con «Più anni» spento). Gli specializzandi vedono nella tabella dei turni solo le sale del proprio anno.</p>
-     <div class="list">${rows.map(r=>{ const ys=yearsFor(r.p); return `<div class="item"><span class="name-strong">${esc(r.name)}</span><span class="pickers sm">${YEARS.map(y=>`<button data-act="covy" data-k="${esc(r.k)}" data-y="${y}" aria-pressed="${ys.includes(y)}">${yLab(y)}°</button>`).join("")}</span></div>`; }).join("")}</div></div>`; })():"";
+    return `<div class="panel"><h2>Anni che coprono ogni sala</h2><p class="muted" style="margin:0;font-size:.85rem">Elenco unico per tutti gli anni: lo modificate tu e i gestori di qualsiasi anno. Un anno genera turni solo nelle sale dove è segnato (anche con «Più anni» spento). Gli specializzandi vedono nella tabella dei turni solo le sale del proprio anno. Gli anni sono quelli di corso del mese (l'anno cambia a novembre).</p>
+     <div class="list">${rows.map(r=>{ const ys=yearsFor(r.p); return `<div class="item"><span class="name-strong">${esc(r.name)}</span><span class="pickers sm">${YEARS.map(y=>`<button data-act="covy" data-k="${esc(r.k)}" data-y="${y}" aria-pressed="${ys.includes(y)}">${y}°</button>`).join("")}</span></div>`; }).join("")}</div></div>`; })():"";
   const privPanel=ADMIN()&&db?`<div class="panel"><div class="row" style="justify-content:space-between"><h2>Privacy indisponibilità</h2><button class="btn ${HIDEUNAV?"primary":""}" data-act="privtog" role="switch" aria-checked="${HIDEUNAV}">${HIDEUNAV?"Attivo":"Spento"}</button></div>
    <p class="muted" style="margin:0;font-size:.85rem">${HIDEUNAV?"Gli specializzandi vedono solo le proprie indisponibilità, ferie, congressi e preferenze. Tu e i gestori vedete tutto.":"Tutti vedono le indisponibilità, ferie e congressi di tutti. Attivandolo ognuno vede solo le proprie (tu e i gestori vedete sempre tutto)."}</p>
    <div class="row" style="justify-content:space-between"><h2>Privacy cambi</h2><button class="btn ${HIDESWAPS?"primary":""}" data-act="privsw" role="switch" aria-checked="${HIDESWAPS}">${HIDESWAPS?"Attivo":"Spento"}</button></div>
