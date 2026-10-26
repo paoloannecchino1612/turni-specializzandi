@@ -70,7 +70,8 @@ const UNAV={}; /* mk → pid → {data: codice} — un documento per specializza
 /* preferenze di turno (3° e 4° anno), nello stesso documento delle indisponibilità: mk → pid → {data: "M" | "TC1|M" …} */
 const PREF={}; function PR(mk){return PREF[mk]||(PREF[mk]={});}
 /* privacy: se attivo (config/privacy.hideUnav), gli specializzandi vedono solo le proprie indisponibilità, ferie, congressi e preferenze */
-let HIDEUNAV=false;
+let HIDEUNAV=false, HIDESWAPS=false;
+function swInvolves(x,pid){ return !!pid&&(x.from===pid||x.to===pid||(x.needs||[]).includes(pid)||(x.extra||[]).some(e=>e.giver===pid||e.taker===pid)); }
 function canPref(pid){ const r=resOf(pid); return !!r&&yearOfRes(r)>=3; }
 function UN(mk){return UNAV[mk]||(UNAV[mk]={});}
 const now=new Date();
@@ -738,7 +739,9 @@ function vImp(){
     return `<div class="panel"><h2>Anni che coprono ogni sala</h2><p class="muted" style="margin:0;font-size:.85rem">Elenco unico per tutti gli anni: lo modificate tu e i gestori di qualsiasi anno. Un anno genera turni solo nelle sale dove è segnato. Vale per le sale con lo stesso nome in tutti gli anni.</p>
      <div class="list">${rows.map(r=>{ const ys=yearsFor(r.p); return `<div class="item"><span class="name-strong">${esc(r.name)}</span><span class="pickers sm">${YEARS.map(y=>`<button data-act="covy" data-k="${esc(r.k)}" data-y="${y}" aria-pressed="${ys.includes(y)}">${y}°</button>`).join("")}</span></div>`; }).join("")}</div></div>`; })():"";
   const privPanel=ADMIN()&&db?`<div class="panel"><div class="row" style="justify-content:space-between"><h2>Privacy indisponibilità</h2><button class="btn ${HIDEUNAV?"primary":""}" data-act="privtog" role="switch" aria-checked="${HIDEUNAV}">${HIDEUNAV?"Attivo":"Spento"}</button></div>
-   <p class="muted" style="margin:0;font-size:.85rem">${HIDEUNAV?"Gli specializzandi vedono solo le proprie indisponibilità, ferie, congressi e preferenze. Tu e i gestori vedete tutto.":"Tutti vedono le indisponibilità, ferie e congressi di tutti. Attivandolo ognuno vede solo le proprie (tu e i gestori vedete sempre tutto)."}</p></div>`:"";
+   <p class="muted" style="margin:0;font-size:.85rem">${HIDEUNAV?"Gli specializzandi vedono solo le proprie indisponibilità, ferie, congressi e preferenze. Tu e i gestori vedete tutto.":"Tutti vedono le indisponibilità, ferie e congressi di tutti. Attivandolo ognuno vede solo le proprie (tu e i gestori vedete sempre tutto)."}</p>
+   <div class="row" style="justify-content:space-between"><h2>Privacy cambi</h2><button class="btn ${HIDESWAPS?"primary":""}" data-act="privsw" role="switch" aria-checked="${HIDESWAPS}">${HIDESWAPS?"Attivo":"Spento"}</button></div>
+   <p class="muted" style="margin:0;font-size:.85rem">${HIDESWAPS?"Gli specializzandi vedono solo i cambi in cui sono coinvolti. Tu e i gestori vedete tutto.":"Tutti vedono lo storico dei cambi di tutti (con il filtro «Solo i miei»). Attivandolo ognuno vede solo i cambi in cui è coinvolto."}</p></div>`:"";
   return reqPanel+yearsPanel+privPanel+covPanel+mgPanel+allowPanel+linkedPanel()+importPanel+`
   <div class="panel"><h2>Specializzandi</h2>
    <form class="row" id="addform"><input id="newname" placeholder="Cognome Nome" style="flex:1 1 12em" autocomplete="off"><select id="newyear" aria-label="Anno">${[1,2,3,4].map(y=>`<option ${y===2?"selected":""}>${y}° anno</option>`).join("")}</select><button class="btn primary" type="submit">Aggiungi</button></form>
@@ -812,8 +815,9 @@ function vCambi(){ if(!S.residents.length) return monthBar()+noRes();
     h+=`<div class="panel"><div class="row" style="justify-content:space-between"><h2>Cambi da inserire nell'orario ufficiale</h2><span class="chip ${nuovi.length?"tag-C":""}">${nuovi.length} nuovi</span></div>
      <p class="muted" style="margin:0;font-size:.85rem">Scarica l'elenco dei cambi accettati e non ancora riportati: dopo il download vengono segnati come riportati, così la volta successiva trovi solo quelli nuovi.</p>
      <div class="row"><button class="btn primary" data-act="rep" data-all="0" ${nuovi.length?"":"disabled"}>Scarica i ${nuovi.length} nuovi (Excel)</button><button class="btn" data-act="repcopy" ${nuovi.length?"":"disabled"}>Copia come testo</button><button class="btn" data-act="rep" data-all="1" ${acc.length?"":"disabled"}>Scarica tutti (${acc.length})</button></div></div>`; }
-  const done=all.filter(x=>x.status!=="pending").reverse();
-  h+=`<div class="panel"><h2>Storico cambi di ${monthName(mk)}</h2>${done.length?`<div class="stack" style="gap:8px">${done.map(x=>swCard(x,false,false,ADMIN()&&(x.status!=="accepted"||x.applied))).join("")}</div>`:`<p class="muted" style="margin:0">Nessun cambio per ora.</p>`}</div>`;
+  const forced=HIDESWAPS&&!ADMIN(), onlyMine=forced||(UI.swMine&&!!me);
+  const done=all.filter(x=>x.status!=="pending"&&(!onlyMine||swInvolves(x,me))).reverse();
+  h+=`<div class="panel"><div class="row" style="justify-content:space-between"><h2>Storico cambi di ${monthName(mk)}</h2>${!forced&&me?`<span class="pickers sm"><button data-act="swmine" data-v="0" aria-pressed="${!onlyMine}">Tutti</button><button data-act="swmine" data-v="1" aria-pressed="${onlyMine}">Solo i miei</button></span>`:""}</div>${done.length?`<div class="stack" style="gap:8px">${done.map(x=>swCard(x,false,false,ADMIN()&&(x.status!=="accepted"||x.applied))).join("")}</div>`:`<p class="muted" style="margin:0">Nessun cambio per ora.</p>`}</div>`;
   return h; }
 function linkedPanel(){ let h=""; if(OWNER){ const bad=CLAIMDOCS.filter(x=>CLAIMS[x.pid]!==x.u||!(MULTI?yearOfPid(x.pid):S.residents.some(r=>r.id===x.pid)));
     if(bad.length) h+=`<div class="panel" style="border:2px solid var(--bad)"><h2>Associazioni da sistemare</h2><p class="muted" style="margin:0;font-size:.85rem">Account associati a un nome già preso da un altro account o a un nome che non esiste più. Scollegali: potranno scegliere di nuovo il proprio nome.</p>
@@ -1200,7 +1204,9 @@ document.addEventListener("click",e=>{
     db.doc("config/years").set({state:JSON.stringify({coverage:next}),updated:new Date().toISOString()}).catch(()=>toast("Non riesco a salvare: le regole del database vanno aggiornate"));
     return; }
   if(a==="rflag"){ const r=resOf(el.dataset.id); if(!r) return; const f=el.dataset.f; r[f]=!canDo(r.id,f==="nights"?"N":"D"); persist(); render(); return; }
-  if(a==="privtog"){ if(!ADMIN()) return; db.doc("config/privacy").set({hideUnav:!HIDEUNAV,updated:new Date().toISOString()}).then(()=>toast(!HIDEUNAV?"Indisponibilità degli altri nascoste agli specializzandi":"Indisponibilità di nuovo visibili a tutti")).catch(()=>toast("Non riesco a salvare: aggiorna le regole del database")); return; }
+  if(a==="privsw"){ if(!ADMIN()) return; db.doc("config/privacy").set({hideUnav:HIDEUNAV,hideSwaps:!HIDESWAPS,updated:new Date().toISOString()}).then(()=>toast(!HIDESWAPS?"Cambi degli altri nascosti agli specializzandi":"Cambi di nuovo visibili a tutti")).catch(()=>toast("Non riesco a salvare: aggiorna le regole del database")); return; }
+  if(a==="swmine"){ UI.swMine=el.dataset.v==="1"; render(); return; }
+  if(a==="privtog"){ if(!ADMIN()) return; db.doc("config/privacy").set({hideUnav:!HIDEUNAV,hideSwaps:HIDESWAPS,updated:new Date().toISOString()}).then(()=>toast(!HIDEUNAV?"Indisponibilità degli altri nascoste agli specializzandi":"Indisponibilità di nuovo visibili a tutti")).catch(()=>toast("Non riesco a salvare: aggiorna le regole del database")); return; }
   if(a==="year"){ switchYear(+el.dataset.v); render(); return; }
   if(a==="years"){ if(UI.confirm!=="years"){UI.confirm="years";render();return;} UI.confirm=null;
     if(S.multiYear){ S.multiYear=false; persist(); toast("Più anni disattivato: dati degli altri anni conservati"); render(); return; }
@@ -1384,7 +1390,8 @@ render();
       for(const x of list) if(!CLAIMS[x.pid]) CLAIMS[x.pid]=x.u; CLAIMDOCS=list;
       syncSubs(list.map(x=>x.u)); recomputeUnav(); syncRoles(); autoYear(); if(S&&!layer.innerHTML) render(); }, ()=>{});
     syncSubs([]);
-    db.doc("config/privacy").onSnapshot(sn=>{ const v=!!(sn.exists&&sn.data().hideUnav); if(v===HIDEUNAV) return; HIDEUNAV=v; recomputeUnav(); if(S&&!layer.innerHTML) render(); },()=>{});
+    db.doc("config/privacy").onSnapshot(sn=>{ const d=(sn.exists&&sn.data())||{}, v=!!d.hideUnav, w=!!d.hideSwaps; if(v===HIDEUNAV&&w===HIDESWAPS) return;
+      const ch=v!==HIDEUNAV; HIDEUNAV=v; HIDESWAPS=w; if(ch) recomputeUnav(); if(S&&!layer.innerHTML) render(); },()=>{});
     if(OWNER) db.collection("accessRequests").limit(200).onSnapshot(qs=>{ REQS=qs.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.email).sort((a,b)=>(a.at||"").localeCompare(b.at||"")); 
       const t=document.querySelector('#tabs button[data-tab="imp"]'); if(t) t.textContent=REQS.length?`Impostazioni (${REQS.length})`:"Impostazioni";
       if(REQS.length&&!UI.reqToast){ UI.reqToast=true; toast(REQS.length===1?"Nuova richiesta di accesso in Impostazioni":REQS.length+" richieste di accesso in Impostazioni"); }
