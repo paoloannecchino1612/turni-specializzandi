@@ -739,8 +739,9 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   if(UI.view==="giorni"){
     /* filtro per metodica: sale della rotazione (solo mattina/pomeriggio) oppure notti e guardie */
     const myY=ADMIN()?null:yLab((MULTI&&myAnyPid()&&yearOfPid(myAnyPid()))||CURY);
-    const F=UI.filt||"", cols=columns(SC,p).filter(c=>myY===null||yearsFor(c.post).includes(myY)).filter(c=>!F||(F==="NG"?(c.s==="N"||c.s==="D"):(c.post.cover===F&&(c.s==="M"||c.s==="P")))), used=S.posts.filter(x=>cols.some(c=>c.post===x));
-    body=`<div class="pickers sm" style="margin-bottom:6px"><button data-act="filt" data-v="" aria-pressed="${!F}">Tutte</button>${S.rotations.filter(r=>S.posts.some(x=>x.cover===r.id&&postActive(x))).map(r=>`<button data-act="filt" data-v="${r.id}" aria-pressed="${F===r.id}">${esc(r.name)}</button>`).join("")}<button data-act="filt" data-v="NG" aria-pressed="${F==="NG"}">Notti e guardie</button></div>`;
+    const cols0=columns(SC,p).filter(c=>myY===null||yearsFor(c.post).includes(myY)), fgs=FGROUPS.filter(([id])=>cols0.some(c=>(c.s==="M"||c.s==="P")&&fgOf(c.post)===id));
+    const F=fgs.some(([id])=>id===UI.filt)||UI.filt==="NG"?UI.filt:"", cols=cols0.filter(c=>!F||(F==="NG"?(c.s==="N"||c.s==="D"):(fgOf(c.post)===F&&(c.s==="M"||c.s==="P")))), used=S.posts.filter(x=>cols.some(c=>c.post===x));
+    body=`<div class="pickers sm" style="margin-bottom:6px"><button data-act="filt" data-v="" aria-pressed="${!F}">Tutte</button>${fgs.map(([id,name])=>`<button data-act="filt" data-v="${id}" aria-pressed="${F===id}">${esc(name)}</button>`).join("")}<button data-act="filt" data-v="NG" aria-pressed="${F==="NG"}">Notti e guardie</button></div>`;
     body+=`<div class="scroll"><table class="grid"><thead><tr><th class="sticky" rowspan="2">Giorno</th>${used.map(x=>`<th class="roomh" colspan="${cols.filter(c=>c.post===x).length}">${esc(x.name)}</th>`).join("")}</tr>
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
      ${p.days.map((d,i)=>{const t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
@@ -1065,6 +1066,10 @@ function maybePlan(mk,pid,d){ if(!ADMIN()) return false; const c=conflictsOf(mk,
 /* ---------- turni coperti dagli altri anni (import dal foglio "BOZZA ORARI") ---------- */
 /* mo.ext: "giorno|postId|turno" → ["(3) Rossi", …]; quei turni non vengono assegnati ai nostri e non sono buchi */
 /* TC e RM possono avere più persone: lì un altro anno non toglie il nostro posto (resta da coprire con priorità bassa, ma vuoto non è un buco) */
+/* filtri per metodica in Turni "Per giorno": gruppi riconosciuti dal nome della sala (indipendenti dalle rotazioni salvate) */
+const FGROUPS=[["TC","TC"],["RM","RM"],["ANGIO","Angiografia"],["DEA","DEA"],["SENO","Senologia"],["ECO","Ecografia"],["RX","RX"]];
+function fgOf(p){ const k=normRoom(p.name); if(/^(diagsen|radsen)/.test(k)) return "SENO"; if(/^eco/.test(k)) return "ECO"; if(/^(rx|sala8)/.test(k)) return "RX";
+  if(/^tc/.test(k)) return "TC"; if(/^rm/.test(k)) return "RM"; if(/^angio/.test(k)) return "ANGIO"; if(/^dea/.test(k)) return "DEA"; return p.cover; }
 function multiPost(p){ return !!p&&(p.cover==="TC"||p.cover==="RM"); }
 function extCovered(mo,d,key){ return !!EXT(mo)[d+"|"+key] && !multiPost(postOf(key.split("|")[0])) && !(mo.fixed||{})[d+"|"+key+"|0"]; }
 const EXT_MAN="Altri anni (inserito a mano)";
