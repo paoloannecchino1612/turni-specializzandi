@@ -351,10 +351,23 @@ function fairMonth(mk){ if(!MULTI) return null;
   if(!people) return null;
   let demand=0; for(const d of days){ const t=dayType(d); for(const k in union) demand+=((union[k].on||{})[t]||[]).length; }
   return Math.max(1,Math.ceil(demand/people)); }
+/* equità su più mesi: notti, guardie e turni nel weekend dei 3 mesi precedenti (orario pubblicato).
+   Scarto di ognuno dalla media del gruppo (limitato a ±3): il generatore lo somma ai conteggi del mese, così chi ne ha fatti di più ne riceve meno. */
+function pastLoad(mk){ const [y,m]=mk.split("-").map(Number), out={}; S.residents.forEach(r=>out[r.id]={N:0,D:0,we:0,months:0});
+  for(let k=1;k<=KEEP_MONTHS;k++){ const pk=mkOf(y,m-k), mo=S.months[pk]; if(!mo||!mo.sched||!mo.generated) continue; const sc=effSched(pk)||mo.sched, seen=new Set();
+    for(const d of period(pk).days){ const t=dayType(d); for(const key in (sc[d]||{})){ const sh=key.split("|")[1]; (sc[d][key]||[]).forEach(pid=>{ const o=out[pid]; if(!o) return; seen.add(pid);
+      if(sh==="N") o.N++; if(sh==="D") o.D++; if(t!=="fer") o.we++; }); } }
+    seen.forEach(pid=>out[pid].months++); }
+  return out; }
+function pastBias(mk){ const h=pastLoad(mk), B={}; const ids=Object.keys(h).filter(id=>h[id].months>0);
+  for(const f of ["N","D","we"]){ const el=ids.filter(id=>f==="we"||canDo(id,f)); const mean=el.length?el.reduce((a,id)=>a+h[id][f],0)/el.length:0;
+    for(const id in h){ B[id]=B[id]||{N:0,D:0,we:0}; if(el.includes(id)) B[id][f]=Math.max(-3,Math.min(3,h[id][f]-mean)); } }
+  return {B,h}; }
 function generate(mk,wk,only2){ /* only2: Set di pid a cui si possono dare turni nuovi (aggiorna per rotazione) */
   const mo=M(mk), {days}=period(mk), rand=rng(Date.now()%2147483647), only=wk!==undefined&&wk!==null, base=(hasDraft(mo)?mo.draft.sched:mo.sched)||{};
   const sched={}, st={}, slots=[], nDone={N:0,D:0};
   S.residents.forEach(r=>{st[r.id]=newStat();st[r.id].jit=rand();});
+  const PB=pastBias(mk).B, pb=(id,f)=>(PB[id]||{})[f]||0;
   /* notte dell'ultimo giorno del mese precedente: il primo lunedì è smonto */
   { const [y,m]=mk.split("-").map(Number), pk=mkOf(y,m-1); if(S.months[pk]){ const ps=effSched(pk)||{}, last=add(days[0],-1); for(const k in (ps[last]||{})) (ps[last][k]||[]).forEach(pid=>{ if(pid&&st[pid]) st[pid].on[last]=k.split("|")[1]; }); } }
   days.forEach((d,i)=>{ const t=dayType(d), w=Math.floor(i/7);
@@ -373,7 +386,7 @@ function generate(mk,wk,only2){ /* only2: Set di pid a cui si possono dare turni
       if(sl.s==="N"&&capN&&(p.N>=capN.per||nDone.N>=capN.year)) continue; if(sl.s==="D"&&capD&&(p.D>=capD.per||nDone.D>=capD.year)) continue; if(!ok(mo,p,r.id,sl.d,sl.s,sl.w,cap,forceG)) continue; if(mcap&&p.tot>=mcap) continue;
       const j=p.jit+rand()*0.5;
       const mp=(sl.s==="M"||sl.s==="P")?p[sl.s]-(sl.s==="M"?p.P:p.M):0, pc=p.pc[sl.post.id]||0, same=p.last[sl.d]===undefined&&p.last[add(sl.d,-1)]===sl.post.id?1:0;
-      const key= sl.s==="N"?[p.N,p.tot,j] : sl.s==="D"?[p.we,p.tot,j] : sl.t!=="fer"?[p.we,p.tot,mp,pc+same,j] : [p.tot,mp,pc+same,j];
+      const key= sl.s==="N"?[p.N+pb(r.id,"N"),p.tot,j] : sl.s==="D"?[p.we+pb(r.id,"we")+pb(r.id,"D"),p.tot,j] : sl.t!=="fer"?[p.we+pb(r.id,"we"),p.tot,mp,pc+same,j] : [p.tot,mp,pc+same,j];
       if(forceG) key.unshift(p.g||0);
       if(!best||cmp(key,bk)<0){best=r;bk=key;} }
     return best; };
@@ -614,8 +627,21 @@ function render(){
   const yLoaded=!MULTI||ALLY().every(y=>yState(y)||(RAW[y]&&RAW[y].cfg===null));
   const needLink=db&&MYUID&&yLoaded&&(MULTI||S.residents.length)&&!myAnyPid();
   if(needLink&&!OWNER){ app.innerHTML=`<section class="view">${claimPanel("")}</section>`; return; }
-  app.innerHTML=`<section class="view">${yearBar()}${needLink?linkPanel():""}${({mese:vMese,indisp:vIndisp,turni:vTurni,cambi:vCambi,imp:vImp}[UI.tab]||vMese)()}</section>`;
+  app.innerHTML=`<section class="view">${todayBanner()}${yearBar()}${needLink?linkPanel():""}${({mese:vMese,indisp:vIndisp,turni:vTurni,cambi:vCambi,imp:vImp}[UI.tab]||vMese)()}</section>`;
 }
+/* banner in alto: il turno di oggi e di domani di chi ha un nome associato (orario pubblicato, con i cambi accettati) */
+function mkOfDay(d){ const [y,m]=d.split("-").map(Number); for(const dm of [0,1,-1]){ const mk=mkOf(y,m+dm), p=period(mk); if(d>=p.first&&d<=p.last) return mk; } return null; }
+function dayInfo(pid,d){ const mk=mkOfDay(d); if(!mk) return null; const own=S.residents.some(r=>r.id===pid), st=own?S:yState(yearOfPid(pid)); if(!st) return null;
+  const mo=(st.months||{})[mk]; if(!mo||!mo.sched||!mo.generated) return {txt:"orario non ancora pubblicato",cls:""};
+  const sc=own?(effSched(mk)||mo.sched):mo.sched, find=dd=>{ for(const k in (sc[dd]||{})) if((sc[dd][k]||[]).includes(pid)) return k; return null; };
+  const k=find(d); if(k){ const [postId,sh]=k.split("|"), post=(st.posts||[]).find(x=>x.id===postId); return {txt:sh==="N"?`Notte ${esc(S.hours.N)}`:sh==="D"?`Guardia ${esc(S.hours.D)} (${esc(post?post.name:"DEA")})`:`${esc(post?post.name:postId)} · ${SHN[sh]} ${esc(S.hours[sh])}`,cls:"sh-"+sh}; }
+  const pk=find(add(d,-1)); if(pk&&pk.split("|")[1]==="N") return {txt:"Smonto",cls:""};
+  const u=((own&&S.months[mk]&&S.months[mk].unav)||{})[pid]; const c=u&&u[d]; if(c==="F") return {txt:"Ferie",cls:""}; if(c==="C") return {txt:"Congresso",cls:""};
+  return {txt:"Libero",cls:""}; }
+function todayBanner(){ const pid=myAnyPid(); if(!pid) return ""; const t=new Date(), today=ymd(new Date(Date.UTC(t.getFullYear(),t.getMonth(),t.getDate()))), tom=add(today,1);
+  const a=dayInfo(pid,today), b=dayInfo(pid,tom); if(!a&&!b) return "";
+  const cell=(lab,d,x)=>`<div style="flex:1;min-width:140px"><span class="muted" style="font-size:.78rem">${lab} · ${fmt(d)}</span><div class="name-strong">${x?(x.cls?`<span class="chip ${x.cls}">${x.txt}</span>`:x.txt):"—"}</div></div>`;
+  return `<div class="panel" style="flex-direction:row;flex-wrap:wrap;gap:10px;padding:10px 14px;margin-bottom:10px">${cell("Oggi",today,a)}${cell("Domani",tom,b)}</div>`; }
 /* mese il cui periodo (primo lunedì → ultima domenica) contiene la data di oggi */
 /* all'apertura l'app parte dal mese corrente (quello il cui periodo contiene oggi) */
 function todayMk(){ const t=new Date(), today=ymd(new Date(Date.UTC(t.getFullYear(),t.getMonth(),t.getDate())));
@@ -779,7 +805,12 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   if(UI.view==="conti"){ const cov={}; p.days.forEach(d=>{ for(const k in (SC[d]||{})){ const c=cov[k]||(cov[k]={f:0,n:0}); (SC[d][k]||[]).forEach(x=>{c.n++; if(x)c.f++;}); } });
     const shown=S.posts.filter(x=>SH.some(s=>cov[x.id+"|"+s]));
     const pct=c=>c?`${Math.round(c.f/c.n*100)}% <span class="muted">(${c.f}/${c.n})</span>`:"";
-    body+=`<h3 style="margin-top:6px">Copertura per sala</h3><div class="scroll"><table class="grid"><thead><tr><th class="sticky">Sala</th>${SH.map(s=>`<th><span class="chip sh-${s}">${SHN[s]}</span></th>`).join("")}</tr></thead><tbody>${shown.map(x=>`<tr><td class="sticky name-strong">${esc(x.name)}</td>${SH.map(s=>`<td class="num">${pct(cov[x.id+"|"+s])}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`; }
+    body+=`<h3 style="margin-top:6px">Copertura per sala</h3><div class="scroll"><table class="grid"><thead><tr><th class="sticky">Sala</th>${SH.map(s=>`<th><span class="chip sh-${s}">${SHN[s]}</span></th>`).join("")}</tr></thead><tbody>${shown.map(x=>`<tr><td class="sticky name-strong">${esc(x.name)}</td>${SH.map(s=>`<td class="num">${pct(cov[x.id+"|"+s])}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    { const {h}=pastBias(UI.mk), cur={}; S.residents.forEach(r=>cur[r.id]={N:0,D:0,we:0}); p.days.forEach(d=>{ const t=dayType(d); for(const k in (SC[d]||{})){ const sh=k.split("|")[1]; (SC[d][k]||[]).forEach(x=>{ const o=cur[x]; if(!o) return; if(sh==="N")o.N++; if(sh==="D")o.D++; if(t!=="fer")o.we++; }); } });
+      const rows=S.residents.filter(r=>h[r.id].months||cur[r.id].N||cur[r.id].D||cur[r.id].we);
+      if(rows.length) body+=`<h3 style="margin-top:6px">Equità su più mesi</h3><p class="muted" style="margin:0;font-size:.82rem">Notti, guardie e turni nel weekend dei 3 mesi precedenti (orario pubblicato) + questo mese. Generando, chi ne ha fatti di più rispetto alla media ne riceve meno.</p>
+        <div class="scroll"><table class="grid"><thead><tr><th class="sticky">Specializzando</th><th>Notti</th><th>Guardie</th><th>Weekend</th><th>Mesi</th></tr></thead><tbody>${rows.map(r=>{ const a=h[r.id], c=cur[r.id]; const f=(x,y)=>`${x+y} <span class="muted">(${x}+${y})</span>`;
+          return `<tr><td class="sticky name-strong">${esc(rName(r))}</td><td class="num">${f(a.N,c.N)}</td><td class="num">${f(a.D,c.D)}</td><td class="num">${f(a.we,c.we)}</td><td class="num">${a.months}</td></tr>`; }).join("")}</tbody></table></div>`; } }
   return head+draft+alerts+tabs+body+holesBox;
 }
 function code(mo,per,pid,d){ const p=per[pid]; if(p&&p.on[d]) return p.on[d]; if(p&&p.on[add(d,-1)]==="N") return "S"; const u=unavOf(mo,pid,d); return u==="G"?"X":u==="F"?"F":u==="C"?"C":""; }
