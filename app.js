@@ -31,21 +31,25 @@ const SW={}, SWALL={}, CLAIMS={}; let CLAIMDOCS=[]; let ALLOW=[], lastRoles="", 
 /* ---------- più anni (opzionale e reversibile) ----------
    l'anno 2 usa i documenti di sempre (config/main, planner/state); gli altri config/yN e planner/yN.
    Si attiva con S.multiYear nel config dell'anno 2: spento, l'app è identica a prima. */
-const YEARS=[1,2,3,4], RAW={}; let CURY=2, MULTI=false, RAWV=0, REBUILD=null, YAUTO=false;
+/* coorti: ogni documento yN è un gruppo di specializzandi (N = anno di corso nel 2026/27); in ogni mese si vedono le 4 coorti
+   che in quel mese sono al 1°–4° anno (YRS). Es. ottobre 2026: y2…y5 (y5 = 4° anno uscente), novembre 2026: y1…y4. */
+const LEVELS=[1,2,3,4], RAW={};
+function YRS(mk){ const sh=yShift(mk||UI.mk); return LEVELS.map(l=>l-sh); }
+function ALLY(){ const set=new Set(); try{ const [y,m]=todayMk().split("-").map(Number); for(let k=-KEEP_MONTHS;k<=KEEP_MONTHS;k++) YRS(mkOf(y,m+k)).forEach(c=>set.add(c)); }catch(e){ LEVELS.forEach(c=>set.add(c)); } return [...set].sort((a,b)=>a-b); } let CURY=2, MULTI=false, RAWV=0, REBUILD=null, YAUTO=false;
 function yDocs(y){ return y===2?{cfg:"config/main",mon:"planner/state"}:{cfg:"config/y"+y,mon:"planner/y"+y}; }
 const PARSED={};
 /* anni che coprono ogni sala: elenco unico per tutti (config/years), lo modificano proprietario e gestori di qualsiasi anno.
    chiave = nome sala normalizzato; senza indicazione la sala è di tutti gli anni */
 let COVY={};
 const COV_DEF={diagsen:[1],radsen1:[1],radsen2:[1],ecocolumbus:[1],eco:[1],rxtorace:[1],rxscheletro:[1],tccolumbus:[3],tccemi0:[1],sala8:[1]};
-function yearsFor(p){ const k=normRoom(p.name), v=COVY[k]; return Array.isArray(v)?v:(COV_DEF[k]||YEARS); }
+function yearsFor(p){ const k=normRoom(p.name), v=COVY[k]; return Array.isArray(v)?v:(COV_DEF[k]||LEVELS); }
 /* gli anni dell'elenco sono gli anni di corso effettivi del mese (es. in ottobre il vostro gruppo è 1° anno) */
 function postActive(p){ return yearsFor(p).includes(yLab(CURY)); }
 function yState(y){ if(y===CURY&&S) return S; const r=RAW[y]; if(!r||r.cfg===undefined||r.mon===undefined) return null;
   const key=(r.cfg||"")+"\u0001"+(r.mon||""); if(PARSED[y]&&PARSED[y].key===key) return PARSED[y].st;
   let st=null; try{ const c=r.cfg?JSON.parse(r.cfg):null, m=r.mon?JSON.parse(r.mon):null; if(c) st={...c,months:(m&&m.months)||{}}; }catch(e){}
   PARSED[y]={key,st}; return st; }
-function yearOfPid(pid){ for(const y of YEARS){ const st=yState(y); if(st&&(st.residents||[]).some(r=>r.id===pid)) return y; } return null; }
+function yearOfPid(pid){ for(const y of ALLY()){ const st=yState(y); if(st&&(st.residents||[]).some(r=>r.id===pid)) return y; } return null; }
 function myAnyPid(){ if(!MYUID) return null; for(const pid in CLAIMS) if(CLAIMS[pid]===MYUID&&(MULTI?yearOfPid(pid):S&&S.residents.some(r=>r.id===pid))) return pid; return null; }
 /* cambi: si mostrano solo quelli dell'anno che si sta guardando */
 function filterSW(){ for(const k in SW) delete SW[k]; const ids=new Set(S?S.residents.map(r=>r.id):[]);
@@ -53,7 +57,7 @@ function filterSW(){ for(const k in SW) delete SW[k]; const ids=new Set(S?S.resi
 /* cascata: i turni degli anni superiori (4 → 3 → 2 → 1) contano come "coperti da altri anni" per l'anno che si guarda */
 const EXTC={key:null,map:{}};
 function autoExt(mk,lower){ const out={};
-  for(const y of YEARS){ if(lower?y>=CURY:y<=CURY) continue; const st=yState(y); const m2=st&&st.months&&st.months[mk]; if(!m2||!m2.sched) continue;
+  for(const y of YRS(mk)){ if(lower?y>=CURY:y<=CURY) continue; const st=yState(y); const m2=st&&st.months&&st.months[mk]; if(!m2||!m2.sched) continue;
     const mine={}; S.posts.forEach(p=>mine[normRoom(p.name)]=p); const pmap={}; (st.posts||[]).forEach(p=>pmap[p.id]=mine[normRoom(p.name)]);
     const nm={}; (st.residents||[]).forEach(r=>nm[r.id]=`(${yLab(r.year||st.groupYear||y)}) ${r.name}`);
     for(const d in m2.sched) for(const k in m2.sched[d]){ const [pid,sh]=k.split("|"), my=pmap[pid]; if(!my||!((my.on||{})[dayType(d)]||[]).includes(sh)) continue;
@@ -72,7 +76,7 @@ function EXT(mo){ let own=mo.ext||{}; if(S&&mo.mk){ const se=sheetExtCached(mo.m
   const out={...auto}; for(const k in own) out[k]=[...(auto[k]||[]),...own[k]]; return out; }
 function syncRoles(){ if(!OWNER||!db||!S) return; const uidsOf=st=>[...new Set(((st&&st.managers)||[]).map(p=>CLAIMS[p]).filter(Boolean))].sort();
   const st2=yState(2); if(!st2) return; const doc={uids:uidsOf(st2)};
-  if(MULTI){ for(const y of [1,3,4]){ const st=yState(y); if(!st) return; doc["y"+y]=uidsOf(st); } }
+  if(MULTI){ for(const y of ALLY()){ if(y===2) continue; const st=yState(y); if(!st){ if(RAW[y]&&RAW[y].cfg===null) continue; return; } doc["y"+y]=uidsOf(st); } }
   const k=JSON.stringify(doc); if(k===lastRoles) return; lastRoles=k; db.doc("roles/managers").set(doc).catch(()=>{lastRoles="";}); } let MYUID=null, USER=null;
 const UNAV={}; /* mk → pid → {data: codice} — un documento per specializzando e mese */
 /* preferenze di turno (3° e 4° anno), nello stesso documento delle indisponibilità: mk → pid → {data: "M" | "TC1|M" …} */
@@ -188,7 +192,7 @@ function syncSubs(uids){ const want=new Set(["staff",...uids]);
   for(const u of want) if(!SUBS[u]) SUBS[u]=db.collection(`unav/${u}/m`).limit(1000).onSnapshot(qs=>{ SRC[u]={}; for(const doc of qs.docs){ const x=doc.data(); if(x&&x.mk&&x.pid) SRC[u][doc.id]=x; } recomputeUnav(); if(S&&!layer.innerHTML) render(); },()=>{});
   for(const u in SUBS) if(!want.has(u)){ try{SUBS[u]();}catch(e){} delete SUBS[u]; delete SRC[u]; } }
 /* associazione account → nome: definitiva per lo specializzando, la cambia solo il proprietario */
-function linkPanel(){ const groups=MULTI?YEARS.map(y=>[y,((yState(y)||{}).residents)||[]]).filter(g=>g[1].length):[[null,S.residents]];
+function linkPanel(){ const groups=MULTI?YRS(todayMk()).concat(ALLY().filter(c=>!YRS(todayMk()).includes(c)&&c<YRS(todayMk())[0])).map(y=>[y,((yState(y)||{}).residents)||[]]).filter(g=>g[1].length):[[null,S.residents]];
   const anyFree=groups.some(g=>g[1].some(r=>!CLAIMS[r.id]));
   return `<div class="panel" style="border:2px solid var(--accent)"><h2>Associa l'account: chi sei?</h2>
    <p style="margin:0;font-size:.9rem">Tocca il tuo cognome e conferma. <strong>La scelta è definitiva</strong>: potrà cambiarla solo chi gestisce il tool. Da quel momento potrai modificare solo le tue indisponibilità e rispondere ai cambi rivolti a te.</p>
@@ -200,7 +204,7 @@ function claimPanel(why){ const pid=myAnyPid(); const mine=CLAIMDOCS.find(x=>x.u
   if(!pid&&mine&&!OWNER) return `<div class="panel" style="border:2px solid var(--bad)"><h2>Associazione da sistemare</h2><p style="margin:0;font-size:.9rem">Il tuo account risulta già associato a un nome (${esc(rNameAny(mine.pid))}) che appartiene a un altro collega o non esiste più. Chiedi al proprietario di scollegarti: poi potrai scegliere il tuo nome.</p></div>`;
   if(!pid) return linkPanel(); const y=MULTI?yearOfPid(pid):null;
   return `<div class="panel"><p style="margin:0;font-size:.9rem">Il tuo account è associato a <strong>${esc(rNameAny(pid))}</strong>${y&&y!==CURY?` del ${yLab(y)}° anno: qui puoi solo guardare. Per le tue indisponibilità e i tuoi cambi scegli in alto il ${yLab(y)}° anno.`:"."}</p>${y&&y!==CURY?`<div class="row"><button class="btn primary" data-act="year" data-v="${y}">Vai al ${yLab(y)}° anno</button></div>`:""}</div>`; }
-function rNameAny(pid){ for(const y of YEARS){ const st=yState(y); const r=st&&(st.residents||[]).find(x=>x.id===pid); if(r) return `(${yLab(r.year||st.groupYear||y)}) ${r.name}`; } return resName(pid); }
+function rNameAny(pid){ for(const y of ALLY()){ const st=yState(y); const r=st&&(st.residents||[]).find(x=>x.id===pid); if(r) return `(${yLab(r.year||st.groupYear||y)}) ${r.name}`; } return resName(pid); }
 function claimPanelOld(why){ return `<div class="panel"><h2>Chi sei?</h2><p class="muted" style="margin:0;font-size:.88rem">${why}</p>
   <div class="pickers">${S.residents.map(r=>{const taken=CLAIMS[r.id]&&CLAIMS[r.id]!==MYUID;return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""}>${esc(rName(r))}${taken?' <span class="cnt">già collegato</span>':""}</button>`;}).join("")}</div></div>`; }
 function saveUnav(mk,pid){ const k=mk+"_"+pid; if(db&&!canEditUnav(pid,mk)){ toast(unavDenyMsg(pid,mk)); return; } clearTimeout(uT[k]); setSync("Modifiche in corso…");
@@ -263,7 +267,7 @@ function canDoR(r,s,st){ if(s!=="N"&&s!=="D") return true; const v=s==="N"?r.nig
 function canDo(pid,s){ const r=resOf(pid); return r?canDoR(r,s,S):true; }
 /* notti e guardie equilibrate tra gli anni: quota per persona = notti (o guardie) del mese ÷ abilitati presenti di tutti gli anni */
 function nightQuota(mk,sh){ if(!MULTI||!hasLowerYear()) return null; const days=period(mk).days; let need=0, people=0, mine=0, union={};
-  for(const y of YEARS){ const st=yState(y); if(!st) continue; const rot=(((st.months||{})[mk])||{}).rot||{}, ext=new Set((st.externals||[]).map(x=>x.id));
+  for(const y of YRS(mk)){ const st=yState(y); if(!st) continue; const rot=(((st.months||{})[mk])||{}).rot||{}, ext=new Set((st.externals||[]).map(x=>x.id));
     const n=(st.residents||[]).filter(r=>rot[r.id]&&!ext.has(rot[r.id])&&canDoR(r,sh,st)).length; people+=n; if(y===CURY) mine=n;
     (st.posts||[]).forEach(p=>{ const k=normRoom(p.name); if(k&&yearsFor(p).includes(yLab(y))&&!union[k]) union[k]=p; }); }
   for(const d of days){ const t=dayType(d); for(const k in union) if(((union[k].on||{})[t]||[]).includes(sh)) need++; }
@@ -338,10 +342,10 @@ function acceptDraft(mk,weeks){ const mo=M(mk); if(!hasDraft(mo)) return 0; cons
   if(all) delete mo.draft; return weeks.length; }
 /* equilibrio tra gli anni (con più anni attivo): un anno che ha anni sotto di sé nella cascata si ferma alla quota
    media settimanale per persona (turni da coprire in tutte le sale ÷ specializzandi presenti di tutti gli anni), così il resto va agli anni successivi */
-function hasLowerYear(){ return MULTI&&YEARS.some(y=>y<CURY&&(((yState(y)||{}).residents)||[]).length); }
+function hasLowerYear(){ return MULTI&&YRS(UI.mk).some(y=>y<CURY&&(((yState(y)||{}).residents)||[]).length); }
 function fairMonth(mk){ if(!MULTI) return null;
   const days=period(mk).days, union={}; let people=0;
-  for(const y of YEARS){ const st=yState(y); if(!st) continue; const rot=(((st.months||{})[mk])||{}).rot||{}, ext=new Set((st.externals||[]).map(x=>x.id));
+  for(const y of YRS(mk)){ const st=yState(y); if(!st) continue; const rot=(((st.months||{})[mk])||{}).rot||{}, ext=new Set((st.externals||[]).map(x=>x.id));
     people+=(st.residents||[]).filter(r=>rot[r.id]&&!ext.has(rot[r.id])).length;
     (st.posts||[]).forEach(p=>{ const k=normRoom(p.name); if(k&&yearsFor(p).includes(yLab(y))&&!union[k]) union[k]=p; }); }
   if(!people) return null;
@@ -425,7 +429,7 @@ function generate(mk,wk,only2){ /* only2: Set di pid a cui si possono dare turni
    più di un'altra si sposta una persona, preferendo i più giovani (1°, poi 2°, 3°, 4° anno). Si spostano solo i turni che
    si possono modificare: dell'anno che si guarda; con più anni attivo, il proprietario anche quelli degli altri anni.
    I turni fissi (inseriti a mano) non si spostano. */
-function rebalanceRooms(mk,onlyPids,onlyCover){ const days=period(mk).days, sch={}, posts={}, fixedOf={}, mon={}, Ys=MULTI?YEARS:[CURY];
+function rebalanceRooms(mk,onlyPids,onlyCover){ const days=period(mk).days, sch={}, posts={}, fixedOf={}, mon={}, Ys=MULTI?YRS(mk):[CURY];
   for(const y of Ys){ const st=y===CURY?S:yState(y); if(!st) continue; const m=(st.months||{})[mk]; if(!m) continue; const src=(m.draft&&m.draft.sched)||m.sched; if(!src) continue;
     sch[y]=y===CURY?src:JSON.parse(JSON.stringify(src)); fixedOf[y]=m.fixed||{}; mon[y]=st; posts[y]={};
     (st.posts||[]).forEach(p=>{ posts[y][normRoom(p.name)]=p; }); }
@@ -570,8 +574,11 @@ function myPid(){ if(!MYUID||!S) return null; for(const pid in CLAIMS) if(CLAIMS
 
 /* ---------- render ---------- */
 const app=document.getElementById("app");
-function yearBar(){ if(!MULTI) return ""; return `<div class="pickers" style="margin-bottom:2px">${YEARS.map(y=>{ const l=yLab(y); return `<button data-act="year" data-v="${y}" aria-pressed="${y===CURY}">${l<1?"nuovo anno":l>4?"specializzati":l+"° anno"}</button>`; }).join("")}</div>`; }
+/* cambiando mese si resta sulla propria coorte; se in quel mese non c'è (es. il nuovo 1° anno in ottobre) si passa allo stesso anno di corso */
+function goMonth(nk){ const lvl=yLab(CURY); UI.mk=nk; if(MULTI&&!YRS(nk).includes(CURY)){ const c=Math.min(4,Math.max(1,lvl))-yShift(nk); if(!switchYear(c)) return; } render(); }
+function yearBar(){ if(!MULTI) return ""; return `<div class="pickers" style="margin-bottom:2px">${YRS(UI.mk).map(y=>{ const l=yLab(y); return `<button data-act="year" data-v="${y}" aria-pressed="${y===CURY}">${l<1?"nuovo anno":l>4?"specializzati":l+"° anno"}</button>`; }).join("")}</div>`; }
 function switchYear(y){ if(!db||y===CURY||!REBUILD) return true; if(saveT||saving){ toast("Attendi il salvataggio e riprova"); return false; }
+  if(RAW[y]&&RAW[y].cfg===null&&!OWNER){ toast("Questo anno non è ancora stato creato dal proprietario"); return false; }
   CURY=y; docRef=db.doc(yDocs(y).mon); cfgRef=db.doc(yDocs(y).cfg); S=null; PRUNED=false; AUTOSYNC=false; SALIGN=false; SEXC.key=null; UI.who=null; UI.sel=null; UI.confirm=null; EXTC.key=null; LOWC.key=null;
   try{ localStorage.setItem("turni.year",String(y)); }catch(e){}
   REBUILD(); if(!S) render(); return true; }
@@ -579,24 +586,32 @@ function switchYear(y){ if(!db||y===CURY||!REBUILD) return true; if(saveT||savin
 function autoYear(){ if(!MULTI||YAUTO||!MYUID) return; const pid=Object.keys(CLAIMS).find(p=>CLAIMS[p]===MYUID);
   let y=pid?yearOfPid(pid):null; if(!y){ try{ y=+localStorage.getItem("turni.year")||null; }catch(e){} }
   if(pid&&!y) return; /* dati degli anni non ancora arrivati */
-  YAUTO=true; if(y&&YEARS.includes(y)&&y!==CURY) switchYear(y); }
+  YAUTO=true; if(y&&ALLY().includes(y)&&y!==CURY) switchYear(y); }
 /* nomi per anno ricavati dal foglio "Elenco Spec" (anno accademico 2026/27: (2)→3°, (3)→4°) */
 const YSEED={1:[],3:["Alcini","Avenoso","Battistella","Breccia","Capone","De Blasi","De Filippis","Del Prete","Della Valle","Di Certo","Kosta","Marino","Mastrodonato","Monterisi","Pica","Pozzebon","Quarta G.","Quatrale","Seri","Sparagna","Spinilli","Tancredi","Tomassetti","Trogu","Villa"],
+  /* 4° anno di ottobre 2026 (escono a novembre) */
+  5:["Bianco","Bottalico","Brancasi","Farina","Ferrara","Ferravante","Friscia","Iacono","Lippi","Marchetti","Mazzon","Morelli","Nardini","Papalia","Patrucco","Rubino","Sabato","Schiavo","Sciaccotta","Scrocca"],
   4:["Ariano","Azzaro","Cerquiglini","Chianura","Cigliese","Collura","Corinto","D'Aniello","Di Maio","Ferrari","Fiorillo","Gulotta","Imbemba","Isufi","Lia","Marzano","Morettoni","Napoletano","Parisi","Pentassuglia","Quarta A.","Sama","Villone","Zhang"]};
-async function enableYears(){ if(!OWNER||!db||CURY!==2) return; const base=JSON.parse(splitS().cfg);
-  for(const y of [1,3,4]){ const snap=await db.doc(yDocs(y).cfg).get(); if(snap.exists) continue;
-    const residents=YSEED[y].map(n=>({id:uid(),name:n,year:y})); sortRes(residents);
-    const cfg={...base,residents,managers:[],groupYear:y}; delete cfg.multiYear;
+/* crea i documenti delle coorti che servono nei mesi visibili (es. a novembre il nuovo 1° anno, vuoto) */
+let COHORTS_BUSY=false;
+async function ensureCohorts(){ if(!OWNER||!db||!MULTI||COHORTS_BUSY) return; COHORTS_BUSY=true; try{
+  const st2=yState(2); if(!st2) return; const {months,...base}=st2; const miss=ALLY().filter(c=>c!==2&&RAW[c]&&RAW[c].cfg===null);
+  for(const y of miss) await createCohort(y,base); } finally { COHORTS_BUSY=false; } }
+async function createCohort(y,base){ const snap=await db.doc(yDocs(y).cfg).get(); if(snap.exists) return;
+    const residents=(YSEED[y]||[]).map(n=>({id:uid(),name:n,year:y})); sortRes(residents);
+    const cfg={...base,residents,managers:[],groupYear:y}; delete cfg.multiYear; delete cfg.extSheetUrl;
     if(y===4) cfg.externals=[...(cfg.externals||[]),{id:"SE",name:"Sede Esterna"}]; if(y===3) cfg.externals=[...(cfg.externals||[]),{id:"IT",name:"Isola Tiberina"}];
     const at=new Date().toISOString();
     await db.doc(yDocs(y).cfg).set({state:JSON.stringify(cfg),updated:at}); await db.doc(yDocs(y).mon).set({state:JSON.stringify({months:{}}),updated:at}); }
+async function enableYears(){ if(!OWNER||!db||CURY!==2) return; const base=JSON.parse(splitS().cfg);
+  for(const y of ALLY()){ if(y===2) continue; await createCohort(y,base); }
   S.multiYear=true; persist(); }
 function render(){
   if(UI.userMode&&S&&MYUID&&Object.keys(CLAIMS).length&&!realAdmin()) setUserMode(false);
   if(!ADMIN()&&(UI.tab==="mese"||(UI.tab==="imp"&&!UI.userMode))) UI.tab="turni";
   document.querySelectorAll("#tabs button").forEach(b=>{b.setAttribute("aria-selected",b.dataset.tab===UI.tab); b.hidden=!ADMIN()&&(b.dataset.tab==="mese"||(b.dataset.tab==="imp"&&!UI.userMode));});
   if(!S){app.innerHTML=`<div class="empty">Caricamento dati…</div>`;return;}
-  const yLoaded=!MULTI||YEARS.every(y=>yState(y)||(RAW[y]&&RAW[y].cfg===null));
+  const yLoaded=!MULTI||ALLY().every(y=>yState(y)||(RAW[y]&&RAW[y].cfg===null));
   const needLink=db&&MYUID&&yLoaded&&(MULTI||S.residents.length)&&!myAnyPid();
   if(needLink&&!OWNER){ app.innerHTML=`<section class="view">${claimPanel("")}</section>`; return; }
   app.innerHTML=`<section class="view">${yearBar()}${needLink?linkPanel():""}${({mese:vMese,indisp:vIndisp,turni:vTurni,cambi:vCambi,imp:vImp}[UI.tab]||vMese)()}</section>`;
@@ -787,9 +802,9 @@ function vImp2(){
   const yearsPanel=OWNER&&db&&CURY===2?`<div class="panel"><h2>Più anni</h2><p class="muted" style="margin:0;font-size:.85rem">${S.multiYear?"Attivo: in alto scegli l'anno. Ogni anno ha nomi, sale, rotazioni e gestori propri (si impostano qui, scegliendo l'anno). Si genera a cascata: prima il 4°, poi il 3° vede i turni del 4° come già coperti, e così via. Disattivando, l'app torna com'era: i dati degli altri anni restano salvati e ricompaiono se lo riattivi.":"Aggiunge 1°, 3° e 4° anno, ognuno con i propri dati. I vostri dati (2° anno) non vengono toccati e disattivando si torna esattamente a come è ora. Nomi presi da «Elenco Spec»: (2)→3° anno, (3)→4° anno; il 1° anno è vuoto."}</p>
    <div class="row"><button class="btn ${UI.confirm==="years"?"confirm":S.multiYear?"danger":"primary"}" data-act="years">${UI.confirm==="years"?"Tocca di nuovo per confermare":S.multiYear?"Disattiva più anni":"Attiva più anni"}</button></div></div>`:"";
   const covPanel=ADMIN()&&db?(()=>{ const rows=[], seen=new Set();
-    (MULTI?YEARS:[CURY]).forEach(y=>((y===CURY?S:yState(y)||{}).posts||[]).forEach(p=>{ const k=normRoom(p.name); if(!k||seen.has(k)) return; seen.add(k); rows.push({k,name:p.name,p}); }));
+    (MULTI?YRS(UI.mk):[CURY]).forEach(y=>((y===CURY?S:yState(y)||{}).posts||[]).forEach(p=>{ const k=normRoom(p.name); if(!k||seen.has(k)) return; seen.add(k); rows.push({k,name:p.name,p}); }));
     return `<div class="panel"><h2>Anni che coprono ogni sala</h2><p class="muted" style="margin:0;font-size:.85rem">Elenco unico per tutti gli anni: lo modificate tu e i gestori di qualsiasi anno. Un anno genera turni solo nelle sale dove è segnato (anche con «Più anni» spento). Gli specializzandi vedono nella tabella dei turni solo le sale del proprio anno. Gli anni sono quelli di corso del mese (l'anno cambia a novembre).</p>
-     <div class="list">${rows.map(r=>{ const ys=yearsFor(r.p); return `<div class="item"><span class="name-strong">${esc(r.name)}</span><span class="pickers sm">${YEARS.map(y=>`<button data-act="covy" data-k="${esc(r.k)}" data-y="${y}" aria-pressed="${ys.includes(y)}">${y}°</button>`).join("")}</span></div>`; }).join("")}</div></div>`; })():"";
+     <div class="list">${rows.map(r=>{ const ys=yearsFor(r.p); return `<div class="item"><span class="name-strong">${esc(r.name)}</span><span class="pickers sm">${LEVELS.map(y=>`<button data-act="covy" data-k="${esc(r.k)}" data-y="${y}" aria-pressed="${ys.includes(y)}">${y}°</button>`).join("")}</span></div>`; }).join("")}</div></div>`; })():"";
   const privPanel=ADMIN()&&db?`<div class="panel"><div class="row" style="justify-content:space-between"><h2>Privacy indisponibilità</h2><button class="btn ${HIDEUNAV?"primary":""}" data-act="privtog" role="switch" aria-checked="${HIDEUNAV}">${HIDEUNAV?"Attivo":"Spento"}</button></div>
    <p class="muted" style="margin:0;font-size:.85rem">${HIDEUNAV?"Gli specializzandi vedono solo le proprie indisponibilità, ferie, congressi e preferenze. Tu e i gestori vedete tutto.":"Tutti vedono le indisponibilità, ferie e congressi di tutti. Attivandolo ognuno vede solo le proprie (tu e i gestori vedete sempre tutto)."}</p>
    <div class="row" style="justify-content:space-between"><h2>Privacy cambi</h2><button class="btn ${HIDESWAPS?"primary":""}" data-act="privsw" role="switch" aria-checked="${HIDESWAPS}">${HIDESWAPS?"Attivo":"Spento"}</button></div>
@@ -1109,7 +1124,7 @@ let SALIGN=false;
 function runSheetAlign(){ if(SALIGN||!S||!ADMIN()) return; SALIGN=true; let n=0; const [y0,m0]=todayMk().split("-").map(Number);
   for(let k=-KEEP_MONTHS;k<=KEEP_MONTHS;k++){ const mk=mkOf(y0,m0+k); if(sheetLatest(mk)) n+=sheetAlign(mk); }
   if(n){ persist(); render(); toast(`${n} turni del tuo anno presi dal foglio caricato da un altro anno: sono nella bozza, da accettare`); } }
-function sheetLatest(mk){ let best=null; for(const y of (MULTI?YEARS:[CURY])){ const st=y===CURY?S:yState(y); const sh=st&&st.months&&st.months[mk]&&st.months[mk].sheet; if(sh&&(!best||sh.at>best.at)) best=sh; } return best; }
+function sheetLatest(mk){ let best=null; for(const y of (MULTI?ALLY():[CURY])){ const st=y===CURY?S:yState(y); const sh=st&&st.months&&st.months[mk]&&st.months[mk].sheet; if(sh&&(!best||sh.at>best.at)) best=sh; } return best; }
 /* voci del foglio per l'anno corrente: chiave con la sala dell'anno, esclusi i nostri */
 function sheetExt(mk){ const sh=sheetLatest(mk); if(!sh) return {}; const by={}; S.posts.forEach(p=>by[normRoom(p.name)]=p);
   const mine=new Set(S.residents.map(r=>r.name.trim().toLowerCase())), out={};
@@ -1237,7 +1252,7 @@ async function exportUnav(){ if(!ADMIN()) return; if(typeof XLSX==="undefined"){
   if(!downloads){toast("Il download non è disponibile in questa vista");return;}
   try{ const r=await downloads.save({filename:fname,data:new Blob([out],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})}); if(r.status==="saved")toast("File Excel salvato"); }catch(e){ toast("Download non riuscito"); } }
 /* copia di sicurezza completa (solo proprietario): documenti e raccolte del database in un file .json */
-const BK_DOCS=["config/main","planner/state","config/y1","planner/y1","config/y3","planner/y3","config/y4","planner/y4","config/years","config/privacy","access/allow","roles/managers"];
+const BK_DOCS=["config/main","planner/state",...[-1,0,1,3,4,5,6].flatMap(c=>["config/y"+c,"planner/y"+c]),"config/years","config/privacy","access/allow","roles/managers"];
 async function exportBackup(){ if(!OWNER||!db) return; toast("Preparo la copia di sicurezza…");
   try{ const out={type:"turni-backup",version:1,at:new Date().toISOString(),docs:{},cols:{}};
     for(const p of BK_DOCS){ const sn=await db.doc(p).get(); if(sn.exists) out.docs[p]=sn.data(); }
@@ -1262,7 +1277,7 @@ async function exportBozza(){ if(typeof XLSX==="undefined"){toast("Libreria Exce
   const rooms=[]; S.posts.forEach(x=>{ const rk=normRoom(x.name); if(rk&&!rooms.some(r=>r.rk===rk)) rooms.push({rk,p:x}); });
   const put=(st,y,sched)=>{ const nm={}; (st.residents||[]).forEach(r=>nm[r.id]=`(${yLab(r.year||st.groupYear||y)}) ${r.name}`); const pk={}; (st.posts||[]).forEach(x=>pk[x.id]=normRoom(x.name));
     for(const d in sched) for(const k in sched[d]){ const [pid,sh]=k.split("|"); (sched[d][k]||[]).forEach(id=>{ if(id&&nm[id]) add(d,pk[pid],sh==="D"?"M":sh,nm[id]); }); } };
-  const ys=MULTI?YEARS:[CURY];
+  const ys=MULTI?YRS(mk):[CURY];
   for(const y of ys){ const st=y===CURY?S:yState(y); const m=st&&st.months&&st.months[mk]; if(!m) continue;
     const sc=y===CURY?(viewSched(mk)||{}):(m.sched||{}); put(st,y,sc);
     for(const kk in (m.ext||{})){ const [d,pid,sh]=kk.split("|"), px=(st.posts||[]).find(x=>x.id===pid); if(px) m.ext[kk].forEach(n=>add(d,normRoom(px.name),sh==="D"?"M":sh,n)); } }
@@ -1367,7 +1382,7 @@ document.addEventListener("click",e=>{
   if(a==="clrF"||a==="clrC"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
     clearUnav([UI.sel],a==="clrF"?"F":"C"); toast((a==="clrF"?"Ferie":"Ferie congresso")+" di "+resName(UI.sel)+" eliminate"); render(); return; }
   if(a==="clrext"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null; const mo=M(UI.mk); mo.ext={}; syncExt(mo); persist(); render(); toast("Turni degli altri anni rimossi: quei turni tornano da coprire"+(mo.generated?" (rigenera per assegnarli)":"")); return; }
-  if(a==="covy"){ const k=el.dataset.k, y=+el.dataset.y; const cur=Array.isArray(COVY[k])?[...COVY[k]]:[...(COV_DEF[k]||YEARS)];
+  if(a==="covy"){ const k=el.dataset.k, y=+el.dataset.y; const cur=Array.isArray(COVY[k])?[...COVY[k]]:[...(COV_DEF[k]||LEVELS)];
     const i=cur.indexOf(y); if(i>=0) cur.splice(i,1); else cur.push(y); cur.sort();
     const next={...COVY,[k]:cur}; COVY=next; EXTC.key=null; render();
     db.doc("config/years").set({state:JSON.stringify({coverage:next}),updated:new Date().toISOString()}).catch(()=>toast("Non riesco a salvare: le regole del database vanno aggiornate"));
@@ -1434,8 +1449,8 @@ document.addEventListener("click",e=>{
     if(a==="clrsched"){ const mo=M(UI.mk); mo.sched=null; mo.generated=null; mo.fixed={}; delete mo.draft; toast("Turni e bozza eliminati"); }
     else { const mode=UI.umode||"T"; clearUnav(a==="clrone"?[UI.sel]:S.residents.map(r=>r.id),mode); toast(a==="clrone"?"Eliminate per "+resName(UI.sel):"Eliminate per tutti"); }
     persist(); render(); return; }
-  if(a==="mtoday"){UI.mk=todayMk();render();return;}
-  if(a==="mprev"||a==="mnext"){const [y,m]=UI.mk.split("-").map(Number); const nk=mkOf(y,m+(a==="mnext"?1:-1)); if(nk<oldestMk()||nk>newestMk()){ toast("Si possono vedere solo i 3 mesi precedenti e i 3 successivi"); return; } UI.mk=nk;render();return;}
+  if(a==="mtoday"){goMonth(todayMk());return;}
+  if(a==="mprev"||a==="mnext"){const [y,m]=UI.mk.split("-").map(Number); const nk=mkOf(y,m+(a==="mnext"?1:-1)); if(nk<oldestMk()||nk>newestMk()){ toast("Si possono vedere solo i 3 mesi precedenti e i 3 successivi"); return; } goMonth(nk); return;}
   if(a==="goto"){UI.tab=el.dataset.tab;render();return;}
   if(a==="sel"){UI.sel=el.dataset.id;UI.selTouched=true;try{localStorage.setItem("turni.me",UI.sel);}catch(_){}render();return;}
   if(a==="day"&&db&&!canEditUnav(UI.sel)){ toast(unavDenyMsg(UI.sel)); return; }
@@ -1550,12 +1565,12 @@ render();
     const subY={};
     const watchYear=y=>{ if(subY[y]) return; subY[y]=true; RAW[y]=RAW[y]||{}; const d=yDocs(y);
       const on=k=>snap=>{ const raw=snap.exists?snap.data().state:null; if(raw===RAW[y][k]) return; RAW[y][k]=raw; RAWV++;
-        if(y===CURY) rebuild(); else { if(y===2) checkMulti(); syncRoles(); autoYear(); if(S&&!layer.innerHTML) render(); } };
+        if(y===CURY) rebuild(); else { if(y===2) checkMulti(); if(raw===null&&k==="cfg") ensureCohorts(); syncRoles(); autoYear(); if(S&&!layer.innerHTML) render(); } };
       db.doc(d.cfg).onSnapshot(on("cfg"),()=>setSync("Connessione persa: ricarica la pagina"));
       db.doc(d.mon).onSnapshot(on("mon"),()=>setSync("Connessione persa: ricarica la pagina")); };
     /* più anni acceso/spento: lo decide il config dell'anno 2 */
     const checkMulti=()=>{ const st2=yState(2); const on=!!(st2&&st2.multiYear); if(on===MULTI) return; MULTI=on; EXTC.key=null;
-      if(MULTI){ YEARS.forEach(watchYear); } else if(CURY!==2) switchYear(2); watchCov(); filterSW(); };
+      if(MULTI){ ALLY().forEach(watchYear); ensureCohorts(); } else if(CURY!==2) switchYear(2); watchCov(); filterSW(); };
     let covSub=false;
     const watchCov=()=>{ if(covSub) return; covSub=true; db.doc("config/years").onSnapshot(sn=>{ let c={}; try{ c=(JSON.parse((sn.exists&&sn.data().state)||"{}").coverage)||{}; }catch(e){}
       COVY=c; RAWV++; EXTC.key=null;

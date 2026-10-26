@@ -17,7 +17,7 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/roles/managers)
         && request.auth.uid in get(/databases/$(database)/documents/roles/managers).data.get(k, []);
     }
-    function isManager() { return mgrList("uids") || mgrList("y1") || mgrList("y3") || mgrList("y4"); }
+    function isManager() { return mgrList("uids") || mgrList("y0") || mgrList("y1") || mgrList("y3") || mgrList("y4") || mgrList("y5") || mgrList("y6"); }
     function isAdmin() { return isOwner() || (allowed() && isManager()); }
 
     // serve all'app per sapere se chi entra è il proprietario
