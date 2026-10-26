@@ -28,7 +28,7 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 
 - Copia di sicurezza (proprietario, Impostazioni sotto "Importa dati"): `exportBackup` scarica un .json `{type:"turni-backup", docs:{percorso:dati}, cols:{percorso:[{id,data}]}}` con config/planner di tutti gli anni, config/years, config/privacy, access/allow, roles/managers, claims, swaps, accessRequests e unav di tutti; "Importa dati" lo riconosce e riscrive tutto (non cancella ciò che è stato creato dopo; storico bozze escluso).
 
-- Si vedono solo gli ultimi 3 mesi (`KEEP_MONTHS`, `oldestMk`): all'apertura da parte di un gestore i mesi più vecchi vengono copiati nello storico (`hist/...`, tipo "Archivio (mese chiuso)") e poi tolti dal documento del planner (`pruneOld`), per restare sotto il limite di 1 MB di Firestore.
+- Si vedono 7 mesi: i 3 precedenti, il corrente e i 3 successivi (`KEEP_MONTHS`, `oldestMk`, `newestMk`): all'apertura da parte di un gestore i mesi più vecchi vengono copiati nello storico (`hist/...`, tipo "Archivio (mese chiuso)") e poi tolti dal documento del planner (`pruneOld`), per restare sotto il limite di 1 MB di Firestore.
 
 ## Permessi
 - Proprietario: tutto; unico che gestisce email autorizzate, gestori, scollegamento account.

@@ -579,6 +579,8 @@ function todayMk(){ const t=new Date(), today=ymd(new Date(Date.UTC(t.getFullYea
 /* si vedono i turni e le indisponibilità fino a 3 mesi prima del mese corrente; i mesi più vecchi vengono archiviati */
 const KEEP_MONTHS=3;
 function oldestMk(){ const [y,m]=todayMk().split("-").map(Number); return mkOf(y,m-KEEP_MONTHS); }
+function newestMk(){ const [y,m]=todayMk().split("-").map(Number); return mkOf(y,m+KEEP_MONTHS); }
+function clampMk(mk){ return mk<oldestMk()?oldestMk():mk>newestMk()?newestMk():mk; }
 let PRUNED=false;
 /* il mese si toglie dal documento solo dopo averne salvato una copia nello storico (se la copia non riesce resta dov'è) */
 async function pruneOld(){ if(PRUNED||!db||!S||!ADMIN()) return; PRUNED=true; const cut=oldestMk(), y=CURY, st=S; let n=0;
@@ -587,9 +589,9 @@ async function pruneOld(){ if(PRUNED||!db||!S||!ADMIN()) return; PRUNED=true; co
         state:JSON.stringify({sched:m.sched||null,draft:m.draft||null,fixed:m.fixed||{},ext:m.ext||{},rot:m.rot||{}})});
       if(S!==st) return; delete st.months[mk]; n++; }catch(e){} }
   if(n) persist(); }
-function monthBar(){ const p=period(UI.mk), tm=todayMk();
+function monthBar(){ if(UI.mk!==clampMk(UI.mk)) UI.mk=clampMk(UI.mk); const p=period(UI.mk), tm=todayMk();
   return `<div class="monthbar"><button class="btn icon" data-act="mprev" aria-label="Mese precedente" ${UI.mk<=oldestMk()?"disabled":""}>‹</button>
-  <span class="name">${monthName(UI.mk)}</span><button class="btn icon" data-act="mnext" aria-label="Mese successivo">›</button>
+  <span class="name">${monthName(UI.mk)}</span><button class="btn icon" data-act="mnext" aria-label="Mese successivo" ${UI.mk>=newestMk()?"disabled":""}>›</button>
   ${UI.mk!==tm?`<button class="btn" data-act="mtoday">Oggi</button>`:`<span class="chip">mese corrente</span>`}
   <span class="period">${fmt(p.first)} → ${fmt(p.last)} · ${p.days.length/7} settimane</span></div>`; }
 function noRes(){return `<div class="panel empty"><h2>Nessuno specializzando</h2><p>Aggiungi i nomi in Impostazioni, poi assegna a ciascuno la rotazione del mese.</p><button class="btn primary" data-act="goto" data-tab="imp">Vai a Impostazioni</button></div>`;}
@@ -1289,7 +1291,7 @@ document.addEventListener("click",e=>{
     else { const mode=UI.umode||"T"; clearUnav(a==="clrone"?[UI.sel]:S.residents.map(r=>r.id),mode); toast(a==="clrone"?"Eliminate per "+resName(UI.sel):"Eliminate per tutti"); }
     persist(); render(); return; }
   if(a==="mtoday"){UI.mk=todayMk();render();return;}
-  if(a==="mprev"||a==="mnext"){const [y,m]=UI.mk.split("-").map(Number); const nk=mkOf(y,m+(a==="mnext"?1:-1)); if(nk<oldestMk()){ toast("Si possono vedere solo gli ultimi 3 mesi"); return; } UI.mk=nk;render();return;}
+  if(a==="mprev"||a==="mnext"){const [y,m]=UI.mk.split("-").map(Number); const nk=mkOf(y,m+(a==="mnext"?1:-1)); if(nk<oldestMk()||nk>newestMk()){ toast("Si possono vedere solo i 3 mesi precedenti e i 3 successivi"); return; } UI.mk=nk;render();return;}
   if(a==="goto"){UI.tab=el.dataset.tab;render();return;}
   if(a==="sel"){UI.sel=el.dataset.id;UI.selTouched=true;try{localStorage.setItem("turni.me",UI.sel);}catch(_){}render();return;}
   if(a==="day"&&db&&!canEditUnav(UI.sel)){ toast(unavDenyMsg(UI.sel)); return; }
