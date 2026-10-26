@@ -30,6 +30,8 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 
 - Si vedono 7 mesi: i 3 precedenti, il corrente e i 3 successivi (`KEEP_MONTHS`, `oldestMk`, `newestMk`): all'apertura da parte di un gestore i mesi più vecchi vengono copiati nello storico (`hist/...`, tipo "Archivio (mese chiuso)") e poi tolti dal documento del planner (`pruneOld`), per restare sotto il limite di 1 MB di Firestore.
 
+- Modalità specializzando per gestori/proprietario: in Impostazioni "Passa a modalità specializzando" (`setUserMode`, salvata in localStorage `turni.usermode`): `ADMIN()` torna falso e `OWNER` è messo a falso (il vero valore è in `REALOWNER`); resta solo la scheda Impostazioni con "Torna in modalità gestore".
+
 ## Permessi
 - Proprietario: tutto; unico che gestisce email autorizzate, gestori, scollegamento account.
 - Gestori: impostazioni, rotazioni, generazione/modifica turni, cambi manuali, cambi da inserire, pulizia storico, indisponibilità di tutti (anche dopo la scadenza).

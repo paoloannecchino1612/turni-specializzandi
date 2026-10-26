@@ -22,7 +22,11 @@ const DEFAULT={
 };
 let S=null, db=null, docRef=null, downloads=null, OWNER=false;
 /* gestori: specializzandi scelti dal proprietario che possono usare tutte le funzioni di gestione */
-function ADMIN(){ return OWNER||(!!S&&(S.managers||[]).includes(myPid())); }
+/* modalità specializzando: un gestore (o il proprietario) può vedere l'app come uno specializzando; resta solo Impostazioni per tornare */
+let REALOWNER=false;
+function realAdmin(){ return REALOWNER||(!!S&&(S.managers||[]).includes(myPid())); }
+function ADMIN(){ if(UI.userMode) return false; return OWNER||(!!S&&(S.managers||[]).includes(myPid())); }
+function setUserMode(on){ UI.userMode=!!on; OWNER=on?false:REALOWNER; try{ localStorage.setItem("turni.usermode",on?"1":""); }catch(e){} recomputeUnav(); }
 const SW={}, SWALL={}, CLAIMS={}; let CLAIMDOCS=[]; let ALLOW=[], lastRoles="", REQS=[];
 /* ---------- più anni (opzionale e reversibile) ----------
    l'anno 2 usa i documenti di sempre (config/main, planner/state); gli altri config/yN e planner/yN.
@@ -564,8 +568,9 @@ async function enableYears(){ if(!OWNER||!db||CURY!==2) return; const base=JSON.
     await db.doc(yDocs(y).cfg).set({state:JSON.stringify(cfg),updated:at}); await db.doc(yDocs(y).mon).set({state:JSON.stringify({months:{}}),updated:at}); }
   S.multiYear=true; persist(); }
 function render(){
-  if(!ADMIN()&&(UI.tab==="mese"||UI.tab==="imp")) UI.tab="turni";
-  document.querySelectorAll("#tabs button").forEach(b=>{b.setAttribute("aria-selected",b.dataset.tab===UI.tab); b.hidden=!ADMIN()&&(b.dataset.tab==="mese"||b.dataset.tab==="imp");});
+  if(UI.userMode&&S&&MYUID&&Object.keys(CLAIMS).length&&!realAdmin()) setUserMode(false);
+  if(!ADMIN()&&(UI.tab==="mese"||(UI.tab==="imp"&&!UI.userMode))) UI.tab="turni";
+  document.querySelectorAll("#tabs button").forEach(b=>{b.setAttribute("aria-selected",b.dataset.tab===UI.tab); b.hidden=!ADMIN()&&(b.dataset.tab==="mese"||(b.dataset.tab==="imp"&&!UI.userMode));});
   if(!S){app.innerHTML=`<div class="empty">Caricamento dati…</div>`;return;}
   const yLoaded=!MULTI||YEARS.every(y=>yState(y)||(RAW[y]&&RAW[y].cfg===null));
   const needLink=db&&MYUID&&yLoaded&&(MULTI||S.residents.length)&&!myAnyPid();
@@ -732,6 +737,10 @@ function code(mo,per,pid,d){ const p=per[pid]; if(p&&p.on[d]) return p.on[d]; if
 function label(c,postName){ if(c==="S")return "smonto"; if(c==="X")return "✕"; if(c==="F")return "ferie"; if(c==="C")return "congr."; if(c==="D")return "G"; if(c==="N")return "monto"; if(c)return esc(postName||"")+" "+c; return ""; }
 
 function vImp(){
+  if(UI.userMode) return `<div class="panel" style="border:2px solid var(--accent)"><h2>Modalità specializzando</h2><p class="muted" style="margin:0;font-size:.88rem">Stai vedendo l'app come uno specializzando: niente funzioni di gestione, solo i turni, le tue indisponibilità e i tuoi cambi.</p><div class="row"><button class="btn primary" data-act="umodeoff">Torna in modalità gestore</button></div></div>`;
+  return modePanel()+vImp2(); }
+function modePanel(){ return `<div class="panel"><div class="row" style="justify-content:space-between"><h2>Modalità gestore</h2><button class="btn" data-act="umodeon">Passa a modalità specializzando</button></div><p class="muted" style="margin:0;font-size:.85rem">Per vedere l'app in modo essenziale, come la vedono gli specializzandi. Puoi tornare indietro da qui.</p></div>`; }
+function vImp2(){
   const covOpts=[...S.rotations.map(r=>[r.id,r.name]),["ALL","Tutti"]];
   const groups=[]; S.posts.forEach(p=>{ const g=p.cover; if(!groups.includes(g)) groups.push(g); });
   const mg=S.managers||[];
@@ -1263,6 +1272,8 @@ document.addEventListener("click",e=>{
   if(a==="privsw"){ if(!ADMIN()) return; db.doc("config/privacy").set({hideUnav:HIDEUNAV,hideSwaps:!HIDESWAPS,updated:new Date().toISOString()}).then(()=>toast(!HIDESWAPS?"Cambi degli altri nascosti agli specializzandi":"Cambi di nuovo visibili a tutti")).catch(()=>toast("Non riesco a salvare: aggiorna le regole del database")); return; }
   if(a==="swmine"){ UI.swMine=el.dataset.v==="1"; render(); return; }
   if(a==="privtog"){ if(!ADMIN()) return; db.doc("config/privacy").set({hideUnav:!HIDEUNAV,hideSwaps:HIDESWAPS,updated:new Date().toISOString()}).then(()=>toast(!HIDEUNAV?"Indisponibilità degli altri nascoste agli specializzandi":"Indisponibilità di nuovo visibili a tutti")).catch(()=>toast("Non riesco a salvare: aggiorna le regole del database")); return; }
+  if(a==="umodeon"){ setUserMode(true); UI.tab="turni"; render(); toast("Modalità specializzando: per tornare vai in Impostazioni"); return; }
+  if(a==="umodeoff"){ setUserMode(false); render(); toast("Modalità gestore attiva"); return; }
   if(a==="year"){ switchYear(+el.dataset.v); render(); return; }
   if(a==="years"){ if(UI.confirm!=="years"){UI.confirm="years";render();return;} UI.confirm=null;
     if(S.multiYear){ S.multiYear=false; persist(); toast("Più anni disattivato: dati degli altri anni conservati"); render(); return; }
@@ -1418,7 +1429,8 @@ render();
   const claude=window.claude;
   const [d1,d2,u1]=await Promise.all([claude?claude.use("db"):null, claude?claude.use("downloads"):null, claude?claude.use("user"):null]);
   db=d1; downloads=d2;
-  OWNER = u1 ? await u1.isOwner().catch(()=>false) : !db;
+  OWNER = u1 ? await u1.isOwner().catch(()=>false) : !db; REALOWNER=OWNER;
+  try{ if(localStorage.getItem("turni.usermode")==="1"){ UI.userMode=true; OWNER=false; } }catch(e){}
   USER=u1; MYUID = u1 ? await u1.id().catch(()=>null) : null;
   if(db){ docRef=db.doc("planner/state"); cfgRef=db.doc("config/main");
     /* RAW[anno] = {cfg, mon} come arrivano dal database (undefined = non ancora arrivato) */
