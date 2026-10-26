@@ -668,8 +668,10 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   let body="";
   const people=S.residents.filter(r=>inGem(mo,r.id)||(SC&&shiftsOf(SC,r.id).length));
   if(UI.view==="giorni"){
-    const cols=columns(SC,p), used=S.posts.filter(x=>cols.some(c=>c.post===x));
-    body=`<div class="scroll"><table class="grid"><thead><tr><th class="sticky" rowspan="2">Giorno</th>${used.map(x=>`<th class="roomh" colspan="${cols.filter(c=>c.post===x).length}">${esc(x.name)}</th>`).join("")}</tr>
+    /* filtro per metodica: sale della rotazione (solo mattina/pomeriggio) oppure notti e guardie */
+    const F=UI.filt||"", cols=columns(SC,p).filter(c=>!F||(F==="NG"?(c.s==="N"||c.s==="D"):(c.post.cover===F&&(c.s==="M"||c.s==="P")))), used=S.posts.filter(x=>cols.some(c=>c.post===x));
+    body=`<div class="pickers sm" style="margin-bottom:6px"><button data-act="filt" data-v="" aria-pressed="${!F}">Tutte</button>${S.rotations.filter(r=>S.posts.some(x=>x.cover===r.id)).map(r=>`<button data-act="filt" data-v="${r.id}" aria-pressed="${F===r.id}">${esc(r.name)}</button>`).join("")}<button data-act="filt" data-v="NG" aria-pressed="${F==="NG"}">Notti e guardie</button></div>`;
+    body+=`<div class="scroll"><table class="grid"><thead><tr><th class="sticky" rowspan="2">Giorno</th>${used.map(x=>`<th class="roomh" colspan="${cols.filter(c=>c.post===x).length}">${esc(x.name)}</th>`).join("")}</tr>
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
      ${p.days.map((d,i)=>{const t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
        if(!arr) return `<td class="cell none">·</td>`;
@@ -1163,6 +1165,7 @@ document.addEventListener("click",e=>{
       if(!multiPost(postOf(k.split("|")[0]))){ const fx=mo.fixed=mo.fixed||{}; Object.keys(fx).filter(z=>z.startsWith(kk+"|")).forEach(z=>delete fx[z]); const W=workSched(mo); if(W&&W[d]) W[d][k]=[]; } }
     else { const l=(mo.ext[kk]||[]).filter(x=>x!==EXT_MAN); if(l.length) mo.ext[kk]=l; else delete mo.ext[kk]; }
     syncExt(mo); persist(); closeSheet(); render(); return; }
+  if(a==="filt"){ UI.filt=el.dataset.v; render(); return; }
   if(a==="dview"){ UI.draftView=el.dataset.v==="1"; render(); return; }
   if(a==="accall"){ if(UI.confirm!=="accall"){UI.confirm="accall";render();return;} UI.confirm=null; const n=period(UI.mk).days.length/7, acc=(M(UI.mk).draft||{}).acc||{};
     acceptDraft(UI.mk,Array.from({length:n},(_,w)=>w).filter(w=>!acc[w])); persist(); consolidate(); render(); toast("Bozza accettata: orario pubblicato"); return; }
