@@ -608,6 +608,7 @@ function vIndisp(){ if(!S.residents.length) return monthBar()+noRes();
   const pr=presence(UI.mk), myRot=mo.rot[UI.sel], lowDays=new Set(pr.filter(x=>x.rot.id===myRot).map(x=>x.d));
   const tot=(id,v)=>Object.entries(mo.unav[id]||{}).filter(([d,u])=>d>=p.first&&d<=p.last&&u===v).length;
   return monthBar()+(otherYear?claimPanel(""):"")+(OWNER||otherYear?"":`<div class="panel" style="gap:4px"><h2>Compila le tue indisponibilità</h2><p class="muted" style="margin:0;font-size:.88rem">Scegli il tuo nome, poi segna i turni in cui non ci sei, le ferie e i congressi. Si salva da solo e tutti vedono le stesse informazioni.</p></div>`)+`
+  ${ADMIN()?`<div class="row"><button class="btn" data-act="xunav">Scarica indisponibilità (Excel)</button></div>`:""}
   <div class="pickers" role="tablist">${MODES.map(([k,l])=>`<button data-act="umode" data-v="${k}" aria-pressed="${mode===k}">${l}</button>`).join("")}</div>
   <div class="panel"><span class="label">Specializzando</span>
    <div class="pickers">${S.residents.map(r=>`<button data-act="sel" data-id="${r.id}" aria-pressed="${r.id===UI.sel}">${esc(rName(r))}${cnt(r.id)?`<span class="cnt">${cnt(r.id)}</span>`:""}</button>`).join("")}</div></div>
@@ -1079,6 +1080,27 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
   layer.dataset.d=d; layer.dataset.k=k; }
 
 /* ---------- export ---------- */
+/* indisponibilità, ferie, congressi (e preferenze) di tutti, per il mese: solo gestori */
+async function exportUnav(){ if(!ADMIN()) return; if(typeof XLSX==="undefined"){toast("Libreria Excel non caricata, riprova tra poco");return;}
+  const mk=UI.mk, mo=M(mk), p=period(mk), PRF=PR(mk);
+  const lab=u=>u==="F"?"Ferie":u==="C"?"Congresso":u==="G"?"Tutto il giorno":SH.filter(s=>u.includes(s)).map(s=>SHN[s]).join(" + ");
+  const pl=v=>{ if(!v) return ""; const [pp,sh]=v.includes("|")?v.split("|"):[null,v]; return (pp?((postOf(pp)||{}).name||pp)+" ":"")+SHN[sh]; };
+  const t1=[["Specializzando","Rotazione",...p.days.map(d=>`${DOW[isoDow(d)]} ${+d.slice(8)}/${+d.slice(5,7)}`)]];
+  S.residents.forEach(r=>t1.push([rName(r),rotName(mo.rot[r.id]),...p.days.map(d=>{ const u=unavOf(mo,r.id,d); return u?(u==="F"?"FERIE":u==="C"?"CONGRESSO":u==="G"?"X":SH.filter(s=>u.includes(s)).map(s=>s==="D"?"G":s).join("")):""; })]));
+  const t2=[["Specializzando","Rotazione","Data","Giorno","Tipo","Dettaglio"]];
+  S.residents.forEach(r=>p.days.forEach(d=>{ const u=unavOf(mo,r.id,d), pf=(PRF[r.id]||{})[d];
+    if(u) t2.push([rName(r),rotName(mo.rot[r.id]),d.split("-").reverse().join("/"),DOW[isoDow(d)],u==="F"?"Ferie":u==="C"?"Ferie congresso":"Indisponibilità",lab(u)]);
+    if(pf) t2.push([rName(r),rotName(mo.rot[r.id]),d.split("-").reverse().join("/"),DOW[isoDow(d)],"Preferenza",pl(pf)]); }));
+  const t3=[["Specializzando","Rotazione","Giorni di indisponibilità","Giorni di ferie","Giorni di congresso","Preferenze"]];
+  S.residents.forEach(r=>{ const c=v=>p.days.filter(d=>{ const u=unavOf(mo,r.id,d); return v==="T"?(u&&u!=="F"&&u!=="C"):u===v; }).length;
+    t3.push([rName(r),rotName(mo.rot[r.id]),c("T"),c("F"),c("C"),p.days.filter(d=>(PRF[r.id]||{})[d]).length]); });
+  t1.push([]); t1.push(["Legenda: M mattina, P pomeriggio, N notte, G guardia, X tutto il giorno. Periodo "+fmt(p.first)+" – "+fmt(p.last)+"."]);
+  const wb=XLSX.utils.book_new(), a=XLSX.utils.aoa_to_sheet(t1); a["!cols"]=[{wch:22},{wch:14},...p.days.map(()=>({wch:8}))];
+  XLSX.utils.book_append_sheet(wb,a,"Calendario"); const b=XLSX.utils.aoa_to_sheet(t2); b["!cols"]=[{wch:22},{wch:14},{wch:11},{wch:6},{wch:16},{wch:24}]; XLSX.utils.book_append_sheet(wb,b,"Elenco");
+  const c=XLSX.utils.aoa_to_sheet(t3); c["!cols"]=[{wch:22},{wch:14},{wch:12},{wch:12},{wch:12},{wch:12}]; XLSX.utils.book_append_sheet(wb,c,"Riepilogo");
+  const out=XLSX.write(wb,{bookType:"xlsx",type:"array"}), fname=`Indisponibilita_${monthName(mk).replace(" ","_")}${MULTI?"_"+CURY+"anno":""}.xlsx`;
+  if(!downloads){toast("Il download non è disponibile in questa vista");return;}
+  try{ const r=await downloads.save({filename:fname,data:new Blob([out],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})}); if(r.status==="saved")toast("File Excel salvato"); }catch(e){ toast("Download non riuscito"); } }
 async function exportXlsx(){
   const mo=M(UI.mk), p=period(UI.mk), {per,where}=derive(UI.mk);
   if(typeof XLSX==="undefined"){toast("Libreria Excel non caricata, riprova tra poco");return;}
@@ -1254,6 +1276,7 @@ document.addEventListener("click",e=>{
   if(a==="gen"){ const mo=M(UI.mk); if(mo.sched&&UI.confirm!=="gen"){UI.confirm="gen";render();return;}
     UI.confirm=null; generate(UI.mk); persist(); render(); toast("Turni generati"); return; }
   if(a==="xlsx"){exportXlsx();return;}
+  if(a==="xunav"){exportUnav();return;}
   if(a==="view"){UI.view=el.dataset.v;render();return;}
   if(a==="cell"){ if(hasDraft(M(UI.mk))) UI.draftView=true;cellSheet(el.dataset.d,el.dataset.k);return;}
   if(a==="assign"){ const mo=M(UI.mk), d=layer.dataset.d, k=layer.dataset.k, i=+el.dataset.i, id=el.dataset.id||null;
