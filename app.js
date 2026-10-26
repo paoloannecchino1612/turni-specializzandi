@@ -548,7 +548,7 @@ function myPid(){ if(!MYUID||!S) return null; for(const pid in CLAIMS) if(CLAIMS
 const app=document.getElementById("app");
 function yearBar(){ if(!MULTI) return ""; return `<div class="pickers" style="margin-bottom:2px">${YEARS.map(y=>`<button data-act="year" data-v="${y}" aria-pressed="${y===CURY}">${y}° anno</button>`).join("")}</div>`; }
 function switchYear(y){ if(!db||y===CURY||!REBUILD) return true; if(saveT||saving){ toast("Attendi il salvataggio e riprova"); return false; }
-  CURY=y; docRef=db.doc(yDocs(y).mon); cfgRef=db.doc(yDocs(y).cfg); S=null; PRUNED=false; UI.who=null; UI.sel=null; UI.confirm=null; EXTC.key=null; LOWC.key=null;
+  CURY=y; docRef=db.doc(yDocs(y).mon); cfgRef=db.doc(yDocs(y).cfg); S=null; PRUNED=false; AUTOSYNC=false; UI.who=null; UI.sel=null; UI.confirm=null; EXTC.key=null; LOWC.key=null;
   try{ localStorage.setItem("turni.year",String(y)); }catch(e){}
   REBUILD(); if(!S) render(); return true; }
 /* all'avvio con più anni: si apre l'anno di chi entra (una volta) */
@@ -1041,9 +1041,11 @@ function normRoom(x){ return String(x||"").toLowerCase().replace(/\(.*?\)/g,"").
 /* foglio: riga 1 = giorni ("LUN 05"), colonna A = sala (le righe sotto senza nome sono la stessa sala),
    prima della riga "POMERIGGIO" mattina, dopo pomeriggio; riga "NOTTE" = notti; domenica e festivi DEA = guardia */
 function parseExt(rows,mk){
-  const days=period(mk).days, hdr=rows[0]||[], col={}; let last=-1;
+  const days=period(mk).days, hdr=rows[0]||[], col={}; let last=-1, bad=0;
   for(let c=1;c<hdr.length;c++){ const m=String(hdr[c]||"").match(/(\d{1,2})/); if(!m) continue; const n=+m[1];
-    for(let i=last+1;i<days.length;i++) if(D(days[i]).getUTCDate()===n){ col[c]=days[i]; last=i; break; } }
+    for(let i=last+1;i<days.length;i++) if(D(days[i]).getUTCDate()===n){ col[c]=days[i]; last=i; break; }
+    /* controllo: il giorno della settimana scritto nel foglio deve coincidere (evita di leggere la scheda di un altro mese) */
+    const w=String(hdr[c]||"").trim().slice(0,3).toLowerCase(); if(col[c]&&/^(lun|mar|mer|gio|ven|sab|dom)$/.test(w)&&DOW[isoDow(col[c])].toLowerCase()!==w) bad++; }
   const postBy={}; S.posts.forEach(p=>{ postBy[normRoom(p.name)]=p; postBy[normRoom(p.id)]=postBy[normRoom(p.id)]||p; });
   const nightPost=S.posts.find(p=>Object.values(p.on||{}).some(a=>(a||[]).includes("N")));
   const ours=new Set(S.residents.map(r=>r.name.trim().toLowerCase()));
@@ -1058,7 +1060,28 @@ function parseExt(rows,mk){
       if(!post||!(post.on[t]||[]).includes(sh)) continue;
       if(ours.has(v.replace(/^\(\s*\d\s*\)\s*/,"").trim().toLowerCase())){ own++; continue; }
       const k=d+"|"+post.id+"|"+sh; map[k]=map[k]||[]; if(!map[k].includes(v)) map[k].push(v); } }
-  return {map,unknown:[...unknown],own,cols:Object.keys(col).length}; }
+  return {map,unknown:[...unknown],own,cols:Object.keys(col).length,bad}; }
+/* aggiornamento automatico dal link salvato del foglio "BOZZA ORARI": quando un gestore apre l'app, al massimo ogni 3 ore,
+   per il mese corrente e i successivi visibili. Aggiorna solo i turni coperti da altri anni (mattina/pomeriggio dal foglio;
+   notti e guardie solo se il foglio le riporta); restano quelli segnati a mano. Poi si usa "Aggiorna l'orario". */
+let AUTOSYNC=false;
+async function autoSyncSheet(){ if(AUTOSYNC||!db||!S||!ADMIN()||!S.extSheetUrl||typeof XLSX==="undefined") return; AUTOSYNC=true;
+  const key="turni.autosync."+CURY; try{ const last=+localStorage.getItem(key)||0; if(Date.now()-last<3*3600*1000) return; }catch(e){}
+  const id=(S.extSheetUrl.match(/\/d\/([A-Za-z0-9_-]{20,})/)||[])[1]; if(!id) return;
+  let changes=0, months=0; const [y0,m0]=todayMk().split("-").map(Number);
+  for(let k=0;k<=KEEP_MONTHS;k++){ const mk=mkOf(y0,m0+k), mn=monthName(mk), names=[mn.charAt(0).toUpperCase()+mn.slice(1),mn.toUpperCase(),mn];
+    let res=null;
+    for(const nm of names){ try{ const r=await fetch(`https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&headers=0&sheet=${encodeURIComponent(nm)}`); if(!r.ok) continue; const txt=await r.text(); if(/^\s*</.test(txt)) continue;
+        const wb=XLSX.read(txt,{type:"string",raw:true}), rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:""}), p=parseExt(rows,mk);
+        if(p.cols>=7&&!p.bad){ res=p; break; } }catch(e){} }
+    if(!res) continue; months++;
+    const mo=M(mk), old=mo.ext||{}, next={};
+    for(const kk in old){ const sh=kk.split("|")[2]; if(old[kk].includes(EXT_MAN)) next[kk]=[EXT_MAN]; if((sh==="N"||sh==="D")&&!res.map[kk]) next[kk]=[...(next[kk]||[]),...old[kk].filter(x=>x!==EXT_MAN)]; }
+    for(const kk in res.map) next[kk]=[...res.map[kk],...((next[kk]||[]).filter(x=>x===EXT_MAN))];
+    const all=new Set([...Object.keys(old),...Object.keys(next)]); let ch=0; all.forEach(kk=>{ if(JSON.stringify(old[kk]||[])!==JSON.stringify(next[kk]||[])) ch++; });
+    if(ch){ mo.ext=next; syncExt(mo); changes+=ch; } }
+  try{ localStorage.setItem(key,String(Date.now())); }catch(e){}
+  if(changes){ persist(); render(); toast(`Turni degli altri anni aggiornati dal foglio: ${changes} modifiche. Usa «Aggiorna l'orario» per ridistribuire.`); } }
 function extPreview(name){ const wb=UI.extWb; if(!wb) return; const ws=wb.Sheets[name];
   const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:""}), r=parseExt(rows,UI.mk); UI.extRes=r;
   const cnt={}; for(const k in r.map){ const [,pid,sh]=k.split("|"), p=postOf(pid), lab=(p?p.name:pid)+" · "+SHN[sh]; cnt[lab]=(cnt[lab]||0)+1; }
@@ -1069,6 +1092,7 @@ function extPreview(name){ const wb=UI.extWb; if(!wb) return; const ws=wb.Sheets
    ${n?`<div class="alerts" style="background:var(--accent-soft)"><strong>${n} turni coperti da altri anni</strong><ul>${Object.entries(cnt).sort().map(([k,v])=>`<li>${esc(k)}: ${v}</li>`).join("")}</ul></div>`:`<div class="alerts bad"><strong>Nessun turno riconosciuto</strong><span style="font-size:.85rem">Controlla di aver scelto il foglio del mese giusto.</span></div>`}
    ${r.own?`<p class="muted" style="margin:0;font-size:.82rem">${r.own} turni dei nostri specializzandi presenti nel foglio sono stati ignorati.</p>`:""}
    ${r.unknown.length?`<p class="muted" style="margin:0;font-size:.82rem">Sale non nostre, ignorate: ${r.unknown.map(esc).join(", ")}.</p>`:""}
+   ${r.bad?`<p style="margin:0;font-size:.82rem;color:var(--bad)">Attenzione: in ${r.bad} colonne il giorno della settimana non corrisponde a ${monthName(UI.mk)}: forse è la scheda di un altro mese.</p>`:""}
    ${r.cols<per.days.length?`<p style="margin:0;font-size:.82rem;color:var(--bad)">Alcuni giorni del mese non sono nel foglio: lì non risulta nessun turno coperto.</p>`:""}
    <div class="row"><button class="btn primary" data-act="extsave" ${n?"":"disabled"}>Salva${Object.keys(M(UI.mk).ext||{}).length?" (sostituisce quelli caricati prima)":""}</button><button class="btn" data-act="close">Annulla</button></div>`); }
 
@@ -1440,7 +1464,7 @@ render();
       const sp=splitS(); lastCfg=rawCfg?sp.cfg:""; lastMon=rawMon&&!(!rawCfg&&mon&&mon.residents)?sp.mon:"";
       setSync(cfg?"Salvato":OWNER?"Nessun dato ancora":"In attesa dei dati");
       if(OWNER&&(migrated||!rawCfg&&cfg)){migrated=false;persist();}
-      checkMulti(); pruneOld(); if(HIDEUNAV) recomputeUnav(); filterSW(); consolidate(); autoInvalidate(); syncRoles(); autoYear(); if(!layer.innerHTML) render(); };
+      checkMulti(); pruneOld(); autoSyncSheet(); if(HIDEUNAV) recomputeUnav(); filterSW(); consolidate(); autoInvalidate(); syncRoles(); autoYear(); if(!layer.innerHTML) render(); };
     REBUILD=rebuild;
     const subY={};
     const watchYear=y=>{ if(subY[y]) return; subY[y]=true; RAW[y]=RAW[y]||{}; const d=yDocs(y);
