@@ -610,7 +610,6 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
        <div class="row" style="gap:8px"><button class="btn" data-act="extlink">Turni degli altri anni da link</button><label class="btn">Turni degli altri anni da file<input type="file" id="extfile" accept=".xlsx,.xls,.csv" hidden></label>${Object.keys(mo.ext||{}).length?`<span class="chip">${Object.keys(mo.ext).length} turni coperti da altri anni</span>${clrBtn("clrext","Rimuovi")}`:""}</div>`; })():""}
     ${noRot.length?`<p class="muted" style="margin:0;font-size:.85rem">Senza rotazione questo mese: ${noRot.map(r=>esc(rName(r))).join(", ")}.</p>`:""}</div>`;
   if(!mo.generated&&!ADMIN()) return head+`<div class="panel empty"><h2>Turni non ancora pubblicati</h2><p>Appena verranno generati li vedrai qui.</p></div>`;
-  if(!mo.sched&&!hasDraft(mo)) return head+draft+`<div class="panel empty"><h2>Pronto per generare</h2><p>Controlla rotazioni e indisponibilità, poi scegli sopra se generare tutto il mese o una settimana. Potrai cambiare a mano ogni turno toccandolo.</p><p>Se alcuni turni sono già decisi, inseriscili prima a mano: la generazione non li tocca.</p><button class="btn" data-act="manualstart">Inserisci turni a mano</button></div>`;
   const nW=p.days.length/7, acc=(mo.draft&&mo.draft.acc)||{};
   const draft=ADMIN()?(hasDraft(mo)?`<div class="panel" style="border:2px solid var(--accent)"><div class="row" style="justify-content:space-between"><h2>Bozza${mo.draft.at?` del ${new Date(mo.draft.at).toLocaleString("it-IT",{dateStyle:"short",timeStyle:"short"})}`:""}</h2>
       <span class="pickers sm"><button data-act="dview" data-v="1" aria-pressed="${draftView(mo)}">Bozza</button><button data-act="dview" data-v="0" aria-pressed="${!draftView(mo)}">Pubblicato</button></span></div>
@@ -620,6 +619,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
       ${clrBtn("drop","Scarta la bozza")}</div>
      <div class="row"><button class="btn" data-act="hist">Storico bozze</button></div>${histBox(UI.mk)}</div>`
     :`<div class="row"><button class="btn" data-act="hist">Storico bozze</button></div>${histBox(UI.mk)}`):"";
+  if(!mo.sched&&!hasDraft(mo)) return head+draft+`<div class="panel empty"><h2>Pronto per generare</h2><p>Controlla rotazioni e indisponibilità, poi scegli sopra se generare tutto il mese o una settimana. Potrai cambiare a mano ogni turno toccandolo.</p><p>Se alcuni turni sono già decisi, inseriscili prima a mano: la generazione non li tocca.</p><button class="btn" data-act="manualstart">Inserisci turni a mano</button></div>`;
   let alerts="";
   let holesBox="";
   if(holes.length&&ADMIN()&&(mo.generated||draftView(mo))){ const g={}; holes.forEach(h=>{const k=fmt(h.d);(g[k]=g[k]||[]).push(`${h.post} ${h.s}`);});
