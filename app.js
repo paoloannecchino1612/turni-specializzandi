@@ -1048,19 +1048,22 @@ function parseExt(rows,mk){
     const w=String(hdr[c]||"").trim().slice(0,3).toLowerCase(); if(col[c]&&/^(lun|mar|mer|gio|ven|sab|dom)$/.test(w)&&DOW[isoDow(col[c])].toLowerCase()!==w) bad++; }
   const postBy={}; S.posts.forEach(p=>{ postBy[normRoom(p.name)]=p; postBy[normRoom(p.id)]=postBy[normRoom(p.id)]||p; });
   const nightPost=S.posts.find(p=>Object.values(p.on||{}).some(a=>(a||[]).includes("N")));
-  const ours=new Set(S.residents.map(r=>r.name.trim().toLowerCase()));
-  const map={}, unknown=new Set(); let sec="M", room=null, own=0;
+  const ourId={}; S.residents.forEach(r=>ourId[r.name.trim().toLowerCase()]=r.id); const ours=new Set(Object.keys(ourId));
+  /* ownMap: dove il foglio mette i nostri; seen: sale/turni presenti nel foglio (per sapere dove il foglio "fa testo") */
+  const map={}, ownMap={}, seen=new Set(), unknown=new Set(); let sec="M", room=null, own=0;
   for(let r=1;r<rows.length;r++){ const row=rows[r]||[], a=String(row[0]||"").trim();
     if(/^pomeriggio/i.test(a)){ sec="P"; room=null; continue; }
     if(a){ if(/^notte/i.test(a)) room={night:true}; else { const p=postBy[normRoom(a)]; room=p?{post:p}:null; if(!p) unknown.add(a); } }
     if(!room) continue;
+    if(room.night) seen.add("N"); else { seen.add(room.post.id+"|"+sec); if(sec==="M") seen.add(room.post.id+"|D"); }
     for(const c in col){ const v=String(row[c]??"").trim(); if(!v) continue; const d=col[c], t=dayType(d);
       let post=room.night?nightPost:room.post, sh=room.night?"N":sec;
       if(!room.night&&t==="fes"&&(post.on.fes||[]).includes("D")) sh="D";
       if(!post||!(post.on[t]||[]).includes(sh)) continue;
-      if(ours.has(v.replace(/^\(\s*\d\s*\)\s*/,"").trim().toLowerCase())){ own++; continue; }
+      const sur=v.replace(/^\(\s*\d\s*\)\s*/,"").trim().toLowerCase();
+      if(ours.has(sur)){ own++; const k=d+"|"+post.id+"|"+sh; (ownMap[k]=ownMap[k]||[]).includes(ourId[sur])||ownMap[k].push(ourId[sur]); continue; }
       const k=d+"|"+post.id+"|"+sh; map[k]=map[k]||[]; if(!map[k].includes(v)) map[k].push(v); } }
-  return {map,unknown:[...unknown],own,cols:Object.keys(col).length,bad}; }
+  return {map,ownMap,seen,colDays:Object.values(col),unknown:[...unknown],own,cols:Object.keys(col).length,bad}; }
 /* aggiornamento automatico dal link salvato del foglio "BOZZA ORARI": quando un gestore apre l'app, al massimo ogni 3 ore,
    per il mese corrente e i successivi visibili. Aggiorna solo i turni coperti da altri anni (mattina/pomeriggio dal foglio;
    notti e guardie solo se il foglio le riporta); restano quelli segnati a mano. Poi si usa "Aggiorna l'orario". */
@@ -1068,7 +1071,7 @@ let AUTOSYNC=false;
 async function autoSyncSheet(){ if(AUTOSYNC||!db||!S||!ADMIN()||!S.extSheetUrl||typeof XLSX==="undefined") return; AUTOSYNC=true;
   const key="turni.autosync."+CURY; try{ const last=+localStorage.getItem(key)||0; if(Date.now()-last<3*3600*1000) return; }catch(e){}
   const id=(S.extSheetUrl.match(/\/d\/([A-Za-z0-9_-]{20,})/)||[])[1]; if(!id) return;
-  let changes=0, months=0; const [y0,m0]=todayMk().split("-").map(Number);
+  let changes=0, months=0, moved=0; const [y0,m0]=todayMk().split("-").map(Number);
   for(let k=0;k<=KEEP_MONTHS;k++){ const mk=mkOf(y0,m0+k), mn=monthName(mk), names=[mn.charAt(0).toUpperCase()+mn.slice(1),mn.toUpperCase(),mn];
     let res=null;
     for(const nm of names){ try{ const r=await fetch(`https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&headers=0&sheet=${encodeURIComponent(nm)}`); if(!r.ok) continue; const txt=await r.text(); if(/^\s*</.test(txt)) continue;
@@ -1079,9 +1082,19 @@ async function autoSyncSheet(){ if(AUTOSYNC||!db||!S||!ADMIN()||!S.extSheetUrl||
     for(const kk in old){ const sh=kk.split("|")[2]; if(old[kk].includes(EXT_MAN)) next[kk]=[EXT_MAN]; if((sh==="N"||sh==="D")&&!res.map[kk]) next[kk]=[...(next[kk]||[]),...old[kk].filter(x=>x!==EXT_MAN)]; }
     for(const kk in res.map) next[kk]=[...res.map[kk],...((next[kk]||[]).filter(x=>x===EXT_MAN))];
     const all=new Set([...Object.keys(old),...Object.keys(next)]); let ch=0; all.forEach(kk=>{ if(JSON.stringify(old[kk]||[])!==JSON.stringify(next[kk]||[])) ch++; });
-    if(ch){ mo.ext=next; syncExt(mo); changes+=ch; } }
+    if(ch){ mo.ext=next; syncExt(mo); changes+=ch; }
+    /* i nostri: se nel foglio sono stati spostati, la bozza si allinea al foglio (da accettare) */
+    const base=hasDraft(mo)?mo.draft.sched:mo.sched;
+    if(base&&res.own>0){ const nightKey=S.posts.find(x=>Object.values(x.on||{}).some(a=>(a||[]).includes("N")));
+      for(const d of res.colDays){ for(const k in (base[d]||{})){ const [pid,sh]=k.split("|"); const sk=sh==="N"?"N":pid+"|"+sh; if(!res.seen.has(sk)) continue;
+          const cur=(base[d][k]||[]).filter(x=>x), want=res.ownMap[d+"|"+k]||[];
+          if(cur.length===want.length&&cur.every(x=>want.includes(x))) continue;
+          const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=want.length?[...want]:(EXT(mo)[d+"|"+k]&&!multiPost(postOf(pid))?[]:[null]);
+          const fx=mo.fixed||{}; Object.keys(fx).filter(z=>z.startsWith(d+"|"+k+"|")).forEach(z=>delete fx[z]); want.forEach((x,i)=>fx[d+"|"+k+"|"+i]=x); mo.fixed=fx; moved++; }
+        for(const kk in res.ownMap){ const [d2,pid,sh]=kk.split("|"); if(d2!==d) continue; const k=pid+"|"+sh; if((base[d]||{})[k]) continue;
+          const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=[...res.ownMap[kk]]; res.ownMap[kk].forEach((x,i)=>{ mo.fixed=mo.fixed||{}; mo.fixed[d+"|"+k+"|"+i]=x; }); moved++; } } } }
   try{ localStorage.setItem(key,String(Date.now())); }catch(e){}
-  if(changes){ persist(); render(); toast(`Turni degli altri anni aggiornati dal foglio: ${changes} modifiche. Usa «Aggiorna l'orario» per ridistribuire.`); } }
+  if(changes||moved){ persist(); render(); toast([changes?`Turni degli altri anni aggiornati dal foglio: ${changes} modifiche`:"",moved?`${moved} turni dei nostri cambiati nel foglio: aggiornati nella bozza, da accettare`:""].filter(Boolean).join(". ")+(changes?". Usa «Aggiorna l'orario» per ridistribuire.":".")); } }
 function extPreview(name){ const wb=UI.extWb; if(!wb) return; const ws=wb.Sheets[name];
   const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:""}), r=parseExt(rows,UI.mk); UI.extRes=r;
   const cnt={}; for(const k in r.map){ const [,pid,sh]=k.split("|"), p=postOf(pid), lab=(p?p.name:pid)+" · "+SHN[sh]; cnt[lab]=(cnt[lab]||0)+1; }
