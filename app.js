@@ -657,7 +657,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   const noRot=S.residents.filter(r=>!mo.rot[r.id]);
   const head=monthBar()+`<div class="panel"><div class="row" style="justify-content:space-between">
     <div class="stack" style="gap:2px"><h2>Turni del mese</h2><span class="muted" style="font-size:.82rem">${mo.generated?`Pubblicati il ${new Date(mo.generated).toLocaleString("it-IT",{dateStyle:"short",timeStyle:"short"})}`:"Non ancora pubblicati"}${ADMIN()&&hasDraft(mo)?" · bozza in corso":""}</span></div>
-    <div class="row">${!ADMIN()?(mo.generated?`<button class="btn primary" data-act="xlsx">Scarica Excel</button>`:""):(mo.sched||hasDraft(mo))?`<button class="btn primary" data-act="xlsx">Scarica Excel</button>${clrBtn("clrsched","Elimina tutti i turni")}`:""}</div></div>
+    <div class="row">${!ADMIN()?(mo.generated?`<button class="btn primary" data-act="xlsx">Scarica Excel</button>`:""):(mo.sched||hasDraft(mo))?`<button class="btn primary" data-act="xlsx">Scarica Excel</button><button class="btn" data-act="xbozza">Excel formato BOZZA ORARI</button>${clrBtn("clrsched","Elimina tutti i turni")}`:""}</div></div>
     ${ADMIN()?(()=>{ const nw=p.days.length/7, cur=UI.genWk??"";
       const filled=w=>p.days.slice(w*7,w*7+7).some(d=>Object.values((workSched(mo)||{})[d]||{}).some(a=>a.some(x=>x)));
       return `<div class="row" style="gap:8px"><label class="row" style="gap:6px"><span class="label">Genera</span><select id="genWk" data-genwk="1"><option value="" ${cur===""?"selected":""}>Tutto il mese</option>${Array.from({length:nw},(_,w)=>`<option value="${w}" ${String(cur)===String(w)?"selected":""}>Settimana ${w+1}: ${fmt(p.days[w*7])} – ${fmt(p.days[w*7+6])}${filled(w)?" ✓":""}</option>`).join("")}</select></label>
@@ -1138,6 +1138,34 @@ async function exportBackup(){ if(!OWNER||!db) return; toast("Preparo la copia d
     if(!downloads){toast("Il download non è disponibile in questa vista");return;}
     const r=await downloads.save({filename:fname,data:new Blob([json],{type:"application/json"})}); if(r.status==="saved") toast("Copia di sicurezza salvata");
   }catch(e){ toast("Copia non riuscita: "+(e.message||e.code||e)); } }
+/* Excel nel formato del foglio "BOZZA ORARI": giorni in riga 1, sale in colonna A (mattina, poi "POMERIGGIO", poi "NOTTE"),
+   nomi "(anno) Cognome" di tutti gli anni (orari pubblicati + turni degli altri anni importati); domenica/festivi la guardia sta nella DEA della mattina */
+function sheetRoomName(p,sh){ const k=normRoom(p.name), m=k.match(/^(tc|rm|angio)(\d)$/);
+  if(m&&m[1]==="tc") return "TC - "+m[2]; if(m&&m[1]==="rm") return `RM ${m[2]} (${m[2]==="2"?"Philips":"GE"})`; if(m&&m[1]==="angio") return "Angiografia "+m[2];
+  if(k==="dea") return sh==="P"?"DEA (II)":"DEA"; return p.name; }
+async function exportBozza(){ if(typeof XLSX==="undefined"){toast("Libreria Excel non caricata, riprova tra poco");return;}
+  const mk=UI.mk, p=period(mk), D3=["DOM","LUN","MAR","MER","GIO","VEN","SAB"];
+  const cell={}; const add=(d,rk,sh,name)=>{ const k=d+"|"+rk+"|"+sh; (cell[k]=cell[k]||[]); if(!cell[k].includes(name)) cell[k].push(name); };
+  const rooms=[]; S.posts.forEach(x=>{ const rk=normRoom(x.name); if(rk&&!rooms.some(r=>r.rk===rk)) rooms.push({rk,p:x}); });
+  const put=(st,y,sched)=>{ const nm={}; (st.residents||[]).forEach(r=>nm[r.id]=`(${r.year||st.groupYear||y}) ${r.name}`); const pk={}; (st.posts||[]).forEach(x=>pk[x.id]=normRoom(x.name));
+    for(const d in sched) for(const k in sched[d]){ const [pid,sh]=k.split("|"); (sched[d][k]||[]).forEach(id=>{ if(id&&nm[id]) add(d,pk[pid],sh==="D"?"M":sh,nm[id]); }); } };
+  const ys=MULTI?YEARS:[CURY];
+  for(const y of ys){ const st=y===CURY?S:yState(y); const m=st&&st.months&&st.months[mk]; if(!m) continue;
+    const sc=y===CURY?(viewSched(mk)||{}):(m.sched||{}); put(st,y,sc);
+    for(const kk in (m.ext||{})){ const [d,pid,sh]=kk.split("|"), px=(st.posts||[]).find(x=>x.id===pid); if(px) m.ext[kk].forEach(n=>add(d,normRoom(px.name),sh==="D"?"M":sh,n)); } }
+  const sortY=a=>a.sort((x,z)=>((z.match(/^\((\d)\)/)||[])[1]||0)-((x.match(/^\((\d)\)/)||[])[1]||0));
+  const rows=[["",...p.days.map(d=>`${D3[(isoDow(d)+1)%7]} ${d.slice(8)}`)]];
+  const block=(sh)=>{ for(const r of rooms){ if(!SH.some(s=>s===sh)) continue; const has=p.days.some(d=>((r.p.on||{})[dayType(d)]||[]).includes(sh)||(sh==="M"&&((r.p.on||{})[dayType(d)]||[]).includes("D")));
+      if(!has||sh==="N") continue; const lists=p.days.map(d=>sortY([...(cell[d+"|"+r.rk+"|"+sh]||[])])); const h=Math.max(1,...lists.map(l=>l.length));
+      for(let i=0;i<h;i++) rows.push([i===0?sheetRoomName(r.p,sh):"",...lists.map(l=>l[i]||"")]); rows.push([]); } };
+  block("M"); rows.push(["POMERIGGIO"]); block("P");
+  const nl=p.days.map(d=>{ const all=[]; rooms.forEach(r=>(cell[d+"|"+r.rk+"|N"]||[]).forEach(n=>all.includes(n)||all.push(n))); return sortY(all); });
+  const hn=Math.max(1,...nl.map(l=>l.length)); for(let i=0;i<hn;i++) rows.push([i===0?"NOTTE":"",...nl.map(l=>l[i]||"")]);
+  const wb=XLSX.utils.book_new(), ws=XLSX.utils.aoa_to_sheet(rows); ws["!cols"]=[{wch:16},...p.days.map(()=>({wch:16}))];
+  const title=monthName(mk).charAt(0).toUpperCase()+monthName(mk).slice(1); XLSX.utils.book_append_sheet(wb,ws,title.slice(0,31));
+  const out=XLSX.write(wb,{bookType:"xlsx",type:"array"}), fname=`BOZZA_ORARI_${title.replace(" ","_")}.xlsx`;
+  if(!downloads){toast("Il download non è disponibile in questa vista");return;}
+  try{ const r=await downloads.save({filename:fname,data:new Blob([out],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})}); if(r.status==="saved")toast("File salvato"); }catch(e){ toast("Download non riuscito"); } }
 async function exportXlsx(){
   const mo=M(UI.mk), p=period(UI.mk), {per,where}=derive(UI.mk);
   if(typeof XLSX==="undefined"){toast("Libreria Excel non caricata, riprova tra poco");return;}
@@ -1318,6 +1346,7 @@ document.addEventListener("click",e=>{
   if(a==="xlsx"){exportXlsx();return;}
   if(a==="xunav"){exportUnav();return;}
   if(a==="backup"){exportBackup();return;}
+  if(a==="xbozza"){exportBozza();return;}
   if(a==="view"){UI.view=el.dataset.v;render();return;}
   if(a==="cell"){ if(hasDraft(M(UI.mk))) UI.draftView=true;cellSheet(el.dataset.d,el.dataset.k);return;}
   if(a==="assign"){ const mo=M(UI.mk), d=layer.dataset.d, k=layer.dataset.k, i=+el.dataset.i, id=el.dataset.id||null;

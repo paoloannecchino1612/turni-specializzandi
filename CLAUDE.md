@@ -63,6 +63,8 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 
 - Notti e guardie già programmate: in Turni "Notti e guardie programmate da link/da file" legge le schede tipo "Guardie/Notti NOV-GEN" (titoli "GUARDIE…"/"NOTTI", righe "Data | Giorno | nomi", date ISO o gg/mm/aaaa) con `parseNights`; i nostri (per cognome) diventano turni fissi in `mo.fixed` e nella bozza, gli altri vanno in `mo.ext` (`applyNights`).
 
+- Export "Excel formato BOZZA ORARI" (`exportBozza`, gestori in Turni): stesso schema del foglio (giorni "LUN 05", sale con nomi del foglio "TC - 1", "RM 2 (Philips)", "DEA"/"DEA (II)", "Angiografia 1", riga "POMERIGGIO", riga "NOTTE"; guardie nella DEA della mattina), nomi "(anno) Cognome" di tutti gli anni (pubblicati, per l'anno corrente la vista attuale) più i turni importati.
+
 ## Contesto
 - Esiste anche il foglio Google "BOZZA ORARI" con gli orari di tutti gli anni (nomi come "(anno) Cognome"). L'orario si costruisce a cascata 4° → 3° → 2° → 1° anno dopo quello degli strutturati. Una prova su ottobre (gruppo 1° anno, sale RX/Eco/Senologia + TC/RM) ha mostrato che il generatore riduce i buchi; possibile sviluppo futuro: importare dal foglio i turni degli altri anni come "occupati".
 - Il proprietario preferisce: prima un consiglio, poi decide lui cosa cambiare; risposte concise; niente modifiche non richieste.
