@@ -69,6 +69,8 @@ function syncRoles(){ if(!OWNER||!db||!S) return; const uidsOf=st=>[...new Set((
 const UNAV={}; /* mk → pid → {data: codice} — un documento per specializzando e mese */
 /* preferenze di turno (3° e 4° anno), nello stesso documento delle indisponibilità: mk → pid → {data: "M" | "TC1|M" …} */
 const PREF={}; function PR(mk){return PREF[mk]||(PREF[mk]={});}
+/* privacy: se attivo (config/privacy.hideUnav), gli specializzandi vedono solo le proprie indisponibilità, ferie, congressi e preferenze */
+let HIDEUNAV=false;
 function canPref(pid){ const r=resOf(pid); return !!r&&yearOfRes(r)>=3; }
 function UN(mk){return UNAV[mk]||(UNAV[mk]={});}
 const now=new Date();
@@ -163,7 +165,8 @@ function recomputeUnav(){ const keep={}, keepP={};
   /* i dati del database arrivano congelati: si copiano, altrimenti le modifiche successive vengono ignorate */
   for(const x of Object.values(SRC.staff||{})){ UN(x.mk)[x.pid]={...(x.days||{})}; if(x.pref) PR(x.mk)[x.pid]={...x.pref}; }
   for(const u in SRC){ if(u==="staff") continue; for(const x of Object.values(SRC[u])) if(CLAIMS[x.pid]===u){ UN(x.mk)[x.pid]={...(x.days||{})}; if(x.pref) PR(x.mk)[x.pid]={...x.pref}; } }
-  for(const k in keep){ const i=k.indexOf("_"); UN(k.slice(0,i))[k.slice(i+1)]=keep[k]; if(keepP[k]) PR(k.slice(0,i))[k.slice(i+1)]=keepP[k]; } }
+  for(const k in keep){ const i=k.indexOf("_"); UN(k.slice(0,i))[k.slice(i+1)]=keep[k]; if(keepP[k]) PR(k.slice(0,i))[k.slice(i+1)]=keepP[k]; }
+  if(HIDEUNAV&&!ADMIN()){ const me=myAnyPid(); for(const mk in UNAV) for(const pid in UNAV[mk]) if(pid!==me) delete UNAV[mk][pid]; for(const mk in PREF) for(const pid in PREF[mk]) if(pid!==me) delete PREF[mk][pid]; } }
 function syncSubs(uids){ const want=new Set(["staff",...uids]);
   for(const u of want) if(!SUBS[u]) SUBS[u]=db.collection(`unav/${u}/m`).limit(1000).onSnapshot(qs=>{ SRC[u]={}; for(const doc of qs.docs){ const x=doc.data(); if(x&&x.mk&&x.pid) SRC[u][doc.id]=x; } recomputeUnav(); if(S&&!layer.innerHTML) render(); },()=>{});
   for(const u in SUBS) if(!want.has(u)){ try{SUBS[u]();}catch(e){} delete SUBS[u]; delete SRC[u]; } }
@@ -596,7 +599,7 @@ function vIndisp(){ if(!S.residents.length) return monthBar()+noRes();
   if(!OWNER&&db){ if(!MYUID) return monthBar()+`<div class="panel"><h2>Accedi con il tuo account</h2><p class="muted" style="margin:0">Per compilare le tue indisponibilità accedi con la tua email.</p></div>`;
     if(!me&&!myAnyPid()) return monthBar()+claimPanel("Tocca il tuo nome per collegarlo al tuo account. Serve una volta sola: dopo potrai modificare solo le tue indisponibilità, ferie e congressi."); }
   const otherYear=!OWNER&&db&&!me&&!!myAnyPid();
-  if(!OWNER&&me&&!UI.selTouched) UI.sel=me;
+  if(!OWNER&&me&&(!UI.selTouched||(HIDEUNAV&&!ADMIN()))) UI.sel=me;
   if(!UI.sel||!S.residents.find(r=>r.id===UI.sel)) UI.sel=S.residents[0].id;
   const ro=db&&!canEditUnav(UI.sel), dl=unavDeadline(UI.mk), closed=todayIso()>dl;
   const dlBox=`<div class="${closed?"alerts":"okline"}" style="${closed?"":"font-weight:500;color:var(--muted)"}">${closed?`<strong>Modifiche chiuse</strong><span style="font-size:.86rem">Indisponibilità, ferie e congressi di ${monthName(UI.mk)} si potevano inserire fino a ${fmt(dl,true)}.${ADMIN()?" Tu puoi ancora modificarle, anche per gli altri.":" Per cambiare qualcosa chiedi a chi gestisce i turni."}</span>`:`Puoi inserire o modificare indisponibilità, ferie e congressi di ${monthName(UI.mk)} fino a <strong>${fmt(dl,true)}</strong>.`}</div>`;
@@ -611,7 +614,7 @@ function vIndisp(){ if(!S.residents.length) return monthBar()+noRes();
   ${ADMIN()?`<div class="row"><button class="btn" data-act="xunav">Scarica indisponibilità (Excel)</button></div>`:""}
   <div class="pickers" role="tablist">${MODES.map(([k,l])=>`<button data-act="umode" data-v="${k}" aria-pressed="${mode===k}">${l}</button>`).join("")}</div>
   <div class="panel"><span class="label">Specializzando</span>
-   <div class="pickers">${S.residents.map(r=>`<button data-act="sel" data-id="${r.id}" aria-pressed="${r.id===UI.sel}">${esc(rName(r))}${cnt(r.id)?`<span class="cnt">${cnt(r.id)}</span>`:""}</button>`).join("")}</div></div>
+   <div class="pickers">${S.residents.filter(r=>!(HIDEUNAV&&!ADMIN())||r.id===me).map(r=>`<button data-act="sel" data-id="${r.id}" aria-pressed="${r.id===UI.sel}">${esc(rName(r))}${cnt(r.id)?`<span class="cnt">${cnt(r.id)}</span>`:""}</button>`).join("")}</div></div>
   <div class="panel"><div class="row" style="justify-content:space-between"><h2>${esc(resName(UI.sel))} · ${MODES.find(x=>x[0]===mode)[1]}</h2><span class="row" style="gap:6px"><span class="chip">${esc(rotName(mo.rot[UI.sel]))}</span><span class="chip tag-F">${tot(UI.sel,"F")} ferie</span><span class="chip tag-C">${tot(UI.sel,"C")} congr.</span></span></div>
    ${dlBox}
    <p class="muted" style="margin:0;font-size:.85rem">${ro?(UI.sel===myPid()?`Sola lettura: il termine per ${monthName(UI.mk)} è scaduto.`:`Stai guardando le voci di ${esc(resName(UI.sel))}: puoi modificare solo le tue.`):hint}</p>
@@ -734,7 +737,9 @@ function vImp(){
     YEARS.forEach(y=>((yState(y)||{}).posts||[]).forEach(p=>{ const k=normRoom(p.name); if(!k||seen.has(k)) return; seen.add(k); rows.push({k,name:p.name,p}); }));
     return `<div class="panel"><h2>Anni che coprono ogni sala</h2><p class="muted" style="margin:0;font-size:.85rem">Elenco unico per tutti gli anni: lo modificate tu e i gestori di qualsiasi anno. Un anno genera turni solo nelle sale dove è segnato. Vale per le sale con lo stesso nome in tutti gli anni.</p>
      <div class="list">${rows.map(r=>{ const ys=yearsFor(r.p); return `<div class="item"><span class="name-strong">${esc(r.name)}</span><span class="pickers sm">${YEARS.map(y=>`<button data-act="covy" data-k="${esc(r.k)}" data-y="${y}" aria-pressed="${ys.includes(y)}">${y}°</button>`).join("")}</span></div>`; }).join("")}</div></div>`; })():"";
-  return reqPanel+yearsPanel+covPanel+mgPanel+allowPanel+linkedPanel()+importPanel+`
+  const privPanel=ADMIN()&&db?`<div class="panel"><div class="row" style="justify-content:space-between"><h2>Privacy indisponibilità</h2><button class="btn ${HIDEUNAV?"primary":""}" data-act="privtog" role="switch" aria-checked="${HIDEUNAV}">${HIDEUNAV?"Attivo":"Spento"}</button></div>
+   <p class="muted" style="margin:0;font-size:.85rem">${HIDEUNAV?"Gli specializzandi vedono solo le proprie indisponibilità, ferie, congressi e preferenze. Tu e i gestori vedete tutto.":"Tutti vedono le indisponibilità, ferie e congressi di tutti. Attivandolo ognuno vede solo le proprie (tu e i gestori vedete sempre tutto)."}</p></div>`:"";
+  return reqPanel+yearsPanel+privPanel+covPanel+mgPanel+allowPanel+linkedPanel()+importPanel+`
   <div class="panel"><h2>Specializzandi</h2>
    <form class="row" id="addform"><input id="newname" placeholder="Cognome Nome" style="flex:1 1 12em" autocomplete="off"><select id="newyear" aria-label="Anno">${[1,2,3,4].map(y=>`<option ${y===2?"selected":""}>${y}° anno</option>`).join("")}</select><button class="btn primary" type="submit">Aggiungi</button></form>
    <div class="list">${S.residents.map(r=>`<div class="item"><input id="rname-${r.id}" data-rname="${r.id}" value="${esc(r.name)}" aria-label="Nome" style="font-weight:600;width:100%"><span class="pickers sm" style="flex:none"><button data-act="rflag" data-id="${r.id}" data-f="nights" aria-pressed="${canDo(r.id,"N")}">Notti</button><button data-act="rflag" data-id="${r.id}" data-f="guards" aria-pressed="${canDo(r.id,"D")}">Guardie</button></span><button class="btn danger ${UI.confirm==="del-"+r.id?"confirm":""}" data-act="del" data-id="${r.id}">${UI.confirm==="del-"+r.id?"Conferma":"Rimuovi"}</button></div>`).join("")||`<p class="muted" style="margin:0">Ancora nessuno.</p>`}</div></div>
@@ -1195,6 +1200,7 @@ document.addEventListener("click",e=>{
     db.doc("config/years").set({state:JSON.stringify({coverage:next}),updated:new Date().toISOString()}).catch(()=>toast("Non riesco a salvare: le regole del database vanno aggiornate"));
     return; }
   if(a==="rflag"){ const r=resOf(el.dataset.id); if(!r) return; const f=el.dataset.f; r[f]=!canDo(r.id,f==="nights"?"N":"D"); persist(); render(); return; }
+  if(a==="privtog"){ if(!ADMIN()) return; db.doc("config/privacy").set({hideUnav:!HIDEUNAV,updated:new Date().toISOString()}).then(()=>toast(!HIDEUNAV?"Indisponibilità degli altri nascoste agli specializzandi":"Indisponibilità di nuovo visibili a tutti")).catch(()=>toast("Non riesco a salvare: aggiorna le regole del database")); return; }
   if(a==="year"){ switchYear(+el.dataset.v); render(); return; }
   if(a==="years"){ if(UI.confirm!=="years"){UI.confirm="years";render();return;} UI.confirm=null;
     if(S.multiYear){ S.multiYear=false; persist(); toast("Più anni disattivato: dati degli altri anni conservati"); render(); return; }
@@ -1354,7 +1360,7 @@ render();
       const sp=splitS(); lastCfg=rawCfg?sp.cfg:""; lastMon=rawMon&&!(!rawCfg&&mon&&mon.residents)?sp.mon:"";
       setSync(cfg?"Salvato":OWNER?"Nessun dato ancora":"In attesa dei dati");
       if(OWNER&&(migrated||!rawCfg&&cfg)){migrated=false;persist();}
-      checkMulti(); filterSW(); consolidate(); autoInvalidate(); syncRoles(); autoYear(); if(!layer.innerHTML) render(); };
+      checkMulti(); if(HIDEUNAV) recomputeUnav(); filterSW(); consolidate(); autoInvalidate(); syncRoles(); autoYear(); if(!layer.innerHTML) render(); };
     REBUILD=rebuild;
     const subY={};
     const watchYear=y=>{ if(subY[y]) return; subY[y]=true; RAW[y]=RAW[y]||{}; const d=yDocs(y);
@@ -1378,6 +1384,7 @@ render();
       for(const x of list) if(!CLAIMS[x.pid]) CLAIMS[x.pid]=x.u; CLAIMDOCS=list;
       syncSubs(list.map(x=>x.u)); recomputeUnav(); syncRoles(); autoYear(); if(S&&!layer.innerHTML) render(); }, ()=>{});
     syncSubs([]);
+    db.doc("config/privacy").onSnapshot(sn=>{ const v=!!(sn.exists&&sn.data().hideUnav); if(v===HIDEUNAV) return; HIDEUNAV=v; recomputeUnav(); if(S&&!layer.innerHTML) render(); },()=>{});
     if(OWNER) db.collection("accessRequests").limit(200).onSnapshot(qs=>{ REQS=qs.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.email).sort((a,b)=>(a.at||"").localeCompare(b.at||"")); 
       const t=document.querySelector('#tabs button[data-tab="imp"]'); if(t) t.textContent=REQS.length?`Impostazioni (${REQS.length})`:"Impostazioni";
       if(REQS.length&&!UI.reqToast){ UI.reqToast=true; toast(REQS.length===1?"Nuova richiesta di accesso in Impostazioni":REQS.length+" richieste di accesso in Impostazioni"); }

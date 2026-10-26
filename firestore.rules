@@ -52,8 +52,11 @@ service cloud.firestore {
       let off = (8 - first.dayOfWeek()) % 7;
       return request.time < first + duration.value(off - 1, 'd');
     }
+    // privacy: se config/privacy.hideUnav è vero, gli specializzandi leggono solo le proprie indisponibilità
+    function unavHidden() { return exists(/databases/$(database)/documents/config/privacy) && get(/databases/$(database)/documents/config/privacy).data.hideUnav == true; }
+    match /config/privacy { allow read: if allowed(); allow write: if isAdmin(); }
     match /unav/{uid}/m/{doc} {
-      allow read: if allowed();
+      allow read: if isAdmin() || (allowed() && (request.auth.uid == uid || !unavHidden()));
       allow write: if isAdmin() || (allowed() && request.auth.uid == uid && beforeDeadline(doc));
     }
 
