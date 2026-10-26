@@ -1089,6 +1089,18 @@ function parseExt(rows,mk){
 /* aggiornamento automatico dal link salvato del foglio "BOZZA ORARI": quando un gestore apre l'app, al massimo ogni 3 ore,
    per il mese corrente e i successivi visibili. Aggiorna solo i turni coperti da altri anni (mattina/pomeriggio dal foglio;
    notti e guardie solo se il foglio le riporta); restano quelli segnati a mano. Poi si usa "Aggiorna l'orario". */
+/* allinea la bozza ai nostri specializzandi come risultano nel foglio (sale/turni presenti nel foglio); restituisce quante caselle cambia */
+function alignOwn(mo,res){ let moved=0;
+  const base=(hasDraft(mo)?mo.draft.sched:mo.sched)||{};
+    if(res.own>0){ const nightKey=S.posts.find(x=>Object.values(x.on||{}).some(a=>(a||[]).includes("N")));
+      for(const d of res.colDays){ for(const k in (base[d]||{})){ const [pid,sh]=k.split("|"); const sk=sh==="N"?"N":pid+"|"+sh; if(!res.seen.has(sk)) continue;
+          const cur=(base[d][k]||[]).filter(x=>x), want=res.ownMap[d+"|"+k]||[];
+          if(cur.length===want.length&&cur.every(x=>want.includes(x))) continue;
+          const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=want.length?[...want]:(EXT(mo)[d+"|"+k]&&!multiPost(postOf(pid))?[]:[null]);
+          const fx=mo.fixed||{}; Object.keys(fx).filter(z=>z.startsWith(d+"|"+k+"|")).forEach(z=>delete fx[z]); want.forEach((x,i)=>fx[d+"|"+k+"|"+i]=x); mo.fixed=fx; moved++; }
+        for(const kk in res.ownMap){ const [d2,pid,sh]=kk.split("|"); if(d2!==d) continue; const k=pid+"|"+sh; if((base[d]||{})[k]) continue;
+          const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=[...res.ownMap[kk]]; res.ownMap[kk].forEach((x,i)=>{ mo.fixed=mo.fixed||{}; mo.fixed[d+"|"+k+"|"+i]=x; }); moved++; } } }
+  return moved; }
 let AUTOSYNC=false;
 async function autoSyncSheet(){ if(AUTOSYNC||!db||!S||!ADMIN()||!S.extSheetUrl||typeof XLSX==="undefined") return; AUTOSYNC=true;
   const key="turni.autosync."+CURY; try{ const last=+localStorage.getItem(key)||0; if(Date.now()-last<3*3600*1000) return; }catch(e){}
@@ -1106,15 +1118,7 @@ async function autoSyncSheet(){ if(AUTOSYNC||!db||!S||!ADMIN()||!S.extSheetUrl||
     const all=new Set([...Object.keys(old),...Object.keys(next)]); let ch=0; all.forEach(kk=>{ if(JSON.stringify(old[kk]||[])!==JSON.stringify(next[kk]||[])) ch++; });
     if(ch){ mo.ext=next; syncExt(mo); changes+=ch; }
     /* i nostri: se nel foglio sono stati spostati, la bozza si allinea al foglio (da accettare) */
-    const base=hasDraft(mo)?mo.draft.sched:mo.sched;
-    if(base&&res.own>0){ const nightKey=S.posts.find(x=>Object.values(x.on||{}).some(a=>(a||[]).includes("N")));
-      for(const d of res.colDays){ for(const k in (base[d]||{})){ const [pid,sh]=k.split("|"); const sk=sh==="N"?"N":pid+"|"+sh; if(!res.seen.has(sk)) continue;
-          const cur=(base[d][k]||[]).filter(x=>x), want=res.ownMap[d+"|"+k]||[];
-          if(cur.length===want.length&&cur.every(x=>want.includes(x))) continue;
-          const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=want.length?[...want]:(EXT(mo)[d+"|"+k]&&!multiPost(postOf(pid))?[]:[null]);
-          const fx=mo.fixed||{}; Object.keys(fx).filter(z=>z.startsWith(d+"|"+k+"|")).forEach(z=>delete fx[z]); want.forEach((x,i)=>fx[d+"|"+k+"|"+i]=x); mo.fixed=fx; moved++; }
-        for(const kk in res.ownMap){ const [d2,pid,sh]=kk.split("|"); if(d2!==d) continue; const k=pid+"|"+sh; if((base[d]||{})[k]) continue;
-          const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=[...res.ownMap[kk]]; res.ownMap[kk].forEach((x,i)=>{ mo.fixed=mo.fixed||{}; mo.fixed[d+"|"+k+"|"+i]=x; }); moved++; } } } }
+    moved+=alignOwn(mo,res); }
   try{ localStorage.setItem(key,String(Date.now())); }catch(e){}
   if(changes||moved){ persist(); render(); toast([changes?`Turni degli altri anni aggiornati dal foglio: ${changes} modifiche`:"",moved?`${moved} turni dei nostri cambiati nel foglio: aggiornati nella bozza, da accettare`:""].filter(Boolean).join(". ")+(changes?". Usa «Aggiorna l'orario» per ridistribuire.":".")); } }
 function extPreview(name){ const wb=UI.extWb; if(!wb) return; const ws=wb.Sheets[name];
@@ -1382,8 +1386,9 @@ document.addEventListener("click",e=>{
     }).catch(err=>{ el.disabled=false; el.textContent="Leggi il foglio";
       const box=document.getElementById("extErr"); if(box) box.textContent="Non riesco a leggere il foglio ("+err.message+"). Controlla che sia condiviso come «Chiunque abbia il link può visualizzare», oppure scaricalo in Excel e usa «da file»."; });
     return; }
-  if(a==="extsave"){ const mo=M(UI.mk), r=UI.extRes; if(!r) return; mo.ext=r.map; syncExt(mo); UI.extRes=null; UI.extWb=null; persist(); closeSheet(); render();
-    toast(`${Object.keys(r.map).length} turni coperti da altri anni salvati`+(mo.generated?": rigenera per applicarli":"")); return; }
+  if(a==="extsave"){ const mo=M(UI.mk), r=UI.extRes; if(!r) return; const man={}; for(const k in (mo.ext||{})) if((mo.ext[k]||[]).includes(EXT_MAN)) man[k]=[EXT_MAN];
+    mo.ext={...r.map}; for(const k in man) mo.ext[k]=[...(mo.ext[k]||[]),EXT_MAN]; syncExt(mo); const mv=alignOwn(mo,r); UI.extRes=null; UI.extWb=null; persist(); closeSheet(); render();
+    toast(`${Object.keys(r.map).length} turni coperti da altri anni salvati`+(mv?`; ${mv} turni dei nostri aggiornati nella bozza come nel foglio (da accettare)`:"")+((mo.generated||hasDraft(mo))?". Usa «Aggiorna l'orario» per ridistribuire":"")); return; }
   if(a==="clrone"||a==="clrall"||a==="clrsched"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
     if(a==="clrsched"){ const mo=M(UI.mk); mo.sched=null; mo.generated=null; mo.fixed={}; delete mo.draft; toast("Turni e bozza eliminati"); }
     else { const mode=UI.umode||"T"; clearUnav(a==="clrone"?[UI.sel]:S.residents.map(r=>r.id),mode); toast(a==="clrone"?"Eliminate per "+resName(UI.sel):"Eliminate per tutti"); }
