@@ -34,6 +34,8 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 
 - Modalità specializzando per gestori/proprietario: in Impostazioni "Passa a modalità specializzando" (`setUserMode`, salvata in localStorage `turni.usermode`): `ADMIN()` torna falso e `OWNER` è messo a falso (il vero valore è in `REALOWNER`); resta solo la scheda Impostazioni con "Torna in modalità gestore".
 
+- Prestazioni: `EXT(mo)` è memorizzato (`EXTMEMO`, ricalcolo solo se cambia `TICK`, che sale a ogni `render`, `persist`, `generate`, `refreshSched`, `alignOwn`, `syncExt`, `sheetAlign`; più mese/anno/RAWV/numero voci di `mo.ext`). Se si aggiunge codice che modifica `mo.ext` sul posto e poi usa `EXT` prima di un render, fare `TICK++`.
+
 ## Permessi
 - Proprietario: tutto; unico che gestisce email autorizzate, gestori, scollegamento account.
 - Gestori: impostazioni, rotazioni, generazione/modifica turni, cambi manuali, cambi da inserire, pulizia storico, indisponibilità di tutti (anche dopo la scadenza).

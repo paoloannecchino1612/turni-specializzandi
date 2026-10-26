@@ -72,7 +72,12 @@ function sheetExtCached(mk){ const sh=sheetLatest(mk); const key=mk+"|"+CURY+"|"
 const LOWC={key:null,map:{}};
 function LOWER(mo){ if(!MULTI||!S) return {}; const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+S.posts.map(p=>p.id+":"+p.name).join(",");
   if(LOWC.key!==key){ LOWC.key=key; LOWC.map=autoExt(mo.mk,true); } return LOWC.map; }
-function EXT(mo){ let own=mo.ext||{}; if(S&&mo.mk){ const se=sheetExtCached(mo.mk); if(Object.keys(se).length){ const m={...se}; for(const k in own) m[k]=dedupNames([...(m[k]||[]),...own[k]]); own=m; } } if(!MULTI||!S) return own;
+/* EXT è chiamato per ogni casella: il risultato si ricalcola solo quando cambia qualcosa (TICK sale a ogni render, generazione e salvataggio) */
+let TICK=0; const EXTMEMO={};
+function EXT(mo){ const own=mo.ext||{}, k=TICK+"|"+mo.mk+"|"+CURY+"|"+RAWV+"|"+(S?S.posts.length+"|"+S.residents.length:"")+"|"+Object.keys(own).length;
+  if(EXTMEMO.mo===mo&&EXTMEMO.own===own&&EXTMEMO.k===k) return EXTMEMO.v;
+  const v=EXT0(mo); EXTMEMO.mo=mo; EXTMEMO.own=own; EXTMEMO.k=k; EXTMEMO.v=v; return v; }
+function EXT0(mo){ let own=mo.ext||{}; if(S&&mo.mk){ const se=sheetExtCached(mo.mk); if(Object.keys(se).length){ const m={...se}; for(const k in own) m[k]=dedupNames([...(m[k]||[]),...own[k]]); own=m; } } if(!MULTI||!S) return own;
   const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+S.posts.map(p=>p.id+":"+p.name).join(",");
   if(EXTC.key!==key){ EXTC.key=key; EXTC.map=autoExt(mo.mk); }
   const auto=EXTC.map; if(!Object.keys(auto).length) return own;
@@ -221,7 +226,7 @@ function saveUnav(mk,pid){ const k=mk+"_"+pid; if(db&&!canEditUnav(pid,mk)){ toa
     try{ await unavRef(mk,pid).set({mk,pid,days:UN(mk)[pid]||{},pref:PR(mk)[pid]||{},updated:new Date().toISOString()}); setSync("Salvato"); }
     catch(e){ setSync(e&&e.code==="invalid_argument"?"Non hai i permessi per salvare: chiedi a chi gestisce i turni di invitarti":"Salvataggio non riuscito, riprova"); }
     uBusy[k]=false; },400); }
-function persist(){ if(!ADMIN()) return; clearTimeout(saveT); setSync("Modifiche in corso…"); saveT=setTimeout(()=>{saveT=null;flush();},500); }
+function persist(){ TICK++; if(!ADMIN()) return; clearTimeout(saveT); setSync("Modifiche in corso…"); saveT=setTimeout(()=>{saveT=null;flush();},500); }
 /* impostazioni del tool (config/main: solo il proprietario) separate dai mesi (planner/state: proprietario e gestori) */
 let cfgRef=null, lastCfg="", lastMon="";
 function splitS(){ const {months,...cfg}=S; return {cfg:JSON.stringify(cfg), mon:JSON.stringify({months})}; }
@@ -377,7 +382,7 @@ function pastBias(mk){ const h=pastLoad(mk), B={}; const ids=Object.keys(h).filt
   for(const f of ["N","D","we"]){ const el=ids.filter(id=>f==="we"||canDo(id,f)); const mean=el.length?el.reduce((a,id)=>a+h[id][f],0)/el.length:0;
     for(const id in h){ B[id]=B[id]||{N:0,D:0,we:0}; if(el.includes(id)) B[id][f]=Math.max(-3,Math.min(3,h[id][f]-mean)); } }
   return {B,h}; }
-function generate(mk,wk,only2){ /* only2: Set di pid a cui si possono dare turni nuovi (aggiorna per rotazione) */
+function generate(mk,wk,only2){ TICK++; /* only2: Set di pid a cui si possono dare turni nuovi (aggiorna per rotazione) */
   const mo=M(mk), {days}=period(mk), rand=rng(Date.now()%2147483647), only=wk!==undefined&&wk!==null, base=(hasDraft(mo)?mo.draft.sched:mo.sched)||{};
   const sched={}, st={}, slots=[], nDone={N:0,D:0};
   S.residents.forEach(r=>{st[r.id]=newStat();st[r.id].jit=rand();});
@@ -493,7 +498,7 @@ function rebalanceRooms(mk,onlyPids,onlyCover){ const days=period(mk).days, sch=
     db.doc(yDocs(y).mon).set({state:JSON.stringify({months}),updated:new Date().toISOString()}).catch(()=>toast("Non riesco a salvare l'orario del "+y+"° anno")); }
   return moved; }
 /* aggiorna: i turni già assegnati restano (fissi solo per questa generazione), si tolgono quelli in conflitto con indisponibilità/ferie/congressi e si ricopre il resto */
-function refreshSched(mk,rot){ const mo=M(mk), base0=hasDraft(mo)?mo.draft.sched:mo.sched; if(!base0) return {removed:0,added:0,covered:0,moved:0};
+function refreshSched(mk,rot){ TICK++; const mo=M(mk), base0=hasDraft(mo)?mo.draft.sched:mo.sched; if(!base0) return {removed:0,added:0,covered:0,moved:0};
   const inRot=rot?new Set(S.residents.filter(r=>mo.rot[r.id]===rot).map(r=>r.id)):null;
   const old=clone(base0), keep={}, fx=mo.fixed||{}; let removed=0, covered=0;
   for(const d in old) for(const k in old[d]) (old[d][k]||[]).forEach((pid,i)=>{ if(!pid) return;
@@ -634,7 +639,7 @@ async function createCohort(y,base){ const snap=await db.doc(yDocs(y).cfg).get()
 async function enableYears(){ if(!OWNER||!db||CURY!==2) return; const base=JSON.parse(splitS().cfg);
   for(const y of ALLY()){ if(y===2) continue; await createCohort(y,base); }
   S.multiYear=true; persist(); }
-function render(){
+function render(){ TICK++;
   if(UI.userMode&&S&&MYUID&&Object.keys(CLAIMS).length&&!realAdmin()) setUserMode(false);
   if(!ADMIN()&&(UI.tab==="mese"||(UI.tab==="imp"&&!UI.userMode))) UI.tab="turni";
   document.querySelectorAll("#tabs button").forEach(b=>{b.setAttribute("aria-selected",b.dataset.tab===UI.tab); b.hidden=!ADMIN()&&(b.dataset.tab==="mese"||(b.dataset.tab==="imp"&&!UI.userMode));});
@@ -1154,7 +1159,7 @@ function sameYearOk(y){ return y===2||y===3; }
 function othersIn(mo,d,key){ return (EXT(mo)[d+"|"+key]||[]).length+(lowerOnly(mo,d,key)||[]).length; }
 function roomCovered(mo,d,key){ return extHas(mo,d,key)||(multiPost(postOf(key.split("|")[0]))&&!!LOWER(mo)[d+"|"+key]); }
 /* allinea l'orario già presente: i turni coperti da altri anni restano vuoti (non buchi), gli altri tornano da coprire */
-function syncExt(mo){ for(const sc of [mo.sched,hasDraft(mo)?mo.draft.sched:null]){ if(!sc) continue;
+function syncExt(mo){ TICK++; for(const sc of [mo.sched,hasDraft(mo)?mo.draft.sched:null]){ if(!sc) continue;
   for(const d in sc) for(const k in sc[d]){ const a=sc[d][k];
     if(extCovered(mo,d,k)){ if(!a.some(x=>x)) sc[d][k]=[]; }
     else if(!a.length) sc[d][k]=[null]; } } }
@@ -1210,7 +1215,7 @@ function sheetExt(mk){ const sh=sheetLatest(mk); if(!sh) return {}; const by={};
     const names=sh.all[ak].filter(v=>!mine.has(v.replace(/^\(\s*\d\s*\)\s*/,"").trim().toLowerCase())); if(names.length) out[d+"|"+p.id+"|"+s]=names; }
   return out; }
 /* allinea la bozza dell'anno corrente a un foglio caricato da un altro anno (una volta per foglio) */
-function sheetAlign(mk){ if(!ADMIN()||!S) return 0; const mo=M(mk), sh=sheetLatest(mk); if(!sh||(mo.sheetAt&&mo.sheetAt>=sh.at)) return 0;
+function sheetAlign(mk){ TICK++; if(!ADMIN()||!S) return 0; const mo=M(mk), sh=sheetLatest(mk); if(!sh||(mo.sheetAt&&mo.sheetAt>=sh.at)) return 0;
   const by={}; S.posts.forEach(p=>by[normRoom(p.name)]=p); const night=S.posts.find(x=>Object.values(x.on||{}).some(a=>(a||[]).includes("N")));
   const ourId={}; S.residents.forEach(r=>ourId[r.name.trim().toLowerCase()]=r.id); const ownMap={}; let own=0;
   for(const ak in sh.all){ const [d,rk,s]=ak.split("|"), p=s==="N"?night:by[rk]; if(!p) continue;
@@ -1221,7 +1226,7 @@ function sheetAlign(mk){ if(!ADMIN()||!S) return 0; const mo=M(mk), sh=sheetLate
    per il mese corrente e i successivi visibili. Aggiorna solo i turni coperti da altri anni (mattina/pomeriggio dal foglio;
    notti e guardie solo se il foglio le riporta); restano quelli segnati a mano. Poi si usa "Aggiorna l'orario". */
 /* allinea la bozza ai nostri specializzandi come risultano nel foglio (sale/turni presenti nel foglio); restituisce quante caselle cambia */
-function alignOwn(mo,res){ let moved=0;
+function alignOwn(mo,res){ let moved=0; TICK++;
   const base=(hasDraft(mo)?mo.draft.sched:mo.sched)||{};
     if(res.own>0){ const nightKey=S.posts.find(x=>Object.values(x.on||{}).some(a=>(a||[]).includes("N")));
       for(const d of res.colDays){ for(const k in (base[d]||{})){ const [pid,sh]=k.split("|"); const sk=sh==="N"?"N":pid+"|"+sh; if(!res.seen.has(sk)) continue;
