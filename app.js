@@ -53,7 +53,7 @@ const EXTC={key:null,map:{}};
 function autoExt(mk,lower){ const out={};
   for(const y of YEARS){ if(lower?y>=CURY:y<=CURY) continue; const st=yState(y); const m2=st&&st.months&&st.months[mk]; if(!m2||!m2.sched) continue;
     const mine={}; S.posts.forEach(p=>mine[normRoom(p.name)]=p); const pmap={}; (st.posts||[]).forEach(p=>pmap[p.id]=mine[normRoom(p.name)]);
-    const nm={}; (st.residents||[]).forEach(r=>nm[r.id]=`(${r.year||st.groupYear||y}) ${r.name}`);
+    const nm={}; (st.residents||[]).forEach(r=>nm[r.id]=`(${yLab(r.year||st.groupYear||y)}) ${r.name}`);
     for(const d in m2.sched) for(const k in m2.sched[d]){ const [pid,sh]=k.split("|"), my=pmap[pid]; if(!my||!((my.on||{})[dayType(d)]||[]).includes(sh)) continue;
       (m2.sched[d][k]||[]).forEach(x=>{ if(!x||!nm[x]) return; const kk=d+"|"+my.id+"|"+sh; (out[kk]=out[kk]||[]).push(nm[x]); }); } }
   return out; }
@@ -120,7 +120,14 @@ function resName(id){ if(id===null||id==="") return "nessuno (scoperto)";
   return resName0(id); }
 function resName0(id){const r=S.residents.find(x=>x.id===id);return r?rName(r):"?";}
 /* nome mostrato con l'anno di specializzazione davanti, come nel foglio: "(2) Cognome" */
-function rName(r){ const y=r.year||S.groupYear||2; return `(${y}) ${r.name}`; }
+/* passaggio d'anno automatico: l'anno accademico inizia a novembre. Gli anni salvati (r.year, groupYear, documenti yN)
+   valgono per l'anno accademico AY_BASE (2026/27, da novembre 2026); per i mesi di altri anni accademici si spostano.
+   Es.: il vostro gruppo è 2° anno da novembre 2026, quindi in ottobre 2026 risulta 1° anno. */
+function ayOf(mk){ const [y,m]=mk.split("-").map(Number); return m>=11?y:y-1; }
+function ayBase(){ const st=yState(2)||S; return +((st&&st.ayBase)||2026); }
+function yShift(mk){ return ayOf(mk||UI.mk)-ayBase(); }
+function yLab(n){ return (+n)+yShift(); }
+function rName(r){ const y=yLab(r.year||S.groupYear||2); return `(${y}) ${r.name}`; }
 function postOf(id){return S.posts.find(p=>p.id===id);}
 function isExt(rot){return !rot||S.externals.some(x=>x.id===rot);}
 /* chi è fuori sede (es. Bambin Gesù) può essere inserito nei turni dal gestore: conta come jolly */
@@ -180,15 +187,15 @@ function linkPanel(){ const groups=MULTI?YEARS.map(y=>[y,((yState(y)||{}).reside
   const anyFree=groups.some(g=>g[1].some(r=>!CLAIMS[r.id]));
   return `<div class="panel" style="border:2px solid var(--accent)"><h2>Associa l'account: chi sei?</h2>
    <p style="margin:0;font-size:.9rem">Tocca il tuo cognome e conferma. <strong>La scelta è definitiva</strong>: potrà cambiarla solo chi gestisce il tool. Da quel momento potrai modificare solo le tue indisponibilità e rispondere ai cambi rivolti a te.</p>
-   ${groups.map(([gy,list])=>`${gy?`<span class="groupname">${gy}° anno</span>`:""}<div class="pickers">${list.map(r=>{const taken=!!CLAIMS[r.id]; const conf=UI.confirm==="claim-"+r.id;
-     return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""} ${conf?'style="background:var(--accent);color:var(--accent-ink);border-color:var(--accent)"':""}>${conf?"Confermo: sono "+esc(gy?`(${r.year||gy}) ${r.name}`:rName(r)):esc(gy?`(${r.year||gy}) ${r.name}`:rName(r))}${taken?' <span class="cnt">già associato</span>':""}</button>`;}).join("")}</div>`).join("")}
+   ${groups.map(([gy,list])=>`${gy?`<span class="groupname">${yLab(gy)}° anno</span>`:""}<div class="pickers">${list.map(r=>{const taken=!!CLAIMS[r.id]; const conf=UI.confirm==="claim-"+r.id;
+     return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""} ${conf?'style="background:var(--accent);color:var(--accent-ink);border-color:var(--accent)"':""}>${conf?"Confermo: sono "+esc(gy?`(${yLab(r.year||gy)}) ${r.name}`:rName(r)):esc(gy?`(${yLab(r.year||gy)}) ${r.name}`:rName(r))}${taken?' <span class="cnt">già associato</span>':""}</button>`;}).join("")}</div>`).join("")}
    ${anyFree?"":`<p class="muted" style="margin:0">Tutti i nomi sono già associati: se il tuo è stato preso per errore, avvisa chi gestisce il tool.</p>`}</div>`; }
 /* un account = una sola persona: se è già associato (anche in un altro anno) non si sceglie più */
 function claimPanel(why){ const pid=myAnyPid(); const mine=CLAIMDOCS.find(x=>x.u===MYUID);
   if(!pid&&mine&&!OWNER) return `<div class="panel" style="border:2px solid var(--bad)"><h2>Associazione da sistemare</h2><p style="margin:0;font-size:.9rem">Il tuo account risulta già associato a un nome (${esc(rNameAny(mine.pid))}) che appartiene a un altro collega o non esiste più. Chiedi al proprietario di scollegarti: poi potrai scegliere il tuo nome.</p></div>`;
   if(!pid) return linkPanel(); const y=MULTI?yearOfPid(pid):null;
-  return `<div class="panel"><p style="margin:0;font-size:.9rem">Il tuo account è associato a <strong>${esc(rNameAny(pid))}</strong>${y&&y!==CURY?` del ${y}° anno: qui puoi solo guardare. Per le tue indisponibilità e i tuoi cambi scegli in alto il ${y}° anno.`:"."}</p>${y&&y!==CURY?`<div class="row"><button class="btn primary" data-act="year" data-v="${y}">Vai al ${y}° anno</button></div>`:""}</div>`; }
-function rNameAny(pid){ for(const y of YEARS){ const st=yState(y); const r=st&&(st.residents||[]).find(x=>x.id===pid); if(r) return `(${r.year||st.groupYear||y}) ${r.name}`; } return resName(pid); }
+  return `<div class="panel"><p style="margin:0;font-size:.9rem">Il tuo account è associato a <strong>${esc(rNameAny(pid))}</strong>${y&&y!==CURY?` del ${yLab(y)}° anno: qui puoi solo guardare. Per le tue indisponibilità e i tuoi cambi scegli in alto il ${yLab(y)}° anno.`:"."}</p>${y&&y!==CURY?`<div class="row"><button class="btn primary" data-act="year" data-v="${y}">Vai al ${yLab(y)}° anno</button></div>`:""}</div>`; }
+function rNameAny(pid){ for(const y of YEARS){ const st=yState(y); const r=st&&(st.residents||[]).find(x=>x.id===pid); if(r) return `(${yLab(r.year||st.groupYear||y)}) ${r.name}`; } return resName(pid); }
 function claimPanelOld(why){ return `<div class="panel"><h2>Chi sei?</h2><p class="muted" style="margin:0;font-size:.88rem">${why}</p>
   <div class="pickers">${S.residents.map(r=>{const taken=CLAIMS[r.id]&&CLAIMS[r.id]!==MYUID;return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""}>${esc(rName(r))}${taken?' <span class="cnt">già collegato</span>':""}</button>`;}).join("")}</div></div>`; }
 function saveUnav(mk,pid){ const k=mk+"_"+pid; if(db&&!canEditUnav(pid,mk)){ toast(unavDenyMsg(pid,mk)); return; } clearTimeout(uT[k]); setSync("Modifiche in corso…");
@@ -237,8 +244,8 @@ function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.i
 function newStat(){return {on:{},tot:0,M:0,P:0,D:0,N:0,we:0,wk:{},wn:{},pc:{},last:{}};}
 /* abilitazione a notti e guardie: per specializzando (r.nights / r.guards); se non indicata, sì tranne il 1° anno */
 function resOf(pid){ return S.residents.find(r=>r.id===pid); }
-function yearOfRes(r){ return +(r.year||S.groupYear||2); }
-function canDoR(r,s,st){ if(s!=="N"&&s!=="D") return true; const v=s==="N"?r.nights:r.guards; return v===undefined?+(r.year||(st||S).groupYear||2)!==1:!!v; }
+function yearOfRes(r){ return yLab(r.year||S.groupYear||2); }
+function canDoR(r,s,st){ if(s!=="N"&&s!=="D") return true; const v=s==="N"?r.nights:r.guards; return v===undefined?yLab(r.year||(st||S).groupYear||2)!==1:!!v; }
 function canDo(pid,s){ const r=resOf(pid); return r?canDoR(r,s,S):true; }
 /* notti e guardie equilibrate tra gli anni: quota per persona = notti (o guardie) del mese ÷ abilitati presenti di tutti gli anni */
 function nightQuota(mk,sh){ if(!MULTI||!hasLowerYear()) return null; const days=period(mk).days; let need=0, people=0, mine=0, union={};
@@ -408,7 +415,7 @@ function rebalanceRooms(mk,onlyPids,onlyCover){ const days=period(mk).days, sch=
   for(const y of Ys){ const st=y===CURY?S:yState(y); if(!st) continue; const m=(st.months||{})[mk]; if(!m) continue; const src=(m.draft&&m.draft.sched)||m.sched; if(!src) continue;
     sch[y]=y===CURY?src:JSON.parse(JSON.stringify(src)); fixedOf[y]=m.fixed||{}; mon[y]=st; posts[y]={};
     (st.posts||[]).forEach(p=>{ posts[y][normRoom(p.name)]=p; }); }
-  const canMove=y=>y===CURY||(OWNER&&MULTI), yearOf=y=>(y===CURY?curYear():y);
+  const canMove=y=>y===CURY||(OWNER&&MULTI), yearOf=y=>(y===CURY?curYear():yLab(y));
   const groups={}; S.posts.filter(p=>multiPost(p)&&(!onlyCover||p.cover===onlyCover||isJolly(onlyCover))).forEach(p=>{ (groups[p.cover]=groups[p.cover]||[]).push(normRoom(p.name)); });
   const sheetExt=MULTI?{}:(M(mk).ext||{});
   let moved=0; const changed=new Set();
@@ -546,7 +553,7 @@ function myPid(){ if(!MYUID||!S) return null; for(const pid in CLAIMS) if(CLAIMS
 
 /* ---------- render ---------- */
 const app=document.getElementById("app");
-function yearBar(){ if(!MULTI) return ""; return `<div class="pickers" style="margin-bottom:2px">${YEARS.map(y=>`<button data-act="year" data-v="${y}" aria-pressed="${y===CURY}">${y}° anno</button>`).join("")}</div>`; }
+function yearBar(){ if(!MULTI) return ""; return `<div class="pickers" style="margin-bottom:2px">${YEARS.map(y=>{ const l=yLab(y); return `<button data-act="year" data-v="${y}" aria-pressed="${y===CURY}">${l<1?"nuovo anno":l>4?"specializzati":l+"° anno"}</button>`; }).join("")}</div>`; }
 function switchYear(y){ if(!db||y===CURY||!REBUILD) return true; if(saveT||saving){ toast("Attendi il salvataggio e riprova"); return false; }
   CURY=y; docRef=db.doc(yDocs(y).mon); cfgRef=db.doc(yDocs(y).cfg); S=null; PRUNED=false; AUTOSYNC=false; UI.who=null; UI.sel=null; UI.confirm=null; EXTC.key=null; LOWC.key=null;
   try{ localStorage.setItem("turni.year",String(y)); }catch(e){}
@@ -1028,7 +1035,7 @@ const EXT_MAN="Altri anni (inserito a mano)";
 function extHas(mo,d,key){ return !!EXT(mo)[d+"|"+key]; }
 /* sale TC/RM: al massimo 3 persone in tutto (anni diversi); stesso anno insieme solo per 2° e 3° anno, segnalato */
 const ROOM_MAX=3;
-function curYear(){ return +(S.groupYear||2); }
+function curYear(){ return yLab(S.groupYear||2); }
 function sameYearOk(y){ return y===2||y===3; }
 function othersIn(mo,d,key){ return (EXT(mo)[d+"|"+key]||[]).length+(LOWER(mo)[d+"|"+key]||[]).length; }
 function roomCovered(mo,d,key){ return extHas(mo,d,key)||(multiPost(postOf(key.split("|")[0]))&&!!LOWER(mo)[d+"|"+key]); }
@@ -1193,7 +1200,7 @@ async function exportBozza(){ if(typeof XLSX==="undefined"){toast("Libreria Exce
   const mk=UI.mk, p=period(mk), D3=["DOM","LUN","MAR","MER","GIO","VEN","SAB"];
   const cell={}; const add=(d,rk,sh,name)=>{ const k=d+"|"+rk+"|"+sh; (cell[k]=cell[k]||[]); if(!cell[k].includes(name)) cell[k].push(name); };
   const rooms=[]; S.posts.forEach(x=>{ const rk=normRoom(x.name); if(rk&&!rooms.some(r=>r.rk===rk)) rooms.push({rk,p:x}); });
-  const put=(st,y,sched)=>{ const nm={}; (st.residents||[]).forEach(r=>nm[r.id]=`(${r.year||st.groupYear||y}) ${r.name}`); const pk={}; (st.posts||[]).forEach(x=>pk[x.id]=normRoom(x.name));
+  const put=(st,y,sched)=>{ const nm={}; (st.residents||[]).forEach(r=>nm[r.id]=`(${yLab(r.year||st.groupYear||y)}) ${r.name}`); const pk={}; (st.posts||[]).forEach(x=>pk[x.id]=normRoom(x.name));
     for(const d in sched) for(const k in sched[d]){ const [pid,sh]=k.split("|"); (sched[d][k]||[]).forEach(id=>{ if(id&&nm[id]) add(d,pk[pid],sh==="D"?"M":sh,nm[id]); }); } };
   const ys=MULTI?YEARS:[CURY];
   for(const y of ys){ const st=y===CURY?S:yState(y); const m=st&&st.months&&st.months[mk]; if(!m) continue;
