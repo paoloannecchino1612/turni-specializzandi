@@ -853,8 +853,15 @@ function thirdBody(x,id,me){ const e=(x.extra||[]).find(z=>z.taker===me); if(!e)
    <p class="muted" style="margin:0;font-size:.86rem">Vale quando accettate entrambi.${(x.acc||[]).length?" Ha già accettato: "+x.acc.map(p=>esc(resName(p))).join(", ")+".":""}</p>
    ${(mine.length||w.holes.length)?`<div class="alerts bad"><strong>Attenzione: accettando, il cambio implica che</strong><ul>${w.holes.map(t=>`<li>${t}</li>`).join("")}${mine.map(t=>`<li><strong>per te</strong>: ${t}</li>`).join("")}</ul><span style="font-size:.85rem">Premendo Accetto confermi il cambio anche se queste regole non vengono rispettate.</span></div>`:`<div class="okline">Per te il cambio rispetta tutte le regole.</div>`}
    <div class="row"><button class="btn primary" data-act="swacc" data-id="${id}">Accetto</button><button class="btn danger" data-act="swrej" data-id="${id}">Non accetto</button></div>`; }
+/* richieste non più possibili (un turno nel frattempo è cambiato): si annullano da sole */
+const INVAL=new Set();
+function autoInvalidate(){ if(!db||!S) return; for(const x of Object.values(SW)){ if(x.status!=="pending"||INVAL.has(x.id)) continue;
+    if(!effSched(x.mk)) continue; const w=swapWarnings(x.mk,x); if(w.ok) continue;
+    INVAL.add(x.id); swWrite({...x,status:"invalid",decided:new Date().toISOString(),reason:"annullata: uno dei turni nel frattempo è cambiato"}); } }
 function answerSheet(id){ const x=SW[id], me=myPid(); if(!x) return;
-  const w=swapWarnings(UI.mk,x); UI.swRole="to";
+  const w=swapWarnings(x.mk,x); UI.swRole="to";
+  if(!w.ok&&effSched(x.mk)){ if(!INVAL.has(x.id)){ INVAL.add(x.id); swWrite({...x,status:"invalid",decided:new Date().toISOString(),reason:"annullata: uno dei turni nel frattempo è cambiato"}); }
+    closeSheet(); toast("Richiesta annullata: uno dei turni nel frattempo è cambiato"); render(); return; }
   const body=!w.ok?`<div class="alerts bad">Il cambio non è più possibile: uno dei due turni nel frattempo è cambiato.</div><div class="row"><button class="btn" data-act="swinvalid" data-id="${id}">Chiudi la richiesta</button></div>`
    : (x.needs&&me!==x.to)?thirdBody(x,id,me):`<p style="margin:0">${esc(resName(x.from))} ti cede <strong>${slotLabel(x.a)}</strong>${x.b?` e prende il tuo <strong>${slotLabel(x.b)}</strong>`:", senza nulla in cambio"}.</p>
      ${x.needs?`<p class="muted" style="margin:0;font-size:.86rem">È un cambio a catena: vale quando accettano ${x.needs.map(p=>esc(resName(p))).join(" e ")}.${(x.acc||[]).length?" Ha già accettato: "+x.acc.map(p=>esc(resName(p))).join(", ")+".":""}</p>`:""}
@@ -1322,7 +1329,7 @@ render();
       const sp=splitS(); lastCfg=rawCfg?sp.cfg:""; lastMon=rawMon&&!(!rawCfg&&mon&&mon.residents)?sp.mon:"";
       setSync(cfg?"Salvato":OWNER?"Nessun dato ancora":"In attesa dei dati");
       if(OWNER&&(migrated||!rawCfg&&cfg)){migrated=false;persist();}
-      checkMulti(); filterSW(); consolidate(); syncRoles(); autoYear(); if(!layer.innerHTML) render(); };
+      checkMulti(); filterSW(); consolidate(); autoInvalidate(); syncRoles(); autoYear(); if(!layer.innerHTML) render(); };
     REBUILD=rebuild;
     const subY={};
     const watchYear=y=>{ if(subY[y]) return; subY[y]=true; RAW[y]=RAW[y]||{}; const d=yDocs(y);
@@ -1339,7 +1346,7 @@ render();
     watchYear(2);
     db.collection("swaps").limit(1000).onSnapshot(qs=>{ for(const k in SWALL) delete SWALL[k];
       for(const doc of qs.docs){ const x=doc.data(); if(x&&x.id&&x.a) SWALL[x.id]=x; }
-      filterSW(); consolidate(); if(S&&!layer.innerHTML) render(); }, ()=>{});
+      filterSW(); consolidate(); autoInvalidate(); if(S&&!layer.innerHTML) render(); }, ()=>{});
     /* claims/<account> = {pid}: ognuno può scrivere solo il proprio; se due account scelgono lo stesso nome vale il primo */
     db.collection("claims").limit(500).onSnapshot(qs=>{ for(const k in CLAIMS) delete CLAIMS[k];
       const list=qs.docs.map(doc=>({u:doc.id,...(doc.data()||{})})).filter(x=>x.pid).sort((a,b)=>(a.at||"").localeCompare(b.at||""));
