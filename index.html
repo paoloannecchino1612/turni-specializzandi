@@ -99,6 +99,7 @@ table.grid tr.weekstart td{border-top:2px solid var(--muted)}
 table.grid td.cell{min-width:7.5em;cursor:pointer}
 table.grid td.cell:hover{background:var(--accent-soft)}
 table.grid td.cell.none{color:var(--line);cursor:default}
+table.grid td.cell.sel{outline:3px solid var(--accent);outline-offset:-3px;background:var(--accent-soft)}
 table.grid td.cell.none:hover{background:none}
 .who{display:block;white-space:nowrap}
 .hole{display:inline-block;font:600 .72rem var(--f-mono);color:var(--bad);background:var(--bad-soft);padding:1px 6px;border-radius:4px}
@@ -192,7 +193,7 @@ body{margin:0;font-size:15px} img{max-width:100%} [hidden]{display:none!importan
 <div id="layer"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script type="module" src="fb.js?v=76"></script>
-<script type="module" src="app.js?v=76"></script>
+<script type="module" src="fb.js?v=77"></script>
+<script type="module" src="app.js?v=77"></script>
 <script>if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});</script>
 </body></html>

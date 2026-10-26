@@ -744,16 +744,18 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
     const F=fgs.some(([id])=>id===UI.filt)||UI.filt==="NG"?UI.filt:"";
     const cols=!F?cols0:F==="NG"?cols0.filter(c=>c.s==="N"||c.s==="D"):S.posts.filter(x=>fgOf(x)===F).flatMap(post=>["M","P"].filter(s=>Object.values(post.on||{}).some(a=>(a||[]).includes(s))).map(s=>({post,s,k:post.id+"|"+s}))), used=S.posts.filter(x=>cols.some(c=>c.post===x));
     body=`<div class="pickers sm" style="margin-bottom:6px"><button data-act="filt" data-v="" aria-pressed="${!F}">Tutte</button>${fgs.map(([id,name])=>`<button data-act="filt" data-v="${id}" aria-pressed="${F===id}">${esc(name)}</button>`).join("")}<button data-act="filt" data-v="NG" aria-pressed="${F==="NG"}">Notti e guardie</button></div>`;
+    if(ADMIN()) body+=UI.clsel?`<div class="row" style="gap:8px;margin-bottom:6px;flex-wrap:wrap;align-items:center"><span class="muted" style="font-size:.84rem">Tocca le caselle da chiudere o riaprire: ${UI.clsel.size} selezionate</span><button class="btn primary" data-act="clapply" data-v="1" ${UI.clsel.size?"":"disabled"}>Chiudi le selezionate</button><button class="btn" data-act="clapply" data-v="0" ${UI.clsel.size?"":"disabled"}>Riapri le selezionate</button><button class="btn" data-act="clsel">Annulla</button></div>`
+      :`<div class="row" style="margin-bottom:6px"><button class="btn" data-act="clsel">Seleziona sale da chiudere</button></div>`;
     body+=`<div class="scroll"><table class="grid"><thead><tr><th class="sticky" rowspan="2">Giorno</th>${used.map(x=>`<th class="roomh" colspan="${cols.filter(c=>c.post===x).length}">${esc(x.name)}</th>`).join("")}</tr>
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
      ${p.days.map((d,i)=>{const t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
-       if(isClosed(mo,d,c.k)&&!(arr||[]).some(x=>x)) return `<td class="cell" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Sala chiusa"><span class="muted" style="font-size:.75rem;font-weight:600">Chiusa</span></td>`;
+       if(isClosed(mo,d,c.k)&&!(arr||[]).some(x=>x)) return `<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Sala chiusa"><span class="muted" style="font-size:.75rem;font-weight:600">Chiusa</span></td>`;
        if(!arr){ const due=postActive(c.post)&&((c.post.on||{})[dayType(d)]||[]).includes(c.s), ex0=EXT(mo)[d+"|"+c.k];
-         if(ex0) return `<td class="cell" ${due&&ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni"><span class="muted" style="font-size:.72rem;display:block">${ex0.map(esc).join("<br>")}</span></td>`;
-         return due?`<td class="cell" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`}><span class="hole">scoperto</span></td>`:`<td class="cell none">·</td>`; }
+         if(ex0) return `<td class="cell${selC(d,c.k)}" ${due&&ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni"><span class="muted" style="font-size:.72rem;display:block">${ex0.map(esc).join("<br>")}</span></td>`;
+         return due?`<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`}><span class="hole">scoperto</span></td>`:`<td class="cell none">·</td>`; }
        const ex=EXT(mo)[d+"|"+c.k], lw=LOWER(mo)[d+"|"+c.k], exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${lw.map(esc).join("<br>")}</span>`:"");
-       if(!arr.length) return `<td class="cell" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
-       return `<td class="cell ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(ex||lw&&multiPost(c.post)||arr.some(v=>v)?"":`<span class="hole">scoperto</span>`)).join("")}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
+       if(!arr.length) return `<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
+       return `<td class="cell${selC(d,c.k)} ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(ex||lw&&multiPost(c.post)||arr.some(v=>v)?"":`<span class="hole">scoperto</span>`)).join("")}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
   } else if(UI.view==="nome"){
     if(!UI.who) UI.who=myPid()||"";
     const pid=UI.who, rows=[];
@@ -1202,6 +1204,13 @@ function extPreview(name){ const wb=UI.extWb; if(!wb) return; const ws=wb.Sheets
 
 /* ---------- sheets ---------- */
 const layer=document.getElementById("layer");
+/* sale chiuse in blocco: si selezionano più caselle nella tabella "Per giorno" */
+function selC(d,k){ return UI.clsel&&UI.clsel.has(d+"|"+k)?" sel":""; }
+function applyClosed(mk,keys,close){ const mo=M(mk); mo.closed={...(mo.closed||{})}; const fx=mo.fixed=mo.fixed||{}; let n=0;
+  for(const dk of keys){ const [d,id,sh]=dk.split("|"), post=postOf(id); if(!post) continue; const ck=d+"|"+normRoom(post.name)+"|"+sh, k=id+"|"+sh;
+    if(close){ if(mo.closed[ck]) continue; mo.closed[ck]=true; const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=[]; Object.keys(fx).filter(z=>z.startsWith(d+"|"+k+"|")).forEach(z=>delete fx[z]); n++; }
+    else if(mo.closed[ck]){ delete mo.closed[ck]; const W=ensureDraft(mo,d); W[d]=W[d]||{}; if(!W[d][k]||!W[d][k].length) W[d][k]=[null]; n++; } }
+  return n; }
 function sheet(html){layer.innerHTML=`<div class="scrim" data-act="close"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;}
 function closeSheet(){layer.innerHTML="";}
 function prefSheet(d){ const mo=M(UI.mk), pid=UI.sel, cur=(PR(UI.mk)[pid]||{})[d]||"", u=unavOf(mo,pid,d);
@@ -1498,6 +1507,10 @@ document.addEventListener("click",e=>{
   if(a==="backup"){exportBackup();return;}
   if(a==="xbozza"){exportBozza();return;}
   if(a==="view"){UI.view=el.dataset.v;render();return;}
+  if(a==="cell"&&UI.clsel){ const kk=el.dataset.d+"|"+el.dataset.k; if(UI.clsel.has(kk)) UI.clsel.delete(kk); else UI.clsel.add(kk); render(); return; }
+  if(a==="clsel"){ UI.clsel=UI.clsel?null:new Set(); render(); return; }
+  if(a==="clapply"){ const n=applyClosed(UI.mk,[...UI.clsel],el.dataset.v==="1"); UI.clsel=null; persist(); render();
+    toast(n?(el.dataset.v==="1"?`${n} turni chiusi (nella bozza, da accettare)`:`${n} turni riaperti (nella bozza)`):"Nessuna modifica"); return; }
   if(a==="cell"){ if(hasDraft(M(UI.mk))) UI.draftView=true;cellSheet(el.dataset.d,el.dataset.k);return;}
   if(a==="assign"){ const mo=M(UI.mk), d=layer.dataset.d, k=layer.dataset.k, i=+el.dataset.i, id=el.dataset.id||null;
     const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=W[d][k]||[null]; const arr=W[d][k], fx=mo.fixed=mo.fixed||{}, pre=d+"|"+k+"|";
