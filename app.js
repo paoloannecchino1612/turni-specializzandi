@@ -37,7 +37,8 @@ const PARSED={};
 /* anni che coprono ogni sala: elenco unico per tutti (config/years), lo modificano proprietario e gestori di qualsiasi anno.
    chiave = nome sala normalizzato; senza indicazione la sala è di tutti gli anni */
 let COVY={};
-function yearsFor(p){ const v=COVY[normRoom(p.name)]; return Array.isArray(v)?v:YEARS; }
+const COV_DEF={diagsen:[1],radsen1:[1],radsen2:[1],ecocolumbus:[1],eco:[1],rxtorace:[1],rxscheletro:[1],tccolumbus:[3]};
+function yearsFor(p){ const k=normRoom(p.name), v=COVY[k]; return Array.isArray(v)?v:(COV_DEF[k]||YEARS); }
 function postActive(p){ return yearsFor(p).includes(CURY); }
 function yState(y){ if(y===CURY&&S) return S; const r=RAW[y]; if(!r||r.cfg===undefined||r.mon===undefined) return null;
   const key=(r.cfg||"")+"\u0001"+(r.mon||""); if(PARSED[y]&&PARSED[y].key===key) return PARSED[y].st;
@@ -237,6 +238,12 @@ function load(raw){ const st=raw?JSON.parse(raw):clone(DEFAULT);
   if(st.groupYear===3&&!st.externals.some(x=>x.id==="IT")){ st.externals.push({id:"IT",name:"Isola Tiberina"}); migrated=true; }
   if(!st._v4){ st.posts.forEach(p=>{ if(p.id==="DEA"&&p.cover==="ALL") p.name="Guardia domenica"; if(p.id==="NOTTE") p.on.fes=[];
       if(p.cover!=="ALL") p.on.fes=[]; }); st._v4=true; migrated=true; }
+  /* sale di Senologia, Ecografia, RX e TC Columbus (di base per il 1°/3° anno: vedi "Anni che coprono ogni sala") */
+  if(!st._v5){ const MP=()=>({fer:["M","P"],sab:["M","P"],fes:[]});
+    [["SENO","Senologia"],["ECO","Ecografia"],["RX","RX"]].forEach(([id,name])=>{ if(!st.rotations.some(r=>r.id===id)) st.rotations.push({id,name,jolly:false}); });
+    [["TCCOL","TC Columbus","TC"],["DIAGSEN","DIAGSEN","SENO"],["RADSEN1","RadSen 1","SENO"],["RADSEN2","RadSen 2","SENO"],["ECOCOL","Eco Columbus","ECO"],["ECO","Ecografia","ECO"],["RXTOR","RX Torace","RX"],["RXSCH","RX Scheletro","RX"]]
+      .forEach(([id,name,cover])=>{ if(!st.posts.some(p=>p.id===id||normRoom(p.name)===normRoom(name))) st.posts.push({id,name,cover,on:MP()}); });
+    st._v5=true; migrated=true; }
   return st; }
 
 /* ---------- generazione ---------- */
@@ -707,7 +714,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
     /* filtro per metodica: sale della rotazione (solo mattina/pomeriggio) oppure notti e guardie */
     const myY=ADMIN()?null:((MULTI&&myAnyPid()&&yearOfPid(myAnyPid()))||CURY);
     const F=UI.filt||"", cols=columns(SC,p).filter(c=>myY===null||yearsFor(c.post).includes(myY)).filter(c=>!F||(F==="NG"?(c.s==="N"||c.s==="D"):(c.post.cover===F&&(c.s==="M"||c.s==="P")))), used=S.posts.filter(x=>cols.some(c=>c.post===x));
-    body=`<div class="pickers sm" style="margin-bottom:6px"><button data-act="filt" data-v="" aria-pressed="${!F}">Tutte</button>${S.rotations.filter(r=>S.posts.some(x=>x.cover===r.id)).map(r=>`<button data-act="filt" data-v="${r.id}" aria-pressed="${F===r.id}">${esc(r.name)}</button>`).join("")}<button data-act="filt" data-v="NG" aria-pressed="${F==="NG"}">Notti e guardie</button></div>`;
+    body=`<div class="pickers sm" style="margin-bottom:6px"><button data-act="filt" data-v="" aria-pressed="${!F}">Tutte</button>${S.rotations.filter(r=>S.posts.some(x=>x.cover===r.id&&postActive(x))).map(r=>`<button data-act="filt" data-v="${r.id}" aria-pressed="${F===r.id}">${esc(r.name)}</button>`).join("")}<button data-act="filt" data-v="NG" aria-pressed="${F==="NG"}">Notti e guardie</button></div>`;
     body+=`<div class="scroll"><table class="grid"><thead><tr><th class="sticky" rowspan="2">Giorno</th>${used.map(x=>`<th class="roomh" colspan="${cols.filter(c=>c.post===x).length}">${esc(x.name)}</th>`).join("")}</tr>
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
      ${p.days.map((d,i)=>{const t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
@@ -1045,7 +1052,8 @@ function syncExt(mo){ for(const sc of [mo.sched,hasDraft(mo)?mo.draft.sched:null
   for(const d in sc) for(const k in sc[d]){ const a=sc[d][k];
     if(extCovered(mo,d,k)){ if(!a.some(x=>x)) sc[d][k]=[]; }
     else if(!a.length) sc[d][k]=[null]; } } }
-function normRoom(x){ return String(x||"").toLowerCase().replace(/\(.*?\)/g,"").replace(/angiografia/g,"angio").replace(/[^a-z0-9]/g,""); }
+function normRoom(x){ let k=String(x||"").toLowerCase().replace(/\(.*?\)/g,"").replace(/angiografia/g,"angio").replace(/ecografia/g,"eco").replace(/[^a-z0-9]/g,"");
+  if(/^diagn?sen/.test(k)) k="diagsen"; return k; }
 /* foglio: riga 1 = giorni ("LUN 05"), colonna A = sala (le righe sotto senza nome sono la stessa sala),
    prima della riga "POMERIGGIO" mattina, dopo pomeriggio; riga "NOTTE" = notti; domenica e festivi DEA = guardia */
 function parseExt(rows,mk){
@@ -1308,7 +1316,7 @@ document.addEventListener("click",e=>{
   if(a==="clrF"||a==="clrC"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
     clearUnav([UI.sel],a==="clrF"?"F":"C"); toast((a==="clrF"?"Ferie":"Ferie congresso")+" di "+resName(UI.sel)+" eliminate"); render(); return; }
   if(a==="clrext"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null; const mo=M(UI.mk); mo.ext={}; syncExt(mo); persist(); render(); toast("Turni degli altri anni rimossi: quei turni tornano da coprire"+(mo.generated?" (rigenera per assegnarli)":"")); return; }
-  if(a==="covy"){ const k=el.dataset.k, y=+el.dataset.y; const cur=Array.isArray(COVY[k])?[...COVY[k]]:[...YEARS];
+  if(a==="covy"){ const k=el.dataset.k, y=+el.dataset.y; const cur=Array.isArray(COVY[k])?[...COVY[k]]:[...(COV_DEF[k]||YEARS)];
     const i=cur.indexOf(y); if(i>=0) cur.splice(i,1); else cur.push(y); cur.sort();
     const next={...COVY,[k]:cur}; COVY=next; EXTC.key=null; render();
     db.doc("config/years").set({state:JSON.stringify({coverage:next}),updated:new Date().toISOString()}).catch(()=>toast("Non riesco a salvare: le regole del database vanno aggiornate"));
@@ -1498,7 +1506,12 @@ render();
       if(MULTI){ YEARS.forEach(watchYear); } else if(CURY!==2) switchYear(2); watchCov(); filterSW(); };
     let covSub=false;
     const watchCov=()=>{ if(covSub) return; covSub=true; db.doc("config/years").onSnapshot(sn=>{ let c={}; try{ c=(JSON.parse((sn.exists&&sn.data().state)||"{}").coverage)||{}; }catch(e){}
-      COVY=c; RAWV++; EXTC.key=null; if(S&&!layer.innerHTML) render(); },()=>{}); };
+      COVY=c; RAWV++; EXTC.key=null;
+      /* sale nuove: di base solo al 1° anno (TC Columbus al 3°), finché tu o un gestore non le cambiate */
+      const DEF=COV_DEF;
+      const miss=Object.keys(DEF).filter(k=>!Array.isArray(COVY[k]));
+      if(miss.length&&(OWNER||ADMIN())){ const next={...COVY}; miss.forEach(k=>next[k]=DEF[k]); COVY=next; db.doc("config/years").set({state:JSON.stringify({coverage:next}),updated:new Date().toISOString()}).catch(()=>{}); }
+      if(S&&!layer.innerHTML) render(); },()=>{}); };
     watchYear(2); watchCov();
     db.collection("swaps").limit(1000).onSnapshot(qs=>{ for(const k in SWALL) delete SWALL[k];
       for(const doc of qs.docs){ const x=doc.data(); if(x&&x.id&&x.a) SWALL[x.id]=x; }
