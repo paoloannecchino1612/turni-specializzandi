@@ -631,7 +631,7 @@ function clearUnav(pids,mode){ const mo=M(UI.mk), p=period(UI.mk);
       if(mode==="T"?!(u==="F"||u==="C"):u===mode) delete m[d]; } saveUnav(UI.mk,pid); } }
 function histBox(mk){ const h=(UI.hist||{})[mk]; if(!h) return ""; if(h==="loading") return `<p class="muted" style="margin:0">Caricamento storico…</p>`;
   if(!h.length) return `<p class="muted" style="margin:0;font-size:.85rem">Nessuna bozza salvata per ${monthName(mk)}.</p>`;
-  return `<div class="list">${h.map((x,i)=>`<div class="item"><span class="stack" style="gap:2px"><span class="name-strong">${esc(x.kind)}</span><span class="muted" style="font-size:.78rem">${new Date(x.at).toLocaleString("it-IT",{dateStyle:"short",timeStyle:"short"})}${x.by?" · "+esc(x.by):""}</span></span><button class="btn ${UI.confirm==="hopen-"+i?"confirm":""}" data-act="hopen" data-i="${i}">${UI.confirm==="hopen-"+i?"Tocca di nuovo":"Apri come bozza"}</button></div>`).join("")}</div>`; }
+  return `<div class="list">${h.map((x,i)=>`<div class="item"><span class="stack" style="gap:2px"><span class="name-strong">${esc(x.kind)}</span><span class="muted" style="font-size:.78rem">${new Date(x.at).toLocaleString("it-IT",{dateStyle:"short",timeStyle:"short"})}${x.by?" · "+esc(x.by):""}</span></span><span class="row" style="gap:6px;flex:none"><button class="btn ${UI.confirm==="hopen-"+i?"confirm":""}" data-act="hopen" data-i="${i}">${UI.confirm==="hopen-"+i?"Tocca di nuovo":"Apri come bozza"}</button><button class="btn danger ${UI.confirm==="hdel-"+i?"confirm":""}" data-act="hdel" data-i="${i}">${UI.confirm==="hdel-"+i?"Conferma":"Elimina"}</button></span></div>`).join("")}</div>`; }
 function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   const mo=M(UI.mk), p=period(UI.mk), SC=viewSched(UI.mk), {per,holes,issues,where}=derive(UI.mk,SC||undefined);
   if(!UI.view) UI.view=ADMIN()?"giorni":"nome";
@@ -659,7 +659,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
      <p class="muted" style="margin:0;font-size:.84rem">La bozza la vedete solo tu e i gestori di quest'anno. Accettandola (tutta o una settimana alla volta) diventa l'orario pubblicato: lo vedono tutti e passa agli altri anni.</p>
      <div class="row" style="gap:6px"><button class="btn ${UI.confirm==="accall"?"confirm":"primary"}" data-act="accall">${UI.confirm==="accall"?"Tocca di nuovo: pubblica":"Accetta tutta la bozza"}</button>
       ${Array.from({length:nW},(_,w)=>acc[w]?`<span class="chip tag-F">Sett. ${w+1} accettata</span>`:`<button class="btn ${UI.confirm==="accw-"+w?"confirm":""}" data-act="accw" data-w="${w}">${UI.confirm==="accw-"+w?"Tocca di nuovo":`Accetta sett. ${w+1} (${fmt(p.days[w*7]).slice(4)})`}</button>`).join("")}
-      ${clrBtn("drop","Scarta la bozza")}</div>
+      ${clrBtn("drop","Elimina la bozza")}</div>
      <div class="row"><button class="btn" data-act="hist">Storico bozze</button></div>${histBox(UI.mk)}</div>`
     :`<div class="row"><button class="btn" data-act="hist">Storico bozze</button></div>${histBox(UI.mk)}`):"";
   if(!mo.sched&&!hasDraft(mo)) return head+draft+`<div class="panel empty"><h2>Pronto per generare</h2><p>Controlla rotazioni e indisponibilità, poi scegli sopra se generare tutto il mese o una settimana. Potrai cambiare a mano ogni turno toccandolo.</p><p>Se alcuni turni sono già decisi, inseriscili prima a mano: la generazione non li tocca.</p><button class="btn" data-act="manualstart">Inserisci turni a mano</button></div>`;
@@ -1112,7 +1112,7 @@ document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]"); if(!el) return;
   let a=el.dataset.act;
   if(a==="close"){ if(e.target===el||el.tagName==="BUTTON"){closeSheet();render();} return; }
-  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","clrext","refresh","refrot","years","accall","accw","drop","hopen","unlink","unlinku","swdel","mswgo"].includes(a)) UI.confirm=null;
+  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","clrext","refresh","refrot","years","accall","accw","drop","hopen","hdel","unlink","unlinku","swdel","mswgo"].includes(a)) UI.confirm=null;
   if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(Object.values(CLAIMS).includes(MYUID)||CLAIMDOCS.some(x=>x.u===MYUID)){ toast(OWNER?"Il tuo account è già associato a un nome: per cambiarlo prima scollegalo in Impostazioni → Account collegati":"Il tuo account è già associato a un nome: solo il proprietario può cambiarlo"); return; } if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString(),email:(USER&&USER.email&&USER.email())||""}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} const y=MULTI?yearOfPid(pid):null; if(y&&y!==CURY) switchYear(y); UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
   if(a==="unlinku"){ const u=el.dataset.u; if(UI.confirm!=="unlu-"+u){UI.confirm="unlu-"+u;render();return;} UI.confirm=null;
     db.doc("claims/"+u).delete().then(()=>{ toast("Account scollegato: ora può scegliere il suo nome"); render(); }).catch(()=>toast("Non riesco a scollegare")); return; }
@@ -1188,10 +1188,12 @@ document.addEventListener("click",e=>{
     acceptDraft(UI.mk,Array.from({length:n},(_,w)=>w).filter(w=>!acc[w])); persist(); consolidate(); render(); toast("Bozza accettata: orario pubblicato"); return; }
   if(a==="accw"){ const w=+el.dataset.w; if(UI.confirm!=="accw-"+w){UI.confirm="accw-"+w;render();return;} UI.confirm=null;
     acceptDraft(UI.mk,[w]); persist(); render(); toast(`Settimana ${w+1} accettata e pubblicata`); return; }
-  if(a==="drop"){ if(UI.confirm!=="drop"){UI.confirm="drop";render();return;} UI.confirm=null; delete M(UI.mk).draft; persist(); render(); toast("Bozza scartata (resta nello storico)"); return; }
+  if(a==="drop"){ if(UI.confirm!=="drop"){UI.confirm="drop";render();return;} UI.confirm=null; delete M(UI.mk).draft; persist(); render(); toast("Bozza eliminata (una copia resta nello storico, da cui puoi eliminarla)"); return; }
   if(a==="hist"){ const mk=UI.mk; UI.hist=UI.hist||{}; if(UI.hist[mk]&&UI.hist[mk]!=="loading"){ delete UI.hist[mk]; render(); return; } UI.hist[mk]="loading"; render();
     db.collection(`hist/y${CURY}_${mk}/v`).limit(100).get().then(r=>{ UI.hist[mk]=r.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.at||"").localeCompare(a.at||"")); render(); })
       .catch(()=>{ UI.hist[mk]=[]; toast("Storico non disponibile: aggiorna le regole del database"); render(); }); return; }
+  if(a==="hdel"){ const i=+el.dataset.i, list=(UI.hist||{})[UI.mk]||[], h=list[i]; if(!h) return; if(UI.confirm!=="hdel-"+i){UI.confirm="hdel-"+i;render();return;} UI.confirm=null;
+    db.doc(`hist/y${CURY}_${UI.mk}/v/${h.id}`).delete().then(()=>{ list.splice(i,1); toast("Eliminata dallo storico"); render(); }).catch(()=>toast("Non riesco a eliminarla: aggiorna le regole del database")); return; }
   if(a==="hopen"){ const i=+el.dataset.i, h=((UI.hist||{})[UI.mk]||[])[i]; if(!h) return; if(UI.confirm!=="hopen-"+i){UI.confirm="hopen-"+i;render();return;} UI.confirm=null;
     let sc=null; try{ sc=JSON.parse(h.state); }catch(e){} if(!sc) return; M(UI.mk).draft={sched:sc,at:new Date().toISOString(),acc:{},from:h.at}; UI.draftView=true; persist(); render(); toast("Bozza ripristinata dallo storico"); return; }
   if(a==="refrot"){ if(!UI.refRot) return; if(UI.confirm!=="refrot"){UI.confirm="refrot";render();return;} UI.confirm=null;
