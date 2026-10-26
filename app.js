@@ -249,6 +249,42 @@ function ok(mo,p,pid,d,s,w,cap,forceG){
   return true; }
 function cmp(a,b){for(let i=0;i<a.length;i++){if(a[i]!==b[i])return a[i]-b[i];}return 0;}
 /* wk = indice della settimana da (ri)generare; senza wk si genera tutto il mese. Le altre settimane restano com'erano e contano per equità e vincoli */
+/* ---------- notti e guardie già programmate (foglio "Guardie/Notti …") ----------
+   tabelle con "Data | Giorno | nome(i)" sotto i titoli "GUARDIE…" e "NOTTI". I nostri diventano turni fissi, gli altri anni turni coperti. */
+function toIso(v){ if(v instanceof Date&&!isNaN(v)) return ymd(new Date(Date.UTC(v.getFullYear(),v.getMonth(),v.getDate())));
+  const t=String(v||"").trim(); let m=t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if(m) return `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
+  m=t.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})$/); if(m){ const y=m[3].length===2?"20"+m[3]:m[3]; return `${y}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`; } return null; }
+function parseNights(rows,mk){ const days=new Set(period(mk).days), titles=[];
+  rows.slice(0,6).forEach(r=>(r||[]).forEach((v,c)=>{ const t=String(v||""); if(/guardi/i.test(t)) titles.push([c,"D"]); else if(/nott/i.test(t)) titles.push([c,"N"]); }));
+  titles.sort((a,b)=>a[0]-b[0]); const kindAt=c=>{ let k=null; for(const [tc,tk] of titles) if(tc<=c) k=tk; return k; };
+  const out=[], dayWord=/^(lun|mar|mer|gio|ven|sab|dom)/i;
+  rows.forEach(r=>{ r=r||[]; for(let c=0;c<r.length;c++){ const d=toIso(r[c]); if(!d) continue; const k=kindAt(c); if(!k||!days.has(d)) continue;
+      let j=c+1; if(dayWord.test(String(r[j]||"").trim())) j++;
+      for(;j<r.length;j++){ const v=String(r[j]??"").trim(); if(!v||toIso(r[j])) break; out.push({d,s:k,name:v}); } } });
+  const ours={}; S.residents.forEach(x=>ours[x.name.trim().toLowerCase()]=x.id);
+  const res=[]; for(const o of out){ const sl=slotsOfDay(o.d).find(x=>x.s===o.s); if(!sl) continue; const sur=o.name.replace(/^\(\s*\d\s*\)\s*/,"").trim().toLowerCase();
+    res.push({...o,key:sl.key,pid:ours[sur]||null}); }
+  return res; }
+function nightsPreview(name){ const wb=UI.extWb; if(!wb) return; const ws=wb.Sheets[name];
+  const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:""}), r=parseNights(rows,UI.mk); UI.nightRes=r;
+  const mine=r.filter(x=>x.pid), oth=r.filter(x=>!x.pid), cnt=(l,s)=>l.filter(x=>x.s===s).length;
+  sheet(`<div class="row" style="justify-content:space-between"><h2>Notti e guardie programmate</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
+   <label class="stack" style="gap:4px"><span class="label">Foglio</span><select id="nightsheet">${wb.SheetNames.map(x=>`<option ${x===name?"selected":""}>${esc(x)}</option>`).join("")}</select></label>
+   <p class="muted" style="margin:0;font-size:.86rem">${monthName(UI.mk)}: i nostri diventano turni fissi (il generatore non li tocca), gli altri anni turni già coperti.</p>
+   ${r.length?`<div class="alerts" style="background:var(--accent-soft)"><strong>Trovati ${r.length} turni</strong><ul>
+     <li>Notti: ${cnt(mine,"N")} nostre, ${cnt(oth,"N")} di altri anni</li><li>Guardie: ${cnt(mine,"D")} nostre, ${cnt(oth,"D")} di altri anni</li></ul></div>
+     ${mine.length?`<p style="margin:0;font-size:.84rem">${mine.map(x=>`${fmt(x.d)} ${x.s==="N"?"notte":"guardia"}: ${esc(resName(x.pid))}`).join(" · ")}</p>`:""}`
+    :`<div class="alerts bad"><strong>Nessuna notte o guardia per ${monthName(UI.mk)}</strong><span style="font-size:.85rem">Controlla di aver scelto il foglio giusto (es. «Guardie/Notti NOV-GEN») e il mese.</span></div>`}
+   <div class="row"><button class="btn primary" data-act="nightsave" ${r.length?"":"disabled"}>Inserisci</button><button class="btn" data-act="close">Annulla</button></div>`); }
+function applyNights(mk,list){ const mo=M(mk); mo.fixed=mo.fixed||{}; mo.ext=mo.ext||{};
+  if(!hasDraft(mo)){ const sc={}; period(mk).days.forEach(d=>{ sc[d]={}; slotsOfDay(d).forEach(x=>{ sc[d][x.key]=[null]; }); }); mo.draft={sched:mo.sched?clone(mo.sched):sc,at:new Date().toISOString(),acc:{}}; }
+  const W=mo.draft.sched; let pins=0, cov=0;
+  for(const x of list){ const pre=x.d+"|"+x.key+"|";
+    if(x.pid){ const used=Object.keys(mo.fixed).filter(z=>z.startsWith(pre)).map(z=>mo.fixed[z]); if(used.includes(x.pid)) continue;
+      const i=used.length; mo.fixed[pre+i]=x.pid; W[x.d]=W[x.d]||{}; const a=W[x.d][x.key]=(W[x.d][x.key]||[null]).filter(v=>v===x.pid||Object.values(mo.fixed).includes(v)||!v);
+      if(!a.includes(x.pid)){ if(!a[0]) a[0]=x.pid; else a.push(x.pid); } pins++; }
+    else { const k=x.d+"|"+x.key; mo.ext[k]=mo.ext[k]||[]; if(!mo.ext[k].includes(x.name)){ mo.ext[k].push(x.name); cov++; } } }
+  syncExt(mo); UI.draftView=true; return {pins,cov}; }
 /* ---------- bozza e pubblicazione ----------
    "Genera" e "Aggiorna" scrivono una bozza (mo.draft) che vedono solo i gestori dell'anno; con "Accetta" (tutta o settimana
    per settimana) passa nell'orario pubblicato (mo.sched), che vedono tutti e che passa agli altri anni. Ogni bozza e ogni
@@ -607,6 +643,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
        <div class="row" style="gap:8px"><select id="refRot" data-refrot="1" aria-label="Rotazione"><option value="">Rotazione…</option>${S.rotations.map(r=>`<option value="${r.id}" ${UI.refRot===r.id?"selected":""}>${esc(r.name)}</option>`).join("")}</select><button class="btn ${UI.confirm==="refrot"?"confirm":""}" data-act="refrot" ${UI.refRot?"":"disabled"}>${UI.confirm==="refrot"?"Tocca di nuovo: aggiorna la rotazione":"Aggiorna la rotazione"}</button></div>
        <p class="muted" style="margin:0;font-size:.82rem">«Aggiorna la rotazione» fa lo stesso solo per chi è nella rotazione scelta: gli altri non vengono toccati.</p>
        <p class="muted" style="margin:0;font-size:.82rem">Tiene fermi i turni già assegnati; toglie quelli in conflitto con indisponibilità, ferie o congressi e quelli ora coperti da altri anni; poi ridistribuisce: ricopre i turni scoperti dando la precedenza a chi ha meno turni e pareggia le persone tra le sale della stessa metodica (TC, RM), spostando prima i più giovani.</p>`:""}
+       <div class="row" style="gap:8px"><button class="btn" data-act="nightlink">Notti e guardie programmate da link</button><label class="btn">Notti e guardie da file<input type="file" id="nightfile" accept=".xlsx,.xls,.csv" hidden></label></div>
        <div class="row" style="gap:8px"><button class="btn" data-act="extlink">Turni degli altri anni da link</button><label class="btn">Turni degli altri anni da file<input type="file" id="extfile" accept=".xlsx,.xls,.csv" hidden></label>${Object.keys(mo.ext||{}).length?`<span class="chip">${Object.keys(mo.ext).length} turni coperti da altri anni</span>${clrBtn("clrext","Rimuovi")}`:""}</div>`; })():""}
     ${noRot.length?`<p class="muted" style="margin:0;font-size:.85rem">Senza rotazione questo mese: ${noRot.map(r=>esc(rName(r))).join(", ")}.</p>`:""}</div>`;
   if(!mo.generated&&!ADMIN()) return head+`<div class="panel empty"><h2>Turni non ancora pubblicati</h2><p>Appena verranno generati li vedrai qui.</p></div>`;
@@ -1054,7 +1091,7 @@ function toggle(arr,v){const i=arr.indexOf(v); if(i>=0)arr.splice(i,1); else arr
 document.getElementById("tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;UI.tab=b.dataset.tab;UI.confirm=null;try{localStorage.setItem("turni.tab",UI.tab);}catch(_){}render();window.scrollTo(0,0);});
 document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]"); if(!el) return;
-  const a=el.dataset.act;
+  let a=el.dataset.act;
   if(a==="close"){ if(e.target===el||el.tagName==="BUTTON"){closeSheet();render();} return; }
   if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","clrext","refresh","refrot","years","accall","accw","drop","hopen","unlink","swdel","mswgo"].includes(a)) UI.confirm=null;
   if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(Object.values(CLAIMS).includes(MYUID)){ toast(OWNER?"Il tuo account è già associato a un nome: per cambiarlo prima scollegalo in Impostazioni → Account collegati":"Il tuo account è già associato a un nome: solo il proprietario può cambiarlo"); return; } if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString()}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} const y=MULTI?yearOfPid(pid):null; if(y&&y!==CURY) switchYear(y); UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
@@ -1134,9 +1171,13 @@ document.addEventListener("click",e=>{
     const r=refreshSched(UI.mk,UI.refRot); if(hasDraft(M(UI.mk))) histAdd(UI.mk,"Bozza aggiornata: "+rotName(UI.refRot),M(UI.mk).draft.sched); persist(); render(); toast(`${rotName(UI.refRot)} aggiornata: ${r.removed} tolti per indisponibilità, ${r.covered} liberati perché coperti da altri anni, ${r.added} nuovi assegnati, ${r.moved} spostati tra sale`); return; }
   if(a==="refresh"){ if(UI.confirm!=="refresh"){UI.confirm="refresh";render();return;} UI.confirm=null;
     const r=refreshSched(UI.mk); if(hasDraft(M(UI.mk))) histAdd(UI.mk,"Bozza aggiornata",M(UI.mk).draft.sched); persist(); render(); toast(`Orario aggiornato: ${r.removed} tolti per indisponibilità, ${r.covered} liberati perché coperti da altri anni, ${r.added} nuovi assegnati, ${r.moved} spostati tra sale della stessa metodica`); return; }
+  if(a==="nightlink"){ UI.extKind="nights"; a="extlink"; }
+  else if(a==="extlink") UI.extKind="rooms";
+  if(a==="nightsave"){ const r=UI.nightRes; if(!r) return; const x=applyNights(UI.mk,r); UI.nightRes=null; UI.extWb=null; persist(); closeSheet(); render();
+    toast(`Inseriti ${x.pins} turni fissi dei nostri e ${x.cov} turni coperti da altri anni (nella bozza)`); return; }
   if(a==="extlink"){ sheet(`<div class="row" style="justify-content:space-between"><h2>Turni degli altri anni</h2><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
      <label class="stack" style="gap:4px"><span class="label">Link del foglio Google</span><input id="extUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/…" value="${esc(S.extSheetUrl||"")}"></label>
-     <p class="muted" style="margin:0;font-size:.84rem">Apri la scheda del mese giusto e copia il link dalla barra degli indirizzi (contiene <code>gid=</code>). Se il link non indica la scheda, si usa quella chiamata «${esc(monthName(UI.mk))}». Il foglio deve essere condiviso come «Chiunque abbia il link può visualizzare».</p>
+     <p class="muted" style="margin:0;font-size:.84rem">${UI.extKind==="nights"?"Apri la scheda delle notti e guardie (es. «Guardie/Notti NOV-GEN») e copia il link dalla barra degli indirizzi (deve contenere <code>gid=</code>).":""} Apri la scheda del mese giusto e copia il link dalla barra degli indirizzi (contiene <code>gid=</code>). Se il link non indica la scheda, si usa quella chiamata «${esc(monthName(UI.mk))}». Il foglio deve essere condiviso come «Chiunque abbia il link può visualizzare».</p>
      <p id="extErr" style="margin:0;font-size:.85rem;color:var(--bad)"></p>
      <div class="row"><button class="btn primary" data-act="extfetch">Leggi il foglio</button><button class="btn" data-act="close">Annulla</button></div>`); return; }
   if(a==="extfetch"){ const url=(document.getElementById("extUrl")||{}).value||"", id=(url.match(/\/d\/([A-Za-z0-9_-]{20,})/)||[])[1], gid=(url.match(/[#&?]gid=(\d+)/)||[])[1];
@@ -1148,7 +1189,7 @@ document.addEventListener("click",e=>{
     el.disabled=true; el.textContent="Lettura in corso…";
     fetch(src).then(r=>{ if(!r.ok) throw new Error("HTTP "+r.status); return r.text(); }).then(txt=>{
       if(/^\s*</.test(txt)) throw new Error("accesso negato");
-      UI.extWb=XLSX.read(txt,{type:"string",raw:true}); const n=UI.extWb.SheetNames[0]; extPreview(n);
+      UI.extWb=XLSX.read(txt,{type:"string",raw:true}); const n=UI.extWb.SheetNames[0]; if(UI.extKind==="nights") nightsPreview(n); else extPreview(n);
     }).catch(err=>{ el.disabled=false; el.textContent="Leggi il foglio";
       const box=document.getElementById("extErr"); if(box) box.textContent="Non riesco a leggere il foglio ("+err.message+"). Controlla che sia condiviso come «Chiunque abbia il link può visualizzare», oppure scaricalo in Excel e usa «da file»."; });
     return; }
@@ -1213,6 +1254,13 @@ document.addEventListener("change",e=>{
         extPreview(name); }catch(err){ toast("File non leggibile: "+err.message); } };
     fr.readAsArrayBuffer(t.files[0]); t.value=""; return; }
   if(t.id==="extsheet"){ extPreview(t.value); return; }
+  if(t.id==="nightsheet"){ nightsPreview(t.value); return; }
+  if(t.id==="nightfile"&&ADMIN()&&t.files&&t.files[0]){ if(typeof XLSX==="undefined"){toast("Libreria Excel non caricata, riprova tra poco");return;}
+    const fr=new FileReader(); fr.onload=()=>{ try{ const wb=XLSX.read(fr.result,{type:"array",cellDates:true}); UI.extWb=wb; UI.extKind="nights";
+        const ab=MESI[+UI.mk.slice(5)-1].slice(0,3).toLowerCase(), cands=wb.SheetNames.filter(n=>/nott/i.test(n));
+        const inRange=n=>{ const m=n.toLowerCase().match(/([a-z]{3})\s*-\s*([a-z]{3})/); if(!m) return false; const ab3=MESI.map(x=>x.slice(0,3)); let i=ab3.indexOf(m[1]); const e=ab3.indexOf(m[2]); if(i<0||e<0) return false; for(let k=0;k<12;k++){ if(ab3[i]===ab) return true; if(i===e) break; i=(i+1)%12; } return false; };
+        nightsPreview(cands.find(inRange)||cands[0]||wb.SheetNames[0]); }catch(err){ toast("File non leggibile: "+err.message); } };
+    fr.readAsArrayBuffer(t.files[0]); t.value=""; return; }
   if(t.id==="impfile"&&OWNER&&t.files&&t.files[0]){ const fr=new FileReader(); fr.onload=async()=>{ try{
       const x=JSON.parse(fr.result); const at=new Date().toISOString();
       if(x.config) await db.doc("config/main").set({state:typeof x.config==="string"?x.config:JSON.stringify(x.config),updated:at});

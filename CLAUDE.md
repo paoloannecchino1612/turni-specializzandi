@@ -55,6 +55,8 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 
 - Turni degli altri anni: in Turni il gestore incolla il link del foglio Google (letto via `gviz/tq?tqx=out:csv&headers=0&gid=` o `&sheet=<Mese Anno>`; serve condivisione «chiunque abbia il link»; ultimo link in `config.extSheetUrl`) oppure carica l'Excel/CSV del foglio "BOZZA ORARI" (riga 1 giorni "LUN 05", colonna A sala con righe di continuazione, riga "POMERIGGIO" separa M/P, riga "NOTTE", DEA domenica/festivi = guardia). Si riconoscono solo le sale nostre (per nome normalizzato), si ignorano i nostri specializzandi; salvati in `months[mk].ext` (`giorno|postId|turno` → nomi). Il generatore non assegna quei turni e non sono buchi (`sched` = []), salvo turno fisso.
 
+- Notti e guardie già programmate: in Turni "Notti e guardie programmate da link/da file" legge le schede tipo "Guardie/Notti NOV-GEN" (titoli "GUARDIE…"/"NOTTI", righe "Data | Giorno | nomi", date ISO o gg/mm/aaaa) con `parseNights`; i nostri (per cognome) diventano turni fissi in `mo.fixed` e nella bozza, gli altri vanno in `mo.ext` (`applyNights`).
+
 ## Contesto
 - Esiste anche il foglio Google "BOZZA ORARI" con gli orari di tutti gli anni (nomi come "(anno) Cognome"). L'orario si costruisce a cascata 4° → 3° → 2° → 1° anno dopo quello degli strutturati. Una prova su ottobre (gruppo 1° anno, sale RX/Eco/Senologia + TC/RM) ha mostrato che il generatore riduce i buchi; possibile sviluppo futuro: importare dal foglio i turni degli altri anni come "occupati".
 - Il proprietario preferisce: prima un consiglio, poi decide lui cosa cambiare; risposte concise; niente modifiche non richieste.
