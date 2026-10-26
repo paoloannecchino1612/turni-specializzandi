@@ -500,7 +500,9 @@ function derive(mk,override){
   }
   return {per,holes,issues:[...new Set(issues)],where};
 }
-function columns(SC,p){ const cols=[]; S.posts.forEach(post=>SH.forEach(s=>{ const k=post.id+"|"+s; if(p.days.some(d=>(SC[d]||{})[k])) cols.push({post,s,k}); })); return cols; }
+/* colonne: sale/turni presenti nell'orario + quelle attive per l'anno anche se non ancora generate (es. sale aggiunte dopo) */
+function columns(SC,p){ const cols=[]; S.posts.forEach(post=>SH.forEach(s=>{ const k=post.id+"|"+s;
+  if(p.days.some(d=>(SC[d]||{})[k])||(postActive(post)&&p.days.some(d=>((post.on||{})[dayType(d)]||[]).includes(s)))) cols.push({post,s,k}); })); return cols; }
 
 /* ---------- cambi turno ---------- */
 /* orario effettivo = turni generati + cambi accettati non ancora consolidati dal gestore */
@@ -721,7 +723,8 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
     body+=`<div class="scroll"><table class="grid"><thead><tr><th class="sticky" rowspan="2">Giorno</th>${used.map(x=>`<th class="roomh" colspan="${cols.filter(c=>c.post===x).length}">${esc(x.name)}</th>`).join("")}</tr>
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
      ${p.days.map((d,i)=>{const t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
-       if(!arr) return `<td class="cell none">·</td>`;
+       if(!arr){ const due=postActive(c.post)&&((c.post.on||{})[dayType(d)]||[]).includes(c.s);
+         return due?`<td class="cell" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`}><span class="hole">scoperto</span></td>`:`<td class="cell none">·</td>`; }
        const ex=EXT(mo)[d+"|"+c.k], lw=LOWER(mo)[d+"|"+c.k], exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${lw.map(esc).join("<br>")}</span>`:"");
        if(!arr.length) return `<td class="cell" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
        return `<td class="cell ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(ex||lw&&multiPost(c.post)||arr.some(v=>v)?"":`<span class="hole">scoperto</span>`)).join("")}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
