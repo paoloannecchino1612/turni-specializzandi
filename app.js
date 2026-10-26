@@ -37,7 +37,7 @@ const PARSED={};
 /* anni che coprono ogni sala: elenco unico per tutti (config/years), lo modificano proprietario e gestori di qualsiasi anno.
    chiave = nome sala normalizzato; senza indicazione la sala è di tutti gli anni */
 let COVY={};
-const COV_DEF={diagsen:[1],radsen1:[1],radsen2:[1],ecocolumbus:[1],eco:[1],rxtorace:[1],rxscheletro:[1],tccolumbus:[3]};
+const COV_DEF={diagsen:[1],radsen1:[1],radsen2:[1],ecocolumbus:[1],eco:[1],rxtorace:[1],rxscheletro:[1],tccolumbus:[3],tccemi0:[1],sala8:[1]};
 function yearsFor(p){ const k=normRoom(p.name), v=COVY[k]; return Array.isArray(v)?v:(COV_DEF[k]||YEARS); }
 /* gli anni dell'elenco sono gli anni di corso effettivi del mese (es. in ottobre il vostro gruppo è 1° anno) */
 function postActive(p){ return yearsFor(p).includes(yLab(CURY)); }
@@ -246,6 +246,9 @@ function load(raw){ const st=raw?JSON.parse(raw):clone(DEFAULT);
     [["TCCOL","TC Columbus","TC"],["DIAGSEN","DIAGSEN","SENO"],["RADSEN1","RadSen 1","SENO"],["RADSEN2","RadSen 2","SENO"],["ECOCOL","Eco Columbus","ECO"],["ECO","Ecografia","ECO"],["RXTOR","RX Torace","RX"],["RXSCH","RX Scheletro","RX"]]
       .forEach(([id,name,cover])=>{ if(!st.posts.some(p=>p.id===id||normRoom(p.name)===normRoom(name))) st.posts.push({id,name,cover,on:MP()}); });
     st._v5=true; migrated=true; }
+  if(!st._v6){ const MP=()=>({fer:["M","P"],sab:["M","P"],fes:[]});
+    [["TCCEMI","TC 0 CEMI","TC"],["SALA8","Sala 8","RX"]].forEach(([id,name,cover])=>{ if(!st.posts.some(p=>p.id===id||normRoom(p.name)===normRoom(name))) st.posts.push({id,name,cover,on:MP()}); });
+    st._v6=true; migrated=true; }
   return st; }
 
 /* ---------- generazione ---------- */
@@ -502,7 +505,8 @@ function derive(mk,override){
 }
 /* colonne: sale/turni presenti nell'orario + quelle attive per l'anno anche se non ancora generate (es. sale aggiunte dopo) */
 function columns(SC,p){ const cols=[]; S.posts.forEach(post=>SH.forEach(s=>{ const k=post.id+"|"+s;
-  if(p.days.some(d=>(SC[d]||{})[k])||(postActive(post)&&p.days.some(d=>((post.on||{})[dayType(d)]||[]).includes(s)))) cols.push({post,s,k}); })); return cols; }
+  const ex=ADMIN()&&S.months[UI.mk]?EXT(M(UI.mk)):{};
+  if(p.days.some(d=>(SC[d]||{})[k])||(postActive(post)&&p.days.some(d=>((post.on||{})[dayType(d)]||[]).includes(s)))||p.days.some(d=>ex[d+"|"+k])) cols.push({post,s,k}); })); return cols; }
 
 /* ---------- cambi turno ---------- */
 /* orario effettivo = turni generati + cambi accettati non ancora consolidati dal gestore */
@@ -723,7 +727,8 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
     body+=`<div class="scroll"><table class="grid"><thead><tr><th class="sticky" rowspan="2">Giorno</th>${used.map(x=>`<th class="roomh" colspan="${cols.filter(c=>c.post===x).length}">${esc(x.name)}</th>`).join("")}</tr>
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
      ${p.days.map((d,i)=>{const t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
-       if(!arr){ const due=postActive(c.post)&&((c.post.on||{})[dayType(d)]||[]).includes(c.s);
+       if(!arr){ const due=postActive(c.post)&&((c.post.on||{})[dayType(d)]||[]).includes(c.s), ex0=EXT(mo)[d+"|"+c.k];
+         if(!due&&ex0) return `<td class="cell" style="cursor:default" title="Altri anni"><span class="muted" style="font-size:.72rem;display:block">${ex0.map(esc).join("<br>")}</span></td>`;
          return due?`<td class="cell" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`}><span class="hole">scoperto</span></td>`:`<td class="cell none">·</td>`; }
        const ex=EXT(mo)[d+"|"+c.k], lw=LOWER(mo)[d+"|"+c.k], exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${lw.map(esc).join("<br>")}</span>`:"");
        if(!arr.length) return `<td class="cell" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
@@ -1059,7 +1064,12 @@ function syncExt(mo){ for(const sc of [mo.sched,hasDraft(mo)?mo.draft.sched:null
     if(extCovered(mo,d,k)){ if(!a.some(x=>x)) sc[d][k]=[]; }
     else if(!a.length) sc[d][k]=[null]; } } }
 function normRoom(x){ let k=String(x||"").toLowerCase().replace(/\(.*?\)/g,"").replace(/angiografia/g,"angio").replace(/ecografia/g,"eco").replace(/[^a-z0-9]/g,"");
-  if(/^diagn?sen/.test(k)) k="diagsen"; return k; }
+  /* nomi del foglio "BOZZA ORARI" → sale dell'app */
+  if(/^diagn?sen/.test(k)) k="diagsen";
+  else if(/cemi/.test(k)) k="tccemi0";                 // "TC - CEMI 0" = TC 0 CEMI
+  else if(/^rxurogen/.test(k)||k==="sala8") k="sala8"; // "RX Uro-Gen/Dig" = Sala 8
+  else if(/^urgenze/.test(k)) k="rxtorace";            // "Urgenze, Torace, Scheletro (I)" (pomeriggio) = RX Torace
+  return k; }
 /* foglio: riga 1 = giorni ("LUN 05"), colonna A = sala (le righe sotto senza nome sono la stessa sala),
    prima della riga "POMERIGGIO" mattina, dopo pomeriggio; riga "NOTTE" = notti; domenica e festivi DEA = guardia */
 function parseExt(rows,mk){
@@ -1213,6 +1223,8 @@ async function exportBackup(){ if(!OWNER||!db) return; toast("Preparo la copia d
 /* Excel nel formato del foglio "BOZZA ORARI": giorni in riga 1, sale in colonna A (mattina, poi "POMERIGGIO", poi "NOTTE"),
    nomi "(anno) Cognome" di tutti gli anni (orari pubblicati + turni degli altri anni importati); domenica/festivi la guardia sta nella DEA della mattina */
 function sheetRoomName(p,sh){ const k=normRoom(p.name), m=k.match(/^(tc|rm|angio)(\d)$/);
+  const SN={tccemi0:"TC - CEMI 0",sala8:"RX Uro-Gen/Dig",rxscheletro:"RX Scheletro",ecocolumbus:"Eco Columbus",tccolumbus:"TC Columbus",radsen1:"RadSen1",radsen2:"RadSen2"};
+  if(k==="diagsen") return sh==="P"?"DIAGSEN":"Diagn Sen II Piano"; if(k==="eco") return sh==="P"?"Eco (I)":"Eco"; if(k==="rxtorace") return sh==="P"?"Urgenze, Torace, Scheletro (I)":"RX Torace"; if(SN[k]) return SN[k];
   if(m&&m[1]==="tc") return "TC - "+m[2]; if(m&&m[1]==="rm") return `RM ${m[2]} (${m[2]==="2"?"Philips":"GE"})`; if(m&&m[1]==="angio") return "Angiografia "+m[2];
   if(k==="dea") return sh==="P"?"DEA (II)":"DEA"; return p.name; }
 async function exportBozza(){ if(typeof XLSX==="undefined"){toast("Libreria Excel non caricata, riprova tra poco");return;}
