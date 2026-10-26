@@ -778,6 +778,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   const tabs=`<div class="pickers"><button data-act="view" data-v="nome" aria-pressed="${UI.view==="nome"}">Per nome</button><button data-act="view" data-v="giorni" aria-pressed="${UI.view==="giorni"}">Per giorno</button><button data-act="view" data-v="persone" aria-pressed="${UI.view==="persone"}">Per specializzando</button><button data-act="view" data-v="conti" aria-pressed="${UI.view==="conti"}">Conteggi</button></div>`;
   let body="";
   const people=S.residents.filter(r=>inGem(mo,r.id)||(SC&&shiftsOf(SC,r.id).length));
+  CHG=UI.view==="giorni"?draftChanges(mo):null;
   if(UI.view==="giorni"){
     /* filtro per metodica: sale della rotazione (solo mattina/pomeriggio) oppure notti e guardie */
     const myY=ADMIN()?null:yLab((MULTI&&myAnyPid()&&yearOfPid(myAnyPid()))||CURY);
@@ -1269,7 +1270,12 @@ function extPreview(name){ const wb=UI.extWb; if(!wb) return; const ws=wb.Sheets
 /* ---------- sheets ---------- */
 const layer=document.getElementById("layer");
 /* sale chiuse in blocco: si selezionano più caselle nella tabella "Per giorno" */
-function selC(d,k){ return UI.clsel&&UI.clsel.has(d+"|"+k)?" sel":""; }
+function selC(d,k){ return (UI.clsel&&UI.clsel.has(d+"|"+k)?" sel":"")+(CHG&&CHG.has(d+"|"+k)?" chg":""); }
+/* caselle della bozza diverse dall'orario pubblicato (evidenziate in arancione nella vista Bozza) */
+let CHG=null; const sameCell=(a,b)=>{ const x=(a||[]).filter(v=>v).sort().join(), y=(b||[]).filter(v=>v).sort().join(); return x===y; };
+function draftChanges(mo){ if(!draftView(mo)||!mo.sched) return null; const out=new Set(), dr=mo.draft.sched||{};
+  for(const d in dr){ if(!mo.sched[d]) continue; const keys=new Set([...Object.keys(dr[d]||{}),...Object.keys(mo.sched[d]||{})]); keys.forEach(k=>{ if(!sameCell(dr[d][k],mo.sched[d][k])) out.add(d+"|"+k); }); }
+  return out; }
 /* chiude/riapre per tutti gli anni (config/years); per l'anno che si guarda aggiorna anche la bozza */
 function applyClosed(mk,keys,close){ const mo=M(mk), cg={...(CLOSEDG[mk]||{})}; const fx=mo.fixed=mo.fixed||{}; let n=0;
   for(const dk of keys){ const [d,id,sh]=dk.split("|"), post=postOf(id); if(!post) continue; const ck=d+"|"+normRoom(post.name)+"|"+sh, k=id+"|"+sh;
@@ -1307,6 +1313,8 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
     if(!arr.includes(pid)&&(p.wk[w]||0)>=S.maxWeek) return `già ${p.wk[w]} turni in settimana`; return ""; };
   const btn=(r,i,cur,tag)=>{const y=why(r.id), isCur=cur===r.id;return `<button class="cand ${isCur?"cur":""}" data-act="assign" data-i="${i}" data-id="${r.id}"><span><span class="name-strong">${esc(rName(r))}</span>${tag?` <span class="muted" style="font-size:.78rem">· ${esc(rotName(mo.rot[r.id]))}</span>`:""}${y&&!isCur?`<br><span class="why">${y}</span>`:""}</span><span class="chip">${per[r.id].tot} turni · ${per[r.id].N} N</span></button>`;};
   sheet(`<div class="row" style="justify-content:space-between"><div><h2>${esc(post.name)} · ${SHN[s]}</h2><span class="muted">${fmt(d,true)} · ${esc(S.hours[s])}</span></div><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
+   ${hasDraft(mo)?(()=>{ const pub=((effSched(UI.mk)||mo.sched||{})[d]||{})[k]||[], dr=((mo.draft.sched||{})[d]||{})[k]||[], nm=a=>a.filter(x=>x).map(resName).join(", ")||(isClosed(mo,d,k)?"Chiusa":"—"), diff=!sameCell(pub,dr);
+      return `<div class="stack" style="gap:2px;font-size:.88rem;padding:8px 10px;border-radius:8px;background:${diff?"var(--chg-soft)":"var(--surface-2,transparent)"};border:1px solid ${diff?"var(--chg)":"var(--line)"}"><span><span class="muted">Orario attivo:</span> <strong>${esc(nm(pub))}</strong></span><span><span class="muted">Bozza:</span> <strong>${esc(nm(dr))}</strong>${diff?' <span style="color:var(--chg);font-weight:600">· modificato</span>':""}</span></div>`; })():""}
    ${EXT(mo)[d+"|"+k]?`<p class="muted" style="margin:0;font-size:.84rem">Altri anni: ${EXT(mo)[d+"|"+k].map(esc).join(", ")}</p>`:""}
    ${lowerOnly(mo,d,k)?`<p class="muted" style="margin:0;font-size:.84rem;font-style:italic">Anni successivi: ${lowerOnly(mo,d,k).map(esc).join(", ")}</p>`:""}
    ${[...arr,...(multiPost(post)&&arr.some(x=>x)?[undefined]:[])].map((cur,i)=>`<div class="stack" style="gap:6px"><span class="label">${cur===undefined?"Aggiungi un'altra persona":cur?`Ora: ${esc(resName(cur))}`:"Scoperto"}</span>

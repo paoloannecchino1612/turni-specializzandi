@@ -16,19 +16,19 @@
   --bg:#f3f5f7; --surface:#ffffff; --ink:#15202b; --muted:#5d6b78; --line:#d9e0e6;
   --accent:#0f6b8f; --accent-ink:#ffffff; --accent-soft:#e1f0f6;
   --m:#ffe3c7; --m-ink:#9a4700; --p:#dbe7ff; --p-ink:#1f4ea6; --n:#ece0fb; --n-ink:#5b2d9c; --d:#fde0de; --d-ink:#b3261e; --f:#dcf2e2; --f-ink:#1d7a3e; --c:#fff2bf; --c-ink:#7a5d00;
-  --bad:#b4282d; --bad-soft:#fbe7e7; --ok:#1d7a4a; --warn-soft:#fff4dc; --off:#eceff2;
+  --bad:#b4282d; --bad-soft:#fbe7e7; --ok:#1d7a4a; --warn-soft:#fff4dc; --off:#eceff2; --chg:#e8770c; --chg-soft:#ffe8cc;
   --f-display:"Schibsted Grotesk",system-ui,sans-serif; --f-body:"Figtree",system-ui,sans-serif; --f-mono:"IBM Plex Mono",ui-monospace,monospace;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#0f1519; --surface:#172026; --ink:#e4ebf0; --muted:#94a3af; --line:#2a3741;
   --accent:#4fb4d8; --accent-ink:#06222e; --accent-soft:#163541;
   --m:#4a2c0e; --m-ink:#ffbf80; --p:#16294a; --p-ink:#9ec2ff; --n:#30204d; --n-ink:#cdb3ff; --d:#4a1a1a; --d-ink:#ff9b94; --f:#143a24; --f-ink:#8fe0a9; --c:#3d3410; --c-ink:#f5d76e;
-  --bad:#ff7b80; --bad-soft:#3a1c1e; --ok:#5fd398; --warn-soft:#3a3016; --off:#1d272e; color-scheme:dark}}
+  --bad:#ff7b80; --bad-soft:#3a1c1e; --ok:#5fd398; --warn-soft:#3a3016; --off:#1d272e; --chg:#ff9d3d; --chg-soft:#4a2a08; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0f1519; --surface:#172026; --ink:#e4ebf0; --muted:#94a3af; --line:#2a3741;
   --accent:#4fb4d8; --accent-ink:#06222e; --accent-soft:#163541;
   --m:#4a2c0e; --m-ink:#ffbf80; --p:#16294a; --p-ink:#9ec2ff; --n:#30204d; --n-ink:#cdb3ff; --d:#4a1a1a; --d-ink:#ff9b94; --f:#143a24; --f-ink:#8fe0a9; --c:#3d3410; --c-ink:#f5d76e;
-  --bad:#ff7b80; --bad-soft:#3a1c1e; --ok:#5fd398; --warn-soft:#3a3016; --off:#1d272e; color-scheme:dark}
+  --bad:#ff7b80; --bad-soft:#3a1c1e; --ok:#5fd398; --warn-soft:#3a3016; --off:#1d272e; --chg:#ff9d3d; --chg-soft:#4a2a08; color-scheme:dark}
 body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.45}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
 .wrap{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 48px}
@@ -99,6 +99,7 @@ table.grid tr.weekstart td{border-top:2px solid var(--muted)}
 table.grid td.cell{min-width:7.5em;cursor:pointer}
 table.grid td.cell:hover{background:var(--accent-soft)}
 table.grid td.cell.none{color:var(--line);cursor:default}
+table.grid td.cell.chg{background:var(--chg-soft);box-shadow:inset 0 0 0 2px var(--chg)}
 table.grid td.cell.sel{outline:3px solid var(--accent);outline-offset:-3px;background:var(--accent-soft)}
 table.grid td.cell.none:hover{background:none}
 .who{display:block;white-space:nowrap}
@@ -193,7 +194,7 @@ body{margin:0;font-size:15px} img{max-width:100%} [hidden]{display:none!importan
 <div id="layer"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script type="module" src="fb.js?v=84"></script>
-<script type="module" src="app.js?v=84"></script>
+<script type="module" src="fb.js?v=85"></script>
+<script type="module" src="app.js?v=85"></script>
 <script>if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});</script>
 </body></html>
