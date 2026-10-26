@@ -80,8 +80,9 @@ function swInvolves(x,pid){ return !!pid&&(x.from===pid||x.to===pid||(x.needs||[
 function canPref(pid){ const r=resOf(pid); return !!r&&yearOfRes(r)>=3; }
 function UN(mk){return UNAV[mk]||(UNAV[mk]={});}
 const now=new Date();
-const UI={tab:"turni", mk:mkOf(now.getFullYear(), now.getMonth()+2), sel:null, view:null, confirm:null};
+const UI={tab:"turni", mk:mkOf(now.getFullYear(), now.getMonth()+1), sel:null, view:null, confirm:null};
 try{const t=localStorage.getItem("turni.tab"); if(t) UI.tab=t; const me=localStorage.getItem("turni.me"); if(me) UI.sel=me;}catch(e){}
+try{ UI.mk=todayMk(); }catch(e){}
 
 /* ---------- date ---------- */
 function mkOf(y,m){ while(m>12){y++;m-=12} while(m<1){y--;m+=12} return y+"-"+String(m).padStart(2,"0"); }
@@ -592,6 +593,7 @@ function render(){
   app.innerHTML=`<section class="view">${yearBar()}${needLink?linkPanel():""}${({mese:vMese,indisp:vIndisp,turni:vTurni,cambi:vCambi,imp:vImp}[UI.tab]||vMese)()}</section>`;
 }
 /* mese il cui periodo (primo lunedì → ultima domenica) contiene la data di oggi */
+/* all'apertura l'app parte dal mese corrente (quello il cui periodo contiene oggi) */
 function todayMk(){ const t=new Date(), today=ymd(new Date(Date.UTC(t.getFullYear(),t.getMonth(),t.getDate())));
   for(const dm of [0,1,-1]){ const mk=mkOf(t.getFullYear(),t.getMonth()+1+dm), p=period(mk); if(today>=p.first&&today<=p.last) return mk; }
   return mkOf(t.getFullYear(),t.getMonth()+1); }
