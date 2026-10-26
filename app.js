@@ -38,7 +38,7 @@ const PARSED={};
    chiave = nome sala normalizzato; senza indicazione la sala è di tutti gli anni */
 let COVY={};
 function yearsFor(p){ const v=COVY[normRoom(p.name)]; return Array.isArray(v)?v:YEARS; }
-function postActive(p){ return !MULTI||yearsFor(p).includes(CURY); }
+function postActive(p){ return yearsFor(p).includes(CURY); }
 function yState(y){ if(y===CURY&&S) return S; const r=RAW[y]; if(!r||r.cfg===undefined||r.mon===undefined) return null;
   const key=(r.cfg||"")+"\u0001"+(r.mon||""); if(PARSED[y]&&PARSED[y].key===key) return PARSED[y].st;
   let st=null; try{ const c=r.cfg?JSON.parse(r.cfg):null, m=r.mon?JSON.parse(r.mon):null; if(c) st={...c,months:(m&&m.months)||{}}; }catch(e){}
@@ -705,7 +705,8 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   const people=S.residents.filter(r=>inGem(mo,r.id)||(SC&&shiftsOf(SC,r.id).length));
   if(UI.view==="giorni"){
     /* filtro per metodica: sale della rotazione (solo mattina/pomeriggio) oppure notti e guardie */
-    const F=UI.filt||"", cols=columns(SC,p).filter(c=>!F||(F==="NG"?(c.s==="N"||c.s==="D"):(c.post.cover===F&&(c.s==="M"||c.s==="P")))), used=S.posts.filter(x=>cols.some(c=>c.post===x));
+    const myY=ADMIN()?null:((MULTI&&myAnyPid()&&yearOfPid(myAnyPid()))||CURY);
+    const F=UI.filt||"", cols=columns(SC,p).filter(c=>myY===null||yearsFor(c.post).includes(myY)).filter(c=>!F||(F==="NG"?(c.s==="N"||c.s==="D"):(c.post.cover===F&&(c.s==="M"||c.s==="P")))), used=S.posts.filter(x=>cols.some(c=>c.post===x));
     body=`<div class="pickers sm" style="margin-bottom:6px"><button data-act="filt" data-v="" aria-pressed="${!F}">Tutte</button>${S.rotations.filter(r=>S.posts.some(x=>x.cover===r.id)).map(r=>`<button data-act="filt" data-v="${r.id}" aria-pressed="${F===r.id}">${esc(r.name)}</button>`).join("")}<button data-act="filt" data-v="NG" aria-pressed="${F==="NG"}">Notti e guardie</button></div>`;
     body+=`<div class="scroll"><table class="grid"><thead><tr><th class="sticky" rowspan="2">Giorno</th>${used.map(x=>`<th class="roomh" colspan="${cols.filter(c=>c.post===x).length}">${esc(x.name)}</th>`).join("")}</tr>
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
@@ -765,10 +766,10 @@ function vImp2(){
    <div class="row"><button class="btn primary" data-act="backup">Scarica copia di sicurezza</button></div></div>`:"";
   const yearsPanel=OWNER&&db&&CURY===2?`<div class="panel"><h2>Più anni</h2><p class="muted" style="margin:0;font-size:.85rem">${S.multiYear?"Attivo: in alto scegli l'anno. Ogni anno ha nomi, sale, rotazioni e gestori propri (si impostano qui, scegliendo l'anno). Si genera a cascata: prima il 4°, poi il 3° vede i turni del 4° come già coperti, e così via. Disattivando, l'app torna com'era: i dati degli altri anni restano salvati e ricompaiono se lo riattivi.":"Aggiunge 1°, 3° e 4° anno, ognuno con i propri dati. I vostri dati (2° anno) non vengono toccati e disattivando si torna esattamente a come è ora. Nomi presi da «Elenco Spec»: (2)→3° anno, (3)→4° anno; il 1° anno è vuoto."}</p>
    <div class="row"><button class="btn ${UI.confirm==="years"?"confirm":S.multiYear?"danger":"primary"}" data-act="years">${UI.confirm==="years"?"Tocca di nuovo per confermare":S.multiYear?"Disattiva più anni":"Attiva più anni"}</button></div></div>`:"";
-  const covPanel=MULTI&&ADMIN()?(()=>{ const rows=[], seen=new Set();
-    YEARS.forEach(y=>((yState(y)||{}).posts||[]).forEach(p=>{ const k=normRoom(p.name); if(!k||seen.has(k)) return; seen.add(k); rows.push({k,name:p.name,p}); }));
-    return `<div class="panel"><h2>Anni che coprono ogni sala</h2><p class="muted" style="margin:0;font-size:.85rem">Elenco unico per tutti gli anni: lo modificate tu e i gestori di qualsiasi anno. Un anno genera turni solo nelle sale dove è segnato. Vale per le sale con lo stesso nome in tutti gli anni.</p>
-     <div class="list">${rows.map(r=>{ const ys=yearsFor(r.p); return `<div class="item"><span class="name-strong">${esc(r.name)}</span><span class="pickers sm">${YEARS.map(y=>`<button data-act="covy" data-k="${esc(r.k)}" data-y="${y}" aria-pressed="${ys.includes(y)}">${y}°</button>`).join("")}</span></div>`; }).join("")}</div></div>`; })():"";
+  const covPanel=ADMIN()&&db?(()=>{ const rows=[], seen=new Set();
+    (MULTI?YEARS:[CURY]).forEach(y=>((y===CURY?S:yState(y)||{}).posts||[]).forEach(p=>{ const k=normRoom(p.name); if(!k||seen.has(k)) return; seen.add(k); rows.push({k,name:p.name,p}); }));
+    return `<div class="panel"><h2>Anni che coprono ogni sala</h2><p class="muted" style="margin:0;font-size:.85rem">Elenco unico per tutti gli anni: lo modificate tu e i gestori di qualsiasi anno. Un anno genera turni solo nelle sale dove è segnato (anche con «Più anni» spento). Gli specializzandi vedono nella tabella dei turni solo le sale del proprio anno.</p>
+     <div class="list">${rows.map(r=>{ const ys=yearsFor(r.p); return `<div class="item"><span class="name-strong">${esc(r.name)}</span><span class="pickers sm">${YEARS.map(y=>`<button data-act="covy" data-k="${esc(r.k)}" data-y="${y}" aria-pressed="${ys.includes(y)}">${yLab(y)}°</button>`).join("")}</span></div>`; }).join("")}</div></div>`; })():"";
   const privPanel=ADMIN()&&db?`<div class="panel"><div class="row" style="justify-content:space-between"><h2>Privacy indisponibilità</h2><button class="btn ${HIDEUNAV?"primary":""}" data-act="privtog" role="switch" aria-checked="${HIDEUNAV}">${HIDEUNAV?"Attivo":"Spento"}</button></div>
    <p class="muted" style="margin:0;font-size:.85rem">${HIDEUNAV?"Gli specializzandi vedono solo le proprie indisponibilità, ferie, congressi e preferenze. Tu e i gestori vedete tutto.":"Tutti vedono le indisponibilità, ferie e congressi di tutti. Attivandolo ognuno vede solo le proprie (tu e i gestori vedete sempre tutto)."}</p>
    <div class="row" style="justify-content:space-between"><h2>Privacy cambi</h2><button class="btn ${HIDESWAPS?"primary":""}" data-act="privsw" role="switch" aria-checked="${HIDESWAPS}">${HIDESWAPS?"Attivo":"Spento"}</button></div>
@@ -1494,11 +1495,11 @@ render();
       db.doc(d.mon).onSnapshot(on("mon"),()=>setSync("Connessione persa: ricarica la pagina")); };
     /* più anni acceso/spento: lo decide il config dell'anno 2 */
     const checkMulti=()=>{ const st2=yState(2); const on=!!(st2&&st2.multiYear); if(on===MULTI) return; MULTI=on; EXTC.key=null;
-      if(MULTI){ YEARS.forEach(watchYear); watchCov(); } else if(CURY!==2) switchYear(2); filterSW(); };
+      if(MULTI){ YEARS.forEach(watchYear); } else if(CURY!==2) switchYear(2); watchCov(); filterSW(); };
     let covSub=false;
     const watchCov=()=>{ if(covSub) return; covSub=true; db.doc("config/years").onSnapshot(sn=>{ let c={}; try{ c=(JSON.parse((sn.exists&&sn.data().state)||"{}").coverage)||{}; }catch(e){}
       COVY=c; RAWV++; EXTC.key=null; if(S&&!layer.innerHTML) render(); },()=>{}); };
-    watchYear(2);
+    watchYear(2); watchCov();
     db.collection("swaps").limit(1000).onSnapshot(qs=>{ for(const k in SWALL) delete SWALL[k];
       for(const doc of qs.docs){ const x=doc.data(); if(x&&x.id&&x.a) SWALL[x.id]=x; }
       filterSW(); consolidate(); autoInvalidate(); if(S&&!layer.innerHTML) render(); }, ()=>{});
