@@ -544,7 +544,7 @@ function myPid(){ if(!MYUID||!S) return null; for(const pid in CLAIMS) if(CLAIMS
 const app=document.getElementById("app");
 function yearBar(){ if(!MULTI) return ""; return `<div class="pickers" style="margin-bottom:2px">${YEARS.map(y=>`<button data-act="year" data-v="${y}" aria-pressed="${y===CURY}">${y}° anno</button>`).join("")}</div>`; }
 function switchYear(y){ if(!db||y===CURY||!REBUILD) return true; if(saveT||saving){ toast("Attendi il salvataggio e riprova"); return false; }
-  CURY=y; docRef=db.doc(yDocs(y).mon); cfgRef=db.doc(yDocs(y).cfg); S=null; UI.who=null; UI.sel=null; UI.confirm=null; EXTC.key=null; LOWC.key=null;
+  CURY=y; docRef=db.doc(yDocs(y).mon); cfgRef=db.doc(yDocs(y).cfg); S=null; PRUNED=false; UI.who=null; UI.sel=null; UI.confirm=null; EXTC.key=null; LOWC.key=null;
   try{ localStorage.setItem("turni.year",String(y)); }catch(e){}
   REBUILD(); if(!S) render(); return true; }
 /* all'avvio con più anni: si apre l'anno di chi entra (una volta) */
@@ -576,8 +576,19 @@ function render(){
 function todayMk(){ const t=new Date(), today=ymd(new Date(Date.UTC(t.getFullYear(),t.getMonth(),t.getDate())));
   for(const dm of [0,1,-1]){ const mk=mkOf(t.getFullYear(),t.getMonth()+1+dm), p=period(mk); if(today>=p.first&&today<=p.last) return mk; }
   return mkOf(t.getFullYear(),t.getMonth()+1); }
+/* si vedono i turni e le indisponibilità fino a 3 mesi prima del mese corrente; i mesi più vecchi vengono archiviati */
+const KEEP_MONTHS=3;
+function oldestMk(){ const [y,m]=todayMk().split("-").map(Number); return mkOf(y,m-KEEP_MONTHS); }
+let PRUNED=false;
+/* il mese si toglie dal documento solo dopo averne salvato una copia nello storico (se la copia non riesce resta dov'è) */
+async function pruneOld(){ if(PRUNED||!db||!S||!ADMIN()) return; PRUNED=true; const cut=oldestMk(), y=CURY, st=S; let n=0;
+  for(const mk of Object.keys(st.months||{})){ if(mk>=cut) continue; const m=st.months[mk];
+    try{ if(m&&(m.sched||m.draft)) await db.collection(`hist/y${y}_${mk}/v`).doc().set({mk,kind:"Archivio (mese chiuso)",by:"automatico",at:new Date().toISOString(),
+        state:JSON.stringify({sched:m.sched||null,draft:m.draft||null,fixed:m.fixed||{},ext:m.ext||{},rot:m.rot||{}})});
+      if(S!==st) return; delete st.months[mk]; n++; }catch(e){} }
+  if(n) persist(); }
 function monthBar(){ const p=period(UI.mk), tm=todayMk();
-  return `<div class="monthbar"><button class="btn icon" data-act="mprev" aria-label="Mese precedente">‹</button>
+  return `<div class="monthbar"><button class="btn icon" data-act="mprev" aria-label="Mese precedente" ${UI.mk<=oldestMk()?"disabled":""}>‹</button>
   <span class="name">${monthName(UI.mk)}</span><button class="btn icon" data-act="mnext" aria-label="Mese successivo">›</button>
   ${UI.mk!==tm?`<button class="btn" data-act="mtoday">Oggi</button>`:`<span class="chip">mese corrente</span>`}
   <span class="period">${fmt(p.first)} → ${fmt(p.last)} · ${p.days.length/7} settimane</span></div>`; }
@@ -1244,7 +1255,7 @@ document.addEventListener("click",e=>{
   if(a==="hdel"){ const i=+el.dataset.i, list=(UI.hist||{})[UI.mk]||[], h=list[i]; if(!h) return; if(UI.confirm!=="hdel-"+i){UI.confirm="hdel-"+i;render();return;} UI.confirm=null;
     db.doc(`hist/y${CURY}_${UI.mk}/v/${h.id}`).delete().then(()=>{ list.splice(i,1); toast("Eliminata dallo storico"); render(); }).catch(()=>toast("Non riesco a eliminarla: aggiorna le regole del database")); return; }
   if(a==="hopen"){ const i=+el.dataset.i, h=((UI.hist||{})[UI.mk]||[])[i]; if(!h) return; if(UI.confirm!=="hopen-"+i){UI.confirm="hopen-"+i;render();return;} UI.confirm=null;
-    let sc=null; try{ sc=JSON.parse(h.state); }catch(e){} if(!sc) return; M(UI.mk).draft={sched:sc,at:new Date().toISOString(),acc:{},from:h.at}; UI.draftView=true; persist(); render(); toast("Bozza ripristinata dallo storico"); return; }
+    let sc=null; try{ sc=JSON.parse(h.state); }catch(e){} if(sc&&sc.rot&&("fixed" in sc)) sc=sc.sched||(sc.draft&&sc.draft.sched); if(!sc){ toast("Questa voce non contiene un orario"); return; } M(UI.mk).draft={sched:sc,at:new Date().toISOString(),acc:{},from:h.at}; UI.draftView=true; persist(); render(); toast("Bozza ripristinata dallo storico"); return; }
   if(a==="refrot"){ if(!UI.refRot) return; if(UI.confirm!=="refrot"){UI.confirm="refrot";render();return;} UI.confirm=null;
     const r=refreshSched(UI.mk,UI.refRot); if(hasDraft(M(UI.mk))) histAdd(UI.mk,"Bozza aggiornata: "+rotName(UI.refRot),M(UI.mk).draft.sched); persist(); render(); toast(`${rotName(UI.refRot)} aggiornata: ${r.removed} tolti per indisponibilità, ${r.covered} liberati perché coperti da altri anni, ${r.added} nuovi assegnati, ${r.moved} spostati tra sale`); return; }
   if(a==="refresh"){ if(UI.confirm!=="refresh"){UI.confirm="refresh";render();return;} UI.confirm=null;
@@ -1278,7 +1289,7 @@ document.addEventListener("click",e=>{
     else { const mode=UI.umode||"T"; clearUnav(a==="clrone"?[UI.sel]:S.residents.map(r=>r.id),mode); toast(a==="clrone"?"Eliminate per "+resName(UI.sel):"Eliminate per tutti"); }
     persist(); render(); return; }
   if(a==="mtoday"){UI.mk=todayMk();render();return;}
-  if(a==="mprev"||a==="mnext"){const [y,m]=UI.mk.split("-").map(Number);UI.mk=mkOf(y,m+(a==="mnext"?1:-1));render();return;}
+  if(a==="mprev"||a==="mnext"){const [y,m]=UI.mk.split("-").map(Number); const nk=mkOf(y,m+(a==="mnext"?1:-1)); if(nk<oldestMk()){ toast("Si possono vedere solo gli ultimi 3 mesi"); return; } UI.mk=nk;render();return;}
   if(a==="goto"){UI.tab=el.dataset.tab;render();return;}
   if(a==="sel"){UI.sel=el.dataset.id;UI.selTouched=true;try{localStorage.setItem("turni.me",UI.sel);}catch(_){}render();return;}
   if(a==="day"&&db&&!canEditUnav(UI.sel)){ toast(unavDenyMsg(UI.sel)); return; }
@@ -1386,7 +1397,7 @@ render();
       const sp=splitS(); lastCfg=rawCfg?sp.cfg:""; lastMon=rawMon&&!(!rawCfg&&mon&&mon.residents)?sp.mon:"";
       setSync(cfg?"Salvato":OWNER?"Nessun dato ancora":"In attesa dei dati");
       if(OWNER&&(migrated||!rawCfg&&cfg)){migrated=false;persist();}
-      checkMulti(); if(HIDEUNAV) recomputeUnav(); filterSW(); consolidate(); autoInvalidate(); syncRoles(); autoYear(); if(!layer.innerHTML) render(); };
+      checkMulti(); pruneOld(); if(HIDEUNAV) recomputeUnav(); filterSW(); consolidate(); autoInvalidate(); syncRoles(); autoYear(); if(!layer.innerHTML) render(); };
     REBUILD=rebuild;
     const subY={};
     const watchYear=y=>{ if(subY[y]) return; subY[y]=true; RAW[y]=RAW[y]||{}; const d=yDocs(y);
