@@ -1299,6 +1299,11 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
      ${pri.map(r=>btn(r,i,cur,cov==="ALL")).join("")||`<p class="muted" style="margin:0">Nessuno in questa rotazione.</p>`}
      ${jol.length?`<span class="groupname">Jolly</span>${jol.map(r=>btn(r,i,cur,true)).join("")}`:""}
      ${(()=>{const bg=S.residents.filter(r=>isBG(mo.rot[r.id])); return bg.length?`<span class="groupname">Bambin Gesù (solo a mano)</span>${bg.map(r=>btn(r,i,cur,true)).join("")}`:"";})()}
+     ${(()=>{ if(cov==="ALL"||pri.some(r=>!why(r.id))) return ""; /* nessuno della rotazione disponibile: si può forzare */
+        const inPools=new Set([...pri,...jol].map(r=>r.id)), others=S.residents.filter(r=>!inPools.has(r.id)&&!isBG(mo.rot[r.id]));
+        if(!others.length) return "";
+        if(UI.forceRot!==d+"|"+k) return `<button class="btn" data-act="forcerot">Forza la rotazione</button>`;
+        return `<span class="groupname">Altri specializzandi (fuori rotazione)</span>${others.sort((a,b)=>!!why(a.id)-!!why(b.id)).map(r=>btn(r,i,cur,true)).join("")}`; })()}
      ${cur?`<button class="btn danger" data-act="assign" data-i="${i}" data-id="">${arr.filter(x=>x).length>1?"Togli":"Lascia scoperto"}</button>`:""}</div>`).join("")}
    <div class="row">${(mo.ext||{})[d+"|"+k]&&(mo.ext[d+"|"+k]||[]).includes(EXT_MAN)?`<button class="btn" data-act="extmark" data-v="0">Togli «coperto da altri anni»</button>`:`<button class="btn" data-act="extmark" data-v="1">Coperto da altri anni</button>`}
      ${isClosed(mo,d,k)?`<button class="btn" data-act="closeroom" data-v="0">Riapri la sala</button>`:`<button class="btn" data-act="closeroom" data-v="1">Sala chiusa (questo turno)</button><button class="btn" data-act="closeroom" data-v="2">Sala chiusa tutto il giorno</button>`}</div>`);
@@ -1485,6 +1490,7 @@ document.addEventListener("click",e=>{
     else shs.forEach(x=>{ const kk=pid+"|"+x; mo.closed[d+"|"+rn+"|"+x]=true; W[d][kk]=[]; Object.keys(fx).filter(z=>z.startsWith(d+"|"+kk+"|")).forEach(z=>delete fx[z]); });
     persist(); closeSheet(); render(); toast(el.dataset.v==="0"?"Sala riaperta (nella bozza)":"Sala chiusa: nessuno assegnato (nella bozza, da accettare)"); return; }
   if(a==="chseen"){ const {pid,list}=myChanges(); const last=list.reduce((m,c)=>c.at>m?c.at:m,""); try{ localStorage.setItem("turni.chseen."+pid,last); }catch(e){} render(); return; }
+  if(a==="forcerot"){ UI.forceRot=layer.dataset.d+"|"+layer.dataset.k; cellSheet(layer.dataset.d,layer.dataset.k); return; }
   if(a==="filt"){ UI.filt=el.dataset.v; render(); return; }
   if(a==="dview"){ UI.draftView=el.dataset.v==="1"; render(); return; }
   if(a==="accall"){ if(UI.confirm!=="accall"){UI.confirm="accall";render();return;} UI.confirm=null; const n=period(UI.mk).days.length/7, acc=(M(UI.mk).draft||{}).acc||{};
