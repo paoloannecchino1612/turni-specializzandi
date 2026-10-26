@@ -292,6 +292,10 @@ function applyNights(mk,list){ const mo=M(mk); mo.fixed=mo.fixed||{}; mo.ext=mo.
 function hasDraft(mo){ return !!(mo.draft&&mo.draft.sched); }
 function draftView(mo){ return ADMIN()&&hasDraft(mo)&&UI.draftView!==false; }
 function workSched(mo){ return draftView(mo)?mo.draft.sched:mo.sched; }
+/* le modifiche a mano vanno sempre nella bozza (creata dal pubblicato se serve) e la settimana toccata torna da accettare */
+function ensureDraft(mo,d){ if(!hasDraft(mo)){ const n=period(mo.mk).days.length/7, acc={}; if(mo.sched) for(let w=0;w<n;w++) acc[w]=true; mo.draft={sched:clone(mo.sched||{}),at:new Date().toISOString(),acc}; }
+  if(d&&mo.draft.acc){ const w=Math.floor(period(mo.mk).days.indexOf(d)/7); if(w>=0) delete mo.draft.acc[w]; } UI.draftView=true; return mo.draft.sched; }
+function editSched(mo){ return hasDraft(mo)?mo.draft.sched:mo.sched; }
 function viewSched(mk){ const mo=M(mk); return draftView(mo)?clone(mo.draft.sched):effSched(mk); }
 function histAdd(mk,kind,sched){ if(!db||!sched) return; const by=myPid()?resName(myPid()):(OWNER?"proprietario":"");
   db.collection(`hist/y${CURY}_${mk}/v`).doc().set({mk,kind,by,at:new Date().toISOString(),state:JSON.stringify(sched)}).catch(()=>{}); }
@@ -1044,7 +1048,7 @@ function daySheet(d){ const mo=M(UI.mk), u=unavOf(mo,UI.sel,d), avail=shiftsOfDa
    ${ADMIN()&&conflictsOf(UI.mk,UI.sel,d).length?`<div class="alerts bad"><strong>${esc(resName(UI.sel))} è già in turno: ${conflictsOf(UI.mk,UI.sel,d).map(c=>slotLabel(c)).join(", ")}</strong><button class="btn primary" data-act="planday" data-d="${d}">Programma un cambio</button></div>`:""}
    <div class="row"><button class="btn" data-act="u" data-v="">Disponibile</button><button class="btn primary" data-act="close">Fatto</button></div>`);
   layer.dataset.d=d; }
-function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf(postId), arr=((workSched(mo)||{})[d]||{})[k]||[null], {per}=derive(UI.mk,viewSched(UI.mk)||undefined);
+function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf(postId), arr=((editSched(mo)||{})[d]||{})[k]||[null], {per}=derive(UI.mk,viewSched(UI.mk)||undefined);
   const w=Math.floor(period(UI.mk).days.indexOf(d)/7), {pri,jol}=pools(mo,post,s), cov=covOf(post,s);
   const why=pid=>{ const p=per[pid], u=unavOf(mo,pid,d); if(!canDo(pid,s)) return s==="N"?"non abilitato alle notti":"non abilitato alle guardie";
     if(blocked(u,s)) return u==="F"?"in ferie":u==="C"?"a congresso":"indisponibile"; if(p.on[d]&&!arr.includes(pid)) return p.on[d]==="N"?"giorno di monto (ha la notte)":s==="N"?`già di ${SHN[p.on[d]].toLowerCase()}, sarebbe il monto`:`già di ${SHN[p.on[d]].toLowerCase()}`;
@@ -1162,7 +1166,7 @@ document.addEventListener("click",e=>{
     el.disabled=true; el.textContent="Creazione degli anni…"; enableYears().then(()=>{ toast("Più anni attivo: scegli l'anno in alto"); render(); }).catch(e=>{ toast("Errore: "+(e.message||e)); render(); }); return; }
   if(a==="extmark"){ const mo=M(UI.mk), d=layer.dataset.d, k=layer.dataset.k, kk=d+"|"+k; mo.ext={...(mo.ext||{})};
     if(el.dataset.v==="1"){ mo.ext[kk]=[...(mo.ext[kk]||[]).filter(x=>x!==EXT_MAN),EXT_MAN];
-      if(!multiPost(postOf(k.split("|")[0]))){ const fx=mo.fixed=mo.fixed||{}; Object.keys(fx).filter(z=>z.startsWith(kk+"|")).forEach(z=>delete fx[z]); const W=workSched(mo); if(W&&W[d]) W[d][k]=[]; } }
+      if(!multiPost(postOf(k.split("|")[0]))){ const fx=mo.fixed=mo.fixed||{}; Object.keys(fx).filter(z=>z.startsWith(kk+"|")).forEach(z=>delete fx[z]); const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=[]; } }
     else { const l=(mo.ext[kk]||[]).filter(x=>x!==EXT_MAN); if(l.length) mo.ext[kk]=l; else delete mo.ext[kk]; }
     syncExt(mo); persist(); closeSheet(); render(); return; }
   if(a==="filt"){ UI.filt=el.dataset.v; render(); return; }
@@ -1236,9 +1240,9 @@ document.addEventListener("click",e=>{
     UI.confirm=null; generate(UI.mk); persist(); render(); toast("Turni generati"); return; }
   if(a==="xlsx"){exportXlsx();return;}
   if(a==="view"){UI.view=el.dataset.v;render();return;}
-  if(a==="cell"){cellSheet(el.dataset.d,el.dataset.k);return;}
+  if(a==="cell"){ if(hasDraft(M(UI.mk))) UI.draftView=true;cellSheet(el.dataset.d,el.dataset.k);return;}
   if(a==="assign"){ const mo=M(UI.mk), d=layer.dataset.d, k=layer.dataset.k, i=+el.dataset.i, id=el.dataset.id||null;
-    const W=workSched(mo); if(!W||!W[d]) return; W[d][k]=W[d][k]||[null]; const arr=W[d][k], fx=mo.fixed=mo.fixed||{}, pre=d+"|"+k+"|";
+    const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=W[d][k]||[null]; const arr=W[d][k], fx=mo.fixed=mo.fixed||{}, pre=d+"|"+k+"|";
     if(id){ arr[i]=id; fx[pre+i]=id; }
     else if(arr.filter(x=>x).length>1){ /* più persone: si toglie solo questa e si riallineano i turni fissi */
       const pins=arr.map((x,j)=>fx[pre+j]===x&&x?x:null); arr.splice(i,1); pins.splice(i,1);
