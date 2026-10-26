@@ -173,6 +173,10 @@ function presenceBox(list){ if(!list.length) return "";
   return `<div class="alerts bad"><strong>Presenza sotto il ${S.minPresence}% in ${list.length} ${list.length===1?"giorno":"casi"}</strong><ul>${list.slice(0,12).map(x=>`<li>${fmt(x.d)} · ${esc(x.rot.name)}: presenti ${x.pres} su ${x.n} (minimo ${x.need}). Assenti: ${x.away.map(r=>esc(rName(r))).join(", ")}</li>`).join("")}${list.length>12?`<li>… e altri ${list.length-12}</li>`:""}</ul></div>`; }
 function shiftsOfDay(d){ const set=new Set(slotsOfDay(d).map(x=>x.s)); return SH.filter(s=>set.has(s)); }
 function slotsOfDay(d){ const t=dayType(d), out=[]; S.posts.forEach(p=>{ if(!postActive(p)) return; SH.forEach(s=>{ if((p.on[t]||[]).includes(s)) out.push({post:p,s,key:p.id+"|"+s}); }); }); return out; }
+/* turni in sale non dell'anno (es. dal foglio): contano comunque per la persona (turni, monto/smonto, settimana, conteggi) */
+function slotsWith(d,day){ const base=slotsOfDay(d), have=new Set(base.map(x=>x.key)), out=[...base];
+  for(const k in (day||{})){ if(have.has(k)||!(day[k]||[]).some(x=>x)) continue; const [pid,s]=k.split("|"), post=postOf(pid); if(post&&SH.includes(s)) out.push({post,s,key:k,extra:true}); }
+  return out; }
 /* chi può coprire una postazione: primari, poi jolly */
 function covOf(post,s){ return (post.all||[]).includes(s)?"ALL":post.cover; }
 function pools(mo,post,s){ const inG=S.residents.filter(r=>inGem(mo,r.id)), cov=covOf(post,s);
@@ -391,7 +395,7 @@ function generate(mk,wk,only2){ TICK++; /* only2: Set di pid a cui si possono da
   { const [y,m]=mk.split("-").map(Number), pk=mkOf(y,m-1); if(S.months[pk]){ const ps=effSched(pk)||{}, last=add(days[0],-1); for(const k in (ps[last]||{})) (ps[last][k]||[]).forEach(pid=>{ if(pid&&st[pid]) st[pid].on[last]=k.split("|")[1]; }); } }
   days.forEach((d,i)=>{ const t=dayType(d), w=Math.floor(i/7);
     if(only&&w!==wk){ sched[d]=clone(base[d]||{});
-      slotsOfDay(d).forEach(x=>{ if(!sched[d][x.key]) sched[d][x.key]=[null];
+      slotsWith(d,sched[d]).forEach(x=>{ if(!sched[d][x.key]) sched[d][x.key]=[null];
         sched[d][x.key].forEach(pid=>{ const p=pid&&st[pid]; if(!p) return; p.on[d]=x.s; p.tot++; p[x.s]++; p.pc[x.post.id]=(p.pc[x.post.id]||0)+1; p.last[d]=x.post.id;
           if(t!=="fer")p.we++; p.wk[w]=(p.wk[w]||0)+1; if(x.s==="N")p.wn[w]=(p.wn[w]||0)+1; }); });
       return; }
@@ -415,6 +419,12 @@ function generate(mk,wk,only2){ TICK++; /* only2: Set di pid a cui si possono da
   /* ogni giorno si riempiono per prime le sale/turni finora meno coperti: i buchi si distribuiscono in modo omogeneo */
   /* turni inseriti a mano (fissi): si mettono per primi e il generatore non li tocca */
   const fx=mo.fixed||{};
+  /* turni fissi in sale non dell'anno (es. dal foglio): restano e contano */
+  { const genDays=new Set(days.filter((d,i)=>!only||Math.floor(i/7)===wk));
+    Object.keys(fx).forEach(z=>{ const [d,pid,sh]=z.split("|"), key=pid+"|"+sh, i=days.indexOf(d); if(!genDays.has(d)||!st[fx[z]]) return;
+      if(slots.some(sl=>sl.d===d&&sl.key===key)||(sched[d]&&sched[d][key]&&slotsOfDay(d).some(x=>x.key===key))) return; const post=postOf(pid); if(!post) return;
+      sched[d][key]=sched[d][key]||[]; if(sched[d][key].includes(fx[z])) return;
+      put({d,i,w:Math.floor(i/7),t:dayType(d),post,s:sh,key},{id:fx[z]},sched[d][key].length>0); }); }
   slots.forEach(sl=>{ const pre=sl.d+"|"+sl.key+"|", ids=Object.keys(fx).filter(k=>k.startsWith(pre)).sort((a,b)=>+a.split("|").pop()-+b.split("|").pop()).map(k=>fx[k]).filter(pid=>st[pid]);
     ids.forEach((pid,n)=>put(sl,{id:pid},n>0)); });
   /* quota mensile per persona uguale per tutti gli anni: gli anni con anni sotto si fermano lì; le persone in più in TC/RM non la superano mai */
@@ -518,11 +528,12 @@ function derive(mk,override){
   const holes=[], issues=[], where={}, SC=override||effSched(mk);
   if(!SC) return {per,holes,issues,where};
   days.forEach((d,i)=>{const w=Math.floor(i/7),t=dayType(d);
-    slotsOfDay(d).forEach(({post,s,key})=>{ const arr=(SC[d]||{})[key]||[null];
+    slotsWith(d,SC[d]).forEach(({post,s,key,extra})=>{ const arr=(SC[d]||{})[key]||[null];
+      if(!extra){
       if(arr.some(x=>x)&&isClosed(mo,d,key)) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: sala chiusa ma con ${arr.filter(x=>x).map(resName).join(", ")}`);
       if(!arr.some(x=>x)&&!roomCovered(mo,d,key)&&!isClosed(mo,d,key)) holes.push({d,post:post.name,s});
       if(multiPost(post)){ const o=arr.filter(x=>x); if(o.length>1) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: ${o.length} dello stesso anno (${o.map(resName).join(", ")})${sameYearOk(curYear())?"":" — non previsto per questo anno"}`);
-        if(o.length+othersIn(mo,d,key)>ROOM_MAX) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: ${o.length+othersIn(mo,d,key)} persone (massimo ${ROOM_MAX})`); }
+        if(o.length+othersIn(mo,d,key)>ROOM_MAX) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: ${o.length+othersIn(mo,d,key)} persone (massimo ${ROOM_MAX})`); } }
       arr.forEach(pid=>{ if(!pid) return; const p=per[pid]; if(!p)return;
         if(p.on[d]) issues.push(`${resName(pid)}: ${p.on[d]==="N"||s==="N"?"lavora di giorno il "+fmt(d)+", giorno di monto":"due turni il "+fmt(d)}`);
         p.on[d]=s; where[pid+"|"+d]=post.name; p.pc[post.name]=(p.pc[post.name]||0)+1; p.tot++; p[s]++; if(t!=="fer")p.we++; if(t==="sab")p.sab=(p.sab||0)+1; if(t==="fes")p.fes=(p.fes||0)+1; p.wk[w]=(p.wk[w]||0)+1; if(s==="N")p.wn[w]=(p.wn[w]||0)+1;
@@ -530,7 +541,7 @@ function derive(mk,override){
         {const u=unavOf(mo,pid,d); if(blocked(u,s)) issues.push(`${resName(pid)}: ${u==="F"?"in ferie":u==="C"?"a congresso":u==="G"?"indisponibile tutto il giorno, inserito perché il turno sarebbe rimasto scoperto,":"indisponibile"} ${fmt(d)} (${SHN[s]})`);}
         const rot=mo.rot[pid];
         if(isExt(rot)&&!isBG(rot)) issues.push(`${resName(pid)}: in turno il ${fmt(d)} ma è ${rot?"a "+rotName(rot):"senza rotazione"}`);
-        else if(!isBG(rot)&&covOf(post,s)!=="ALL"&&rot!==covOf(post,s)&&!(isJolly(rot)&&!isJolly(covOf(post,s)))) issues.push(`${resName(pid)}: in ${post.name} il ${fmt(d)} ma la rotazione è ${rotName(rot)}`);
+        else if(!extra&&!isBG(rot)&&covOf(post,s)!=="ALL"&&rot!==covOf(post,s)&&!(isJolly(rot)&&!isJolly(covOf(post,s)))) issues.push(`${resName(pid)}: in ${post.name} il ${fmt(d)} ma la rotazione è ${rotName(rot)}`);
       }); }); });
   { const PRF=PR(mk); for(const pid in PRF){ if(!per[pid]||!canPref(pid)) continue; for(const d in PRF[pid]){ const code=PRF[pid][d]; if(!code||!days.includes(d)) continue;
       const [pp,sh]=code.includes("|")?code.split("|"):[null,code]; const okk=Object.entries(SC[d]||{}).some(([k,a])=>a.includes(pid)&&k.endsWith("|"+sh)&&(!pp||k.startsWith(pp+"|")));
