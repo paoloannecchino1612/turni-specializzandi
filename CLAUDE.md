@@ -26,6 +26,8 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 
 - Privacy indisponibilità: interruttore in Impostazioni (gestori) → `config/privacy` `{hideUnav}`; se attivo gli specializzandi vedono solo le proprie indisponibilità/ferie/congressi/preferenze (filtro in `recomputeUnav` + regola Firestore sulla lettura di `unav`). Stesso documento `hideSwaps`: gli specializzandi vedono nello storico solo i cambi in cui sono coinvolti (`swInvolves`; solo filtro di visualizzazione, i dati restano leggibili); se spento c'è il filtro "Tutti / Solo i miei". Gestori: "Scarica indisponibilità (Excel)" in Indisponibilità (`exportUnav`).
 
+- Copia di sicurezza (proprietario, Impostazioni sotto "Importa dati"): `exportBackup` scarica un .json `{type:"turni-backup", docs:{percorso:dati}, cols:{percorso:[{id,data}]}}` con config/planner di tutti gli anni, config/years, config/privacy, access/allow, roles/managers, claims, swaps, accessRequests e unav di tutti; "Importa dati" lo riconosce e riscrive tutto (non cancella ciò che è stato creato dopo; storico bozze escluso).
+
 ## Permessi
 - Proprietario: tutto; unico che gestisce email autorizzate, gestori, scollegamento account.
 - Gestori: impostazioni, rotazioni, generazione/modifica turni, cambi manuali, cambi da inserire, pulizia storico, indisponibilità di tutti (anche dopo la scadenza).

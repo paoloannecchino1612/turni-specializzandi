@@ -730,8 +730,10 @@ function vImp(){
   const allowPanel=OWNER?`<div class="panel"><h2>Email autorizzate</h2><p class="muted" style="margin:0;font-size:.85rem">Solo queste email possono entrare nell'app (tu entri sempre). Una per riga. Dopo averle salvate, manda il link ai colleghi: si registrano con la stessa email e una password a scelta.</p>
    <textarea id="allowtxt" rows="6" style="width:100%;font:.88rem var(--f-mono);color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px">${esc(ALLOW.join("\n"))}</textarea>
    <div class="row"><button class="btn primary" data-act="allowsave">Salva elenco</button><span class="muted" style="font-size:.85rem">${ALLOW.length} email autorizzate</span></div></div>`:"";
-  const importPanel=OWNER?`<div class="panel"><h2>Importa dati</h2><p class="muted" style="margin:0;font-size:.85rem">Carica il file di esportazione dal vecchio tool (.json): sostituisce impostazioni e turni e aggiunge indisponibilità e cambi. I collegamenti nome-account vanno rifatti.</p>
-   <input type="file" id="impfile" accept=".json,application/json"></div>`:"";
+  const importPanel=OWNER?`<div class="panel"><h2>Importa dati</h2><p class="muted" style="margin:0;font-size:.85rem">Carica una copia di sicurezza (.json) per ripristinare tutto, oppure il file di esportazione del vecchio tool (sostituisce impostazioni e turni e aggiunge indisponibilità e cambi).</p>
+   <input type="file" id="impfile" accept=".json,application/json"></div>
+   <div class="panel"><h2>Copia di sicurezza</h2><p class="muted" style="margin:0;font-size:.85rem">Scarica in un file tutti i dati: impostazioni e turni di tutti gli anni, indisponibilità, ferie, congressi e preferenze, cambi, associazioni nome-account, email autorizzate e gestori. Per ripristinarli carica il file qui sopra in «Importa dati» (sovrascrive i dati attuali con quelli della copia). Lo storico delle bozze non è incluso.</p>
+   <div class="row"><button class="btn primary" data-act="backup">Scarica copia di sicurezza</button></div></div>`:"";
   const yearsPanel=OWNER&&db&&CURY===2?`<div class="panel"><h2>Più anni</h2><p class="muted" style="margin:0;font-size:.85rem">${S.multiYear?"Attivo: in alto scegli l'anno. Ogni anno ha nomi, sale, rotazioni e gestori propri (si impostano qui, scegliendo l'anno). Si genera a cascata: prima il 4°, poi il 3° vede i turni del 4° come già coperti, e così via. Disattivando, l'app torna com'era: i dati degli altri anni restano salvati e ricompaiono se lo riattivi.":"Aggiunge 1°, 3° e 4° anno, ognuno con i propri dati. I vostri dati (2° anno) non vengono toccati e disattivando si torna esattamente a come è ora. Nomi presi da «Elenco Spec»: (2)→3° anno, (3)→4° anno; il 1° anno è vuoto."}</p>
    <div class="row"><button class="btn ${UI.confirm==="years"?"confirm":S.multiYear?"danger":"primary"}" data-act="years">${UI.confirm==="years"?"Tocca di nuovo per confermare":S.multiYear?"Disattiva più anni":"Attiva più anni"}</button></div></div>`:"";
   const covPanel=MULTI&&ADMIN()?(()=>{ const rows=[], seen=new Set();
@@ -1110,6 +1112,19 @@ async function exportUnav(){ if(!ADMIN()) return; if(typeof XLSX==="undefined"){
   const out=XLSX.write(wb,{bookType:"xlsx",type:"array"}), fname=`Indisponibilita_${monthName(mk).replace(" ","_")}${MULTI?"_"+CURY+"anno":""}.xlsx`;
   if(!downloads){toast("Il download non è disponibile in questa vista");return;}
   try{ const r=await downloads.save({filename:fname,data:new Blob([out],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})}); if(r.status==="saved")toast("File Excel salvato"); }catch(e){ toast("Download non riuscito"); } }
+/* copia di sicurezza completa (solo proprietario): documenti e raccolte del database in un file .json */
+const BK_DOCS=["config/main","planner/state","config/y1","planner/y1","config/y3","planner/y3","config/y4","planner/y4","config/years","config/privacy","access/allow","roles/managers"];
+async function exportBackup(){ if(!OWNER||!db) return; toast("Preparo la copia di sicurezza…");
+  try{ const out={type:"turni-backup",version:1,at:new Date().toISOString(),docs:{},cols:{}};
+    for(const p of BK_DOCS){ const sn=await db.doc(p).get(); if(sn.exists) out.docs[p]=sn.data(); }
+    const col=async p=>{ const r=await db.collection(p).limit(5000).get(); out.cols[p]=r.docs.map(d=>({id:d.id,data:d.data()})); return out.cols[p]; };
+    const claims=await col("claims"); await col("swaps"); await col("accessRequests");
+    for(const u of ["staff",...new Set(claims.map(c=>c.id))]) await col(`unav/${u}/m`);
+    const json=JSON.stringify(out), now=new Date();
+    const fname=`Turni_copia_${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}_${String(now.getHours()).padStart(2,"0")}${String(now.getMinutes()).padStart(2,"0")}.json`;
+    if(!downloads){toast("Il download non è disponibile in questa vista");return;}
+    const r=await downloads.save({filename:fname,data:new Blob([json],{type:"application/json"})}); if(r.status==="saved") toast("Copia di sicurezza salvata");
+  }catch(e){ toast("Copia non riuscita: "+(e.message||e.code||e)); } }
 async function exportXlsx(){
   const mo=M(UI.mk), p=period(UI.mk), {per,where}=derive(UI.mk);
   if(typeof XLSX==="undefined"){toast("Libreria Excel non caricata, riprova tra poco");return;}
@@ -1289,6 +1304,7 @@ document.addEventListener("click",e=>{
     UI.confirm=null; generate(UI.mk); persist(); render(); toast("Turni generati"); return; }
   if(a==="xlsx"){exportXlsx();return;}
   if(a==="xunav"){exportUnav();return;}
+  if(a==="backup"){exportBackup();return;}
   if(a==="view"){UI.view=el.dataset.v;render();return;}
   if(a==="cell"){ if(hasDraft(M(UI.mk))) UI.draftView=true;cellSheet(el.dataset.d,el.dataset.k);return;}
   if(a==="assign"){ const mo=M(UI.mk), d=layer.dataset.d, k=layer.dataset.k, i=+el.dataset.i, id=el.dataset.id||null;
@@ -1327,6 +1343,10 @@ document.addEventListener("change",e=>{
     fr.readAsArrayBuffer(t.files[0]); t.value=""; return; }
   if(t.id==="impfile"&&OWNER&&t.files&&t.files[0]){ const fr=new FileReader(); fr.onload=async()=>{ try{
       const x=JSON.parse(fr.result); const at=new Date().toISOString();
+      if(x.type==="turni-backup"){ toast("Ripristino della copia in corso…");
+        let ko=0; for(const p in (x.docs||{})){ try{ await db.doc(p).set(x.docs[p]); }catch(e){ ko++; } }
+        for(const p in (x.cols||{})){ if(p==="accessRequests") continue; for(const d of x.cols[p]){ try{ await db.collection(p).doc(d.id).set(d.data); }catch(e){ ko++; } } }
+        toast(ko?`Copia ripristinata, ${ko} elementi non scritti: ricarico`:"Copia di sicurezza ripristinata: ricarico"); setTimeout(()=>location.reload(),1800); return; }
       if(x.config) await db.doc("config/main").set({state:typeof x.config==="string"?x.config:JSON.stringify(x.config),updated:at});
       if(x.planner) await db.doc("planner/state").set({state:typeof x.planner==="string"?x.planner:JSON.stringify(x.planner),updated:at});
       for(const u of (x.unav||[])) await db.collection("unav/staff/m").doc(u.mk+"_"+u.pid).set({mk:u.mk,pid:u.pid,days:u.days||{},updated:at});
