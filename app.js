@@ -745,7 +745,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
      ${p.days.map((d,i)=>{const t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
        if(!arr){ const due=postActive(c.post)&&((c.post.on||{})[dayType(d)]||[]).includes(c.s), ex0=EXT(mo)[d+"|"+c.k];
-         if(!due&&ex0) return `<td class="cell" style="cursor:default" title="Altri anni"><span class="muted" style="font-size:.72rem;display:block">${ex0.map(esc).join("<br>")}</span></td>`;
+         if(ex0) return `<td class="cell" ${due&&ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni"><span class="muted" style="font-size:.72rem;display:block">${ex0.map(esc).join("<br>")}</span></td>`;
          return due?`<td class="cell" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`}><span class="hole">scoperto</span></td>`:`<td class="cell none">·</td>`; }
        const ex=EXT(mo)[d+"|"+c.k], lw=LOWER(mo)[d+"|"+c.k], exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${lw.map(esc).join("<br>")}</span>`:"");
        if(!arr.length) return `<td class="cell" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
