@@ -72,11 +72,15 @@ function sheetExtCached(mk){ const sh=sheetLatest(mk); const key=mk+"|"+CURY+"|"
 const LOWC={key:null,map:{}};
 function LOWER(mo){ if(!MULTI||!S) return {}; const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+S.posts.map(p=>p.id+":"+p.name).join(",");
   if(LOWC.key!==key){ LOWC.key=key; LOWC.map=autoExt(mo.mk,true); } return LOWC.map; }
-function EXT(mo){ let own=mo.ext||{}; if(S&&mo.mk){ const se=sheetExtCached(mo.mk); if(Object.keys(se).length){ const m={...se}; for(const k in own) m[k]=[...new Set([...(m[k]||[]),...own[k]])]; own=m; } } if(!MULTI||!S) return own;
+function EXT(mo){ let own=mo.ext||{}; if(S&&mo.mk){ const se=sheetExtCached(mo.mk); if(Object.keys(se).length){ const m={...se}; for(const k in own) m[k]=dedupNames([...(m[k]||[]),...own[k]]); own=m; } } if(!MULTI||!S) return own;
   const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+S.posts.map(p=>p.id+":"+p.name).join(",");
   if(EXTC.key!==key){ EXTC.key=key; EXTC.map=autoExt(mo.mk); }
   const auto=EXTC.map; if(!Object.keys(auto).length) return own;
-  const out={...auto}; for(const k in own) out[k]=[...(auto[k]||[]),...own[k]]; return out; }
+  const out={...auto}; for(const k in own) out[k]=dedupNames([...(auto[k]||[]),...own[k]]); return out; }
+/* stesso nome da più fonti (foglio + orario pubblicato di un altro anno): si tiene una volta sola */
+function nameKey(v){ return String(v).replace(/^\(\s*\d\s*\)\s*/,"").trim().toLowerCase(); }
+function dedupNames(a){ const seen=new Set(); return a.filter(v=>{ const k=nameKey(v); if(!k||v===EXT_MAN) return true; if(seen.has(k)) return false; seen.add(k); return true; }); }
+function lowerOnly(mo,d,key){ const lw=LOWER(mo)[d+"|"+key]; if(!lw) return null; const ex=new Set((EXT(mo)[d+"|"+key]||[]).map(nameKey)); const r=lw.filter(v=>!ex.has(nameKey(v))); return r.length?r:null; }
 function syncRoles(){ if(!OWNER||!db||!S) return; const uidsOf=st=>[...new Set(((st&&st.managers)||[]).map(p=>CLAIMS[p]).filter(Boolean))].sort();
   const st2=yState(2); if(!st2) return; const doc={uids:uidsOf(st2)};
   if(MULTI){ for(const y of ALLY()){ if(y===2) continue; const st=yState(y); if(!st){ if(RAW[y]&&RAW[y].cfg===null) continue; return; } doc["y"+y]=uidsOf(st); } }
@@ -791,7 +795,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
        if(!arr){ const due=postActive(c.post)&&((c.post.on||{})[dayType(d)]||[]).includes(c.s), ex0=EXT(mo)[d+"|"+c.k];
          if(ex0) return `<td class="cell${selC(d,c.k)}" ${(due||UI.clsel)&&ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni"><span class="muted" style="font-size:.72rem;display:block">${ex0.map(esc).join("<br>")}</span></td>`;
          return due?`<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`}><span class="hole">scoperto</span></td>`:UI.clsel&&ADMIN()?`<td class="cell${selC(d,c.k)}" data-act="cell" data-d="${d}" data-k="${c.k}"><span class="muted">·</span></td>`:`<td class="cell none">·</td>`; }
-       const ex=EXT(mo)[d+"|"+c.k], lw=LOWER(mo)[d+"|"+c.k], exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${lw.map(esc).join("<br>")}</span>`:"");
+       const ex=EXT(mo)[d+"|"+c.k], lw=lowerOnly(mo,d,c.k), exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${lw.map(esc).join("<br>")}</span>`:"");
        if(!arr.length) return `<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
        return `<td class="cell${selC(d,c.k)} ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(ex||lw&&multiPost(c.post)||arr.some(v=>v)?"":`<span class="hole">scoperto</span>`)).join("")}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
   } else if(UI.view==="nome"){
@@ -1146,7 +1150,7 @@ function extHas(mo,d,key){ return !!EXT(mo)[d+"|"+key]; }
 const ROOM_MAX=3;
 function curYear(){ return yLab(S.groupYear||2); }
 function sameYearOk(y){ return y===2||y===3; }
-function othersIn(mo,d,key){ return (EXT(mo)[d+"|"+key]||[]).length+(LOWER(mo)[d+"|"+key]||[]).length; }
+function othersIn(mo,d,key){ return (EXT(mo)[d+"|"+key]||[]).length+(lowerOnly(mo,d,key)||[]).length; }
 function roomCovered(mo,d,key){ return extHas(mo,d,key)||(multiPost(postOf(key.split("|")[0]))&&!!LOWER(mo)[d+"|"+key]); }
 /* allinea l'orario già presente: i turni coperti da altri anni restano vuoti (non buchi), gli altri tornano da coprire */
 function syncExt(mo){ for(const sc of [mo.sched,hasDraft(mo)?mo.draft.sched:null]){ if(!sc) continue;
@@ -1304,7 +1308,7 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
   const btn=(r,i,cur,tag)=>{const y=why(r.id), isCur=cur===r.id;return `<button class="cand ${isCur?"cur":""}" data-act="assign" data-i="${i}" data-id="${r.id}"><span><span class="name-strong">${esc(rName(r))}</span>${tag?` <span class="muted" style="font-size:.78rem">· ${esc(rotName(mo.rot[r.id]))}</span>`:""}${y&&!isCur?`<br><span class="why">${y}</span>`:""}</span><span class="chip">${per[r.id].tot} turni · ${per[r.id].N} N</span></button>`;};
   sheet(`<div class="row" style="justify-content:space-between"><div><h2>${esc(post.name)} · ${SHN[s]}</h2><span class="muted">${fmt(d,true)} · ${esc(S.hours[s])}</span></div><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
    ${EXT(mo)[d+"|"+k]?`<p class="muted" style="margin:0;font-size:.84rem">Altri anni: ${EXT(mo)[d+"|"+k].map(esc).join(", ")}</p>`:""}
-   ${LOWER(mo)[d+"|"+k]?`<p class="muted" style="margin:0;font-size:.84rem;font-style:italic">Anni successivi: ${LOWER(mo)[d+"|"+k].map(esc).join(", ")}</p>`:""}
+   ${lowerOnly(mo,d,k)?`<p class="muted" style="margin:0;font-size:.84rem;font-style:italic">Anni successivi: ${lowerOnly(mo,d,k).map(esc).join(", ")}</p>`:""}
    ${[...arr,...(multiPost(post)&&arr.some(x=>x)?[undefined]:[])].map((cur,i)=>`<div class="stack" style="gap:6px"><span class="label">${cur===undefined?"Aggiungi un'altra persona":cur?`Ora: ${esc(resName(cur))}`:"Scoperto"}</span>
      ${cov!=="ALL"?`<span class="groupname">Rotazione ${esc(rotName(cov))}</span>`:`<span class="groupname">Tutti gli specializzandi</span>`}
      ${pri.map(r=>btn(r,i,cur,cov==="ALL")).join("")||`<p class="muted" style="margin:0">Nessuno in questa rotazione.</p>`}
