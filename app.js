@@ -24,8 +24,11 @@ let S=null, db=null, docRef=null, downloads=null, OWNER=false;
 /* gestori: specializzandi scelti dal proprietario che possono usare tutte le funzioni di gestione */
 /* modalità specializzando: un gestore (o il proprietario) può vedere l'app come uno specializzando; resta solo Impostazioni per tornare */
 let REALOWNER=false;
-function realAdmin(){ return REALOWNER||(!!S&&(S.managers||[]).includes(myPid())); }
-function ADMIN(){ if(UI.userMode) return false; return OWNER||(!!S&&(S.managers||[]).includes(myPid())); }
+/* i gestori di un anno gestiscono anche gli anni sotto: 4° → tutti, 3° → 1°–3°, … (coorte con numero ≥ di quella che si guarda) */
+function mgrCohort(){ const pid=myAnyPid(); if(!pid) return null; const y=MULTI?yearOfPid(pid):CURY; const st=y===CURY?S:yState(y); return st&&(st.managers||[]).includes(pid)?y:null; }
+function canMgr(y){ if(OWNER) return true; const A=mgrCohort(); return A!==null&&(A===y||(MULTI&&A>y)); }
+function realAdmin(){ return REALOWNER||(!!S&&(S.managers||[]).includes(myPid()))||(!!S&&MULTI&&(()=>{ const A=mgrCohort(); return A!==null&&A>CURY; })()); }
+function ADMIN(){ if(UI.userMode) return false; return OWNER||(!!S&&(S.managers||[]).includes(myPid()))||(!!S&&MULTI&&(()=>{ const A=mgrCohort(); return A!==null&&A>CURY; })()); }
 function setUserMode(on){ UI.userMode=!!on; OWNER=on?false:REALOWNER; try{ localStorage.setItem("turni.usermode",on?"1":""); }catch(e){} recomputeUnav(); }
 const SW={}, SWALL={}, CLAIMS={}; let CLAIMDOCS=[]; let ALLOW=[], lastRoles="", REQS=[];
 /* ---------- più anni (opzionale e reversibile) ----------
@@ -40,7 +43,7 @@ function yDocs(y){ return y===2?{cfg:"config/main",mon:"planner/state"}:{cfg:"co
 const PARSED={};
 /* anni che coprono ogni sala: elenco unico per tutti (config/years), lo modificano proprietario e gestori di qualsiasi anno.
    chiave = nome sala normalizzato; senza indicazione la sala è di tutti gli anni */
-let COVY={};
+let COVY={}, CLOSEDG={}; /* sale chiuse condivise tra tutti gli anni: mk → {giorno|sala|turno: true} (in config/years) */
 const COV_DEF={diagsen:[1],radsen1:[1],radsen2:[1],ecocolumbus:[1],eco:[1],rxtorace:[1],rxscheletro:[1],tccolumbus:[3],tccemi0:[1],sala8:[1]};
 function yearsFor(p){ const k=normRoom(p.name), v=COVY[k]; return Array.isArray(v)?v:(COV_DEF[k]||LEVELS); }
 /* gli anni dell'elenco sono gli anni di corso effettivi del mese (es. in ottobre il vostro gruppo è 1° anno) */
@@ -453,7 +456,7 @@ function rebalanceRooms(mk,onlyPids,onlyCover){ const days=period(mk).days, sch=
   for(const y of Ys){ const st=y===CURY?S:yState(y); if(!st) continue; const m=(st.months||{})[mk]; if(!m) continue; const src=(m.draft&&m.draft.sched)||m.sched; if(!src) continue;
     sch[y]=y===CURY?src:JSON.parse(JSON.stringify(src)); fixedOf[y]=m.fixed||{}; mon[y]=st; posts[y]={};
     (st.posts||[]).forEach(p=>{ posts[y][normRoom(p.name)]=p; }); }
-  const canMove=y=>y===CURY||(OWNER&&MULTI), yearOf=y=>(y===CURY?curYear():yLab(y));
+  const canMove=y=>y===CURY||(MULTI&&canMgr(y)), yearOf=y=>(y===CURY?curYear():yLab(y));
   const groups={}; S.posts.filter(p=>multiPost(p)&&(!onlyCover||p.cover===onlyCover||isJolly(onlyCover))).forEach(p=>{ (groups[p.cover]=groups[p.cover]||[]).push(normRoom(p.name)); });
   const sheetExt=MULTI?{}:(M(mk).ext||{});
   let moved=0; const changed=new Set();
@@ -507,6 +510,7 @@ function derive(mk,override){
   if(!SC) return {per,holes,issues,where};
   days.forEach((d,i)=>{const w=Math.floor(i/7),t=dayType(d);
     slotsOfDay(d).forEach(({post,s,key})=>{ const arr=(SC[d]||{})[key]||[null];
+      if(arr.some(x=>x)&&isClosed(mo,d,key)) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: sala chiusa ma con ${arr.filter(x=>x).map(resName).join(", ")}`);
       if(!arr.some(x=>x)&&!roomCovered(mo,d,key)&&!isClosed(mo,d,key)) holes.push({d,post:post.name,s});
       if(multiPost(post)){ const o=arr.filter(x=>x); if(o.length>1) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: ${o.length} dello stesso anno (${o.map(resName).join(", ")})${sameYearOk(curYear())?"":" — non previsto per questo anno"}`);
         if(o.length+othersIn(mo,d,key)>ROOM_MAX) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: ${o.length+othersIn(mo,d,key)} persone (massimo ${ROOM_MAX})`); }
@@ -785,8 +789,8 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
      ${p.days.map((d,i)=>{const t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
        if(isClosed(mo,d,c.k)&&!(arr||[]).some(x=>x)) return `<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Sala chiusa"><span class="muted" style="font-size:.75rem;font-weight:600">Chiusa</span></td>`;
        if(!arr){ const due=postActive(c.post)&&((c.post.on||{})[dayType(d)]||[]).includes(c.s), ex0=EXT(mo)[d+"|"+c.k];
-         if(ex0) return `<td class="cell${selC(d,c.k)}" ${due&&ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni"><span class="muted" style="font-size:.72rem;display:block">${ex0.map(esc).join("<br>")}</span></td>`;
-         return due?`<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`}><span class="hole">scoperto</span></td>`:`<td class="cell none">·</td>`; }
+         if(ex0) return `<td class="cell${selC(d,c.k)}" ${(due||UI.clsel)&&ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni"><span class="muted" style="font-size:.72rem;display:block">${ex0.map(esc).join("<br>")}</span></td>`;
+         return due?`<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`}><span class="hole">scoperto</span></td>`:UI.clsel&&ADMIN()?`<td class="cell${selC(d,c.k)}" data-act="cell" data-d="${d}" data-k="${c.k}"><span class="muted">·</span></td>`:`<td class="cell none">·</td>`; }
        const ex=EXT(mo)[d+"|"+c.k], lw=LOWER(mo)[d+"|"+c.k], exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${lw.map(esc).join("<br>")}</span>`:"");
        if(!arr.length) return `<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
        return `<td class="cell${selC(d,c.k)} ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(ex||lw&&multiPost(c.post)||arr.some(v=>v)?"":`<span class="hole">scoperto</span>`)).join("")}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
@@ -1130,7 +1134,9 @@ const FGROUPS=[["TC","TC"],["RM","RM"],["ANGIO","Angiografia"],["DEA","DEA"],["S
 function fgOf(p){ const k=normRoom(p.name); if(/^(diagsen|radsen)/.test(k)) return "SENO"; if(/^eco/.test(k)) return "ECO"; if(/^(rx|sala8)/.test(k)) return "RX";
   if(/^tc/.test(k)) return "TC"; if(/^rm/.test(k)) return "RM"; if(/^angio/.test(k)) return "ANGIO"; if(/^dea/.test(k)) return "DEA"; return p.cover; }
 /* sala chiusa (gestori, per giorno e turno): nessuno viene assegnato e non è un buco; vale per tutti gli anni (chiave con il nome normalizzato della sala) */
-function closedN(mk,d,rn,sh){ const k=d+"|"+rn+"|"+sh; for(const y of (MULTI?YRS(mk):[CURY])){ const st=y===CURY?S:yState(y), m=st&&st.months&&st.months[mk]; if(m&&m.closed&&m.closed[k]) return true; } return false; }
+function saveYearsDoc(){ const om=oldestMk(); const cl={}; for(const mk in CLOSEDG) if(mk>=om&&Object.keys(CLOSEDG[mk]).length) cl[mk]=CLOSEDG[mk]; CLOSEDG=cl;
+  return db.doc("config/years").set({state:JSON.stringify({coverage:COVY,closed:cl}),updated:new Date().toISOString()}); }
+function closedN(mk,d,rn,sh){ const k=d+"|"+rn+"|"+sh; if(CLOSEDG[mk]&&CLOSEDG[mk][k]) return true; for(const y of (MULTI?YRS(mk):[CURY])){ const st=y===CURY?S:yState(y), m=st&&st.months&&st.months[mk]; if(m&&m.closed&&m.closed[k]) return true; } return false; }
 function isClosed(mo,d,key){ const [pid,sh]=key.split("|"), p=postOf(pid); return !!p&&closedN(mo.mk,d,normRoom(p.name),sh); }
 function multiPost(p){ return !!p&&(p.cover==="TC"||p.cover==="RM"); }
 function extCovered(mo,d,key){ return !!EXT(mo)[d+"|"+key] && !multiPost(postOf(key.split("|")[0])) && !(mo.fixed||{})[d+"|"+key+"|0"]; }
@@ -1260,10 +1266,15 @@ function extPreview(name){ const wb=UI.extWb; if(!wb) return; const ws=wb.Sheets
 const layer=document.getElementById("layer");
 /* sale chiuse in blocco: si selezionano più caselle nella tabella "Per giorno" */
 function selC(d,k){ return UI.clsel&&UI.clsel.has(d+"|"+k)?" sel":""; }
-function applyClosed(mk,keys,close){ const mo=M(mk); mo.closed={...(mo.closed||{})}; const fx=mo.fixed=mo.fixed||{}; let n=0;
+/* chiude/riapre per tutti gli anni (config/years); per l'anno che si guarda aggiorna anche la bozza */
+function applyClosed(mk,keys,close){ const mo=M(mk), cg={...(CLOSEDG[mk]||{})}; const fx=mo.fixed=mo.fixed||{}; let n=0;
   for(const dk of keys){ const [d,id,sh]=dk.split("|"), post=postOf(id); if(!post) continue; const ck=d+"|"+normRoom(post.name)+"|"+sh, k=id+"|"+sh;
-    if(close){ if(mo.closed[ck]) continue; mo.closed[ck]=true; const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=[]; Object.keys(fx).filter(z=>z.startsWith(d+"|"+k+"|")).forEach(z=>delete fx[z]); n++; }
-    else if(mo.closed[ck]){ delete mo.closed[ck]; const W=ensureDraft(mo,d); W[d]=W[d]||{}; if(!W[d][k]||!W[d][k].length) W[d][k]=[null]; n++; } }
+    if(close){ if(isClosed(mo,d,k)) continue; cg[ck]=true; const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=[]; Object.keys(fx).filter(z=>z.startsWith(d+"|"+k+"|")).forEach(z=>delete fx[z]); n++; }
+    else if(isClosed(mo,d,k)){ delete cg[ck]; if(mo.closed&&mo.closed[ck]){ mo.closed={...mo.closed}; delete mo.closed[ck]; }
+      /* vecchie chiusure salvate in un altro anno (prima che fossero condivise) */
+      if(MULTI) for(const y of YRS(mk)){ if(y===CURY) continue; const st=yState(y), m=st&&st.months&&st.months[mk]; if(m&&m.closed&&m.closed[ck]&&db){ const months={...st.months,[mk]:{...m,closed:{...m.closed}}}; delete months[mk].closed[ck]; db.doc(yDocs(y).mon).set({state:JSON.stringify({months}),updated:new Date().toISOString()}).catch(()=>{}); } }
+      const W=ensureDraft(mo,d); W[d]=W[d]||{}; if(!W[d][k]||!W[d][k].length) W[d][k]=[null]; n++; } }
+  CLOSEDG={...CLOSEDG,[mk]:cg}; if(n&&db) saveYearsDoc().catch(()=>toast("Non riesco a salvare le sale chiuse: aggiorna le regole del database"));
   return n; }
 function sheet(html){layer.innerHTML=`<div class="scrim" data-act="close"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;}
 function closeSheet(){layer.innerHTML="";}
@@ -1465,7 +1476,7 @@ document.addEventListener("click",e=>{
   if(a==="covy"){ const k=el.dataset.k, y=+el.dataset.y; const cur=Array.isArray(COVY[k])?[...COVY[k]]:[...(COV_DEF[k]||LEVELS)];
     const i=cur.indexOf(y); if(i>=0) cur.splice(i,1); else cur.push(y); cur.sort();
     const next={...COVY,[k]:cur}; COVY=next; EXTC.key=null; render();
-    db.doc("config/years").set({state:JSON.stringify({coverage:next}),updated:new Date().toISOString()}).catch(()=>toast("Non riesco a salvare: le regole del database vanno aggiornate"));
+    saveYearsDoc().catch(()=>toast("Non riesco a salvare: le regole del database vanno aggiornate"));
     return; }
   if(a==="rflag"){ const r=resOf(el.dataset.id); if(!r) return; const f=el.dataset.f; r[f]=!canDo(r.id,f==="nights"?"N":"D"); persist(); render(); return; }
   if(a==="privsw"){ if(!ADMIN()) return; db.doc("config/privacy").set({hideUnav:HIDEUNAV,hideSwaps:!HIDESWAPS,updated:new Date().toISOString()}).then(()=>toast(!HIDESWAPS?"Cambi degli altri nascosti agli specializzandi":"Cambi di nuovo visibili a tutti")).catch(()=>toast("Non riesco a salvare: aggiorna le regole del database")); return; }
@@ -1482,13 +1493,10 @@ document.addEventListener("click",e=>{
       if(!multiPost(postOf(k.split("|")[0]))){ const fx=mo.fixed=mo.fixed||{}; Object.keys(fx).filter(z=>z.startsWith(kk+"|")).forEach(z=>delete fx[z]); const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=[]; } }
     else { const l=(mo.ext[kk]||[]).filter(x=>x!==EXT_MAN); if(l.length) mo.ext[kk]=l; else delete mo.ext[kk]; }
     syncExt(mo); persist(); closeSheet(); render(); return; }
-  if(a==="closeroom"){ const mo=M(UI.mk), d=layer.dataset.d, k=layer.dataset.k, [pid,sh]=k.split("|"), post=postOf(pid), rn=normRoom(post.name);
-    const shs=el.dataset.v==="2"?["M","P"].filter(x=>Object.values(post.on||{}).some(a=>(a||[]).includes(x))):[sh]; if(!shs.includes(sh)) shs.push(sh);
-    mo.closed={...(mo.closed||{})}; const W=ensureDraft(mo,d); W[d]=W[d]||{}; const fx=mo.fixed=mo.fixed||{};
-    if(el.dataset.v==="0"){ /* riapre (e se è stata chiusa da un altro anno lo dice) */ delete mo.closed[d+"|"+rn+"|"+sh]; if(!W[d][k]||!W[d][k].length) W[d][k]=[null];
-      if(isClosed(mo,d,k)) toast("La sala è stata chiusa da un altro anno: la riapre un gestore di quell'anno"); }
-    else shs.forEach(x=>{ const kk=pid+"|"+x; mo.closed[d+"|"+rn+"|"+x]=true; W[d][kk]=[]; Object.keys(fx).filter(z=>z.startsWith(d+"|"+kk+"|")).forEach(z=>delete fx[z]); });
-    persist(); closeSheet(); render(); toast(el.dataset.v==="0"?"Sala riaperta (nella bozza)":"Sala chiusa: nessuno assegnato (nella bozza, da accettare)"); return; }
+  if(a==="closeroom"){ const d=layer.dataset.d, k=layer.dataset.k, [pid,sh]=k.split("|"), post=postOf(pid);
+    const shs=el.dataset.v==="2"?["M","P"].filter(x=>((post.on||{})[dayType(d)]||[]).includes(x)):[sh]; if(!shs.includes(sh)) shs.push(sh);
+    const n=applyClosed(UI.mk,shs.map(x=>d+"|"+pid+"|"+x),el.dataset.v!=="0"); persist(); closeSheet(); render();
+    toast(el.dataset.v==="0"?"Sala riaperta per tutti gli anni (nella bozza)":"Sala chiusa per tutti gli anni: nessuno assegnato (nella bozza, da accettare)"); return; }
   if(a==="chseen"){ const {pid,list}=myChanges(); const last=list.reduce((m,c)=>c.at>m?c.at:m,""); try{ localStorage.setItem("turni.chseen."+pid,last); }catch(e){} render(); return; }
   if(a==="forcerot"){ UI.forceRot=layer.dataset.d+"|"+layer.dataset.k; cellSheet(layer.dataset.d,layer.dataset.k); return; }
   if(a==="filt"){ UI.filt=el.dataset.v; render(); return; }
@@ -1665,12 +1673,12 @@ render();
     const checkMulti=()=>{ const st2=yState(2); const on=!!(st2&&st2.multiYear); if(on===MULTI) return; MULTI=on; EXTC.key=null;
       if(MULTI){ ALLY().forEach(watchYear); ensureCohorts(); } else if(CURY!==2) switchYear(2); watchCov(); filterSW(); };
     let covSub=false;
-    const watchCov=()=>{ if(covSub) return; covSub=true; db.doc("config/years").onSnapshot(sn=>{ let c={}; try{ c=(JSON.parse((sn.exists&&sn.data().state)||"{}").coverage)||{}; }catch(e){}
-      COVY=c; RAWV++; EXTC.key=null;
+    const watchCov=()=>{ if(covSub) return; covSub=true; db.doc("config/years").onSnapshot(sn=>{ let c={}, cl={}; try{ const o=JSON.parse((sn.exists&&sn.data().state)||"{}"); c=o.coverage||{}; cl=o.closed||{}; }catch(e){}
+      COVY=c; CLOSEDG=cl; RAWV++; EXTC.key=null;
       /* sale nuove: di base solo al 1° anno (TC Columbus al 3°), finché tu o un gestore non le cambiate */
       const DEF=COV_DEF;
       const miss=Object.keys(DEF).filter(k=>!Array.isArray(COVY[k]));
-      if(miss.length&&(OWNER||ADMIN())){ const next={...COVY}; miss.forEach(k=>next[k]=DEF[k]); COVY=next; db.doc("config/years").set({state:JSON.stringify({coverage:next}),updated:new Date().toISOString()}).catch(()=>{}); }
+      if(miss.length&&(OWNER||ADMIN())){ const next={...COVY}; miss.forEach(k=>next[k]=DEF[k]); COVY=next; saveYearsDoc().catch(()=>{}); }
       if(S&&!layer.innerHTML) render(); },()=>{}); };
     watchYear(2); watchCov();
     db.collection("swaps").limit(1000).onSnapshot(qs=>{ for(const k in SWALL) delete SWALL[k];
