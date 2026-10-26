@@ -335,7 +335,14 @@ function viewSched(mk){ const mo=M(mk); return draftView(mo)?clone(mo.draft.sche
 function histAdd(mk,kind,sched){ if(!db||!sched) return; const by=myPid()?resName(myPid()):(OWNER?"proprietario":"");
   db.collection(`hist/y${CURY}_${mk}/v`).doc().set({mk,kind,by,at:new Date().toISOString(),state:JSON.stringify(sched)}).catch(()=>{}); }
 function acceptDraft(mk,weeks){ const mo=M(mk); if(!hasDraft(mo)) return 0; const p=period(mk), n=p.days.length/7; mo.sched=mo.sched||{};
-  for(const w of weeks) p.days.slice(w*7,w*7+7).forEach(d=>{ if(mo.draft.sched[d]) mo.sched[d]=clone(mo.draft.sched[d]); });
+  const at0=new Date().toISOString(), chg=[];
+  for(const w of weeks) p.days.slice(w*7,w*7+7).forEach(d=>{ if(!mo.draft.sched[d]) return;
+    /* modifiche all'orario già pubblicato: si segnalano alle persone coinvolte (Cambi → "Modifiche al tuo orario") */
+    if(mo.generated&&mo.sched[d]){ const keysOf=(sc,pid)=>Object.keys(sc||{}).filter(k=>(sc[k]||[]).includes(pid)).sort(), ids=new Set();
+      [mo.sched[d],mo.draft.sched[d]].forEach(sc=>{ for(const k in sc) (sc[k]||[]).forEach(x=>x&&ids.add(x)); });
+      ids.forEach(pid=>{ const a=keysOf(mo.sched[d],pid), b=keysOf(mo.draft.sched[d],pid); if(a.join()!==b.join()) chg.push({at:at0,pid,d,from:a,to:b}); }); }
+    mo.sched[d]=clone(mo.draft.sched[d]); });
+  if(chg.length) mo.changes=[...(mo.changes||[]),...chg].slice(-300);
   mo.draft.acc={...(mo.draft.acc||{})}; weeks.forEach(w=>mo.draft.acc[w]=true); mo.generated=new Date().toISOString();
   const all=Array.from({length:n},(_,w)=>w).every(w=>mo.draft.acc[w]);
   histAdd(mk,weeks.length===n?"Accettata (tutto il mese)":`Accettata: ${weeks.map(w=>"settimana "+(w+1)).join(", ")}`,mo.draft.sched);
@@ -624,6 +631,7 @@ function render(){
   if(!ADMIN()&&(UI.tab==="mese"||(UI.tab==="imp"&&!UI.userMode))) UI.tab="turni";
   document.querySelectorAll("#tabs button").forEach(b=>{b.setAttribute("aria-selected",b.dataset.tab===UI.tab); b.hidden=!ADMIN()&&(b.dataset.tab==="mese"||(b.dataset.tab==="imp"&&!UI.userMode));});
   if(!S){app.innerHTML=`<div class="empty">Caricamento dati…</div>`;return;}
+  { const cb=document.querySelector('#tabs [data-tab="cambi"]'); if(cb){ let n=0; try{ n=new Set(myChanges().list.map(c=>c.d)).size; }catch(e){} cb.textContent=n?`Cambi (${n})`:"Cambi"; } }
   const yLoaded=!MULTI||ALLY().every(y=>yState(y)||(RAW[y]&&RAW[y].cfg===null));
   const needLink=db&&MYUID&&yLoaded&&(MULTI||S.residents.length)&&!myAnyPid();
   if(needLink&&!OWNER){ app.innerHTML=`<section class="view">${claimPanel("")}</section>`; return; }
@@ -870,9 +878,24 @@ function vImp2(){
 }
 
 
+/* modifiche al proprio orario fatte dai gestori (accettando una bozza): finché non si tocca "Ho visto" */
+function myChanges(){ const pid=myAnyPid(); if(!pid) return {pid,list:[]}; const st=S.residents.some(r=>r.id===pid)?S:yState(yearOfPid(pid)); if(!st) return {pid,list:[]};
+  let seen=""; try{ seen=localStorage.getItem("turni.chseen."+pid)||""; }catch(e){}
+  const list=[]; for(const mk in (st.months||{})) ((st.months[mk]||{}).changes||[]).forEach(c=>{ if(c.pid===pid&&c.at>seen) list.push(c); });
+  list.sort((a,b)=>a.d.localeCompare(b.d)||a.at.localeCompare(b.at)); return {pid,list,st}; }
+function changesPanel(){ const {list,st}=myChanges(); if(!list.length) return "";
+  const nm=k=>{ const [pid,sh]=k.split("|"), post=(st.posts||[]).find(x=>x.id===pid); return sh==="N"?"Notte":sh==="D"?"Guardia":`${esc(post?post.name:pid)} ${SHN[sh]}`; };
+  const desc=ks=>ks.length?ks.map(nm).join(" + "):"Libero";
+  /* per ogni giorno l'ultima modifica, confrontata con lo stato di partenza */
+  const by={}; list.forEach(c=>{ if(!by[c.d]) by[c.d]={from:c.from,to:c.to}; else by[c.d].to=c.to; });
+  const rows=Object.keys(by).sort().filter(d=>by[d].from.join()!==by[d].to.join());
+  if(!rows.length) return "";
+  return `<div class="panel" style="border:2px solid var(--accent)"><h2>Modifiche al tuo orario</h2><p class="muted" style="margin:0;font-size:.85rem">I gestori hanno aggiornato l'orario pubblicato:</p>
+    <ul style="margin:0;padding-left:18px">${rows.map(d=>`<li><strong>${fmt(d,true)}</strong>: ${desc(by[d].from)} → <strong>${desc(by[d].to)}</strong></li>`).join("")}</ul>
+    <div class="row"><button class="btn" data-act="chseen">Ho visto</button></div></div>`; }
 function vCambi(){ if(!S.residents.length) return monthBar()+noRes();
   const mk=UI.mk, mo=M(mk), SC=effSched(mk), me=myPid(), all=swapsOf(mk);
-  let h=monthBar();
+  let h=monthBar()+changesPanel();
   if(!MYUID){
     h+=`<div class="panel"><h2>Cambi turno</h2><p class="muted" style="margin:0">Per chiedere o accettare un cambio accedi con la tua email.</p></div>`;
   } else if(!me){
@@ -1461,6 +1484,7 @@ document.addEventListener("click",e=>{
       if(isClosed(mo,d,k)) toast("La sala è stata chiusa da un altro anno: la riapre un gestore di quell'anno"); }
     else shs.forEach(x=>{ const kk=pid+"|"+x; mo.closed[d+"|"+rn+"|"+x]=true; W[d][kk]=[]; Object.keys(fx).filter(z=>z.startsWith(d+"|"+kk+"|")).forEach(z=>delete fx[z]); });
     persist(); closeSheet(); render(); toast(el.dataset.v==="0"?"Sala riaperta (nella bozza)":"Sala chiusa: nessuno assegnato (nella bozza, da accettare)"); return; }
+  if(a==="chseen"){ const {pid,list}=myChanges(); const last=list.reduce((m,c)=>c.at>m?c.at:m,""); try{ localStorage.setItem("turni.chseen."+pid,last); }catch(e){} render(); return; }
   if(a==="filt"){ UI.filt=el.dataset.v; render(); return; }
   if(a==="dview"){ UI.draftView=el.dataset.v==="1"; render(); return; }
   if(a==="accall"){ if(UI.confirm!=="accall"){UI.confirm="accall";render();return;} UI.confirm=null; const n=period(UI.mk).days.length/7, acc=(M(UI.mk).draft||{}).acc||{};
