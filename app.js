@@ -23,7 +23,7 @@ const DEFAULT={
 let S=null, db=null, docRef=null, downloads=null, OWNER=false;
 /* gestori: specializzandi scelti dal proprietario che possono usare tutte le funzioni di gestione */
 function ADMIN(){ return OWNER||(!!S&&(S.managers||[]).includes(myPid())); }
-const SW={}, SWALL={}, CLAIMS={}; let ALLOW=[], lastRoles="", REQS=[];
+const SW={}, SWALL={}, CLAIMS={}; let CLAIMDOCS=[]; let ALLOW=[], lastRoles="", REQS=[];
 /* ---------- più anni (opzionale e reversibile) ----------
    l'anno 2 usa i documenti di sempre (config/main, planner/state); gli altri config/yN e planner/yN.
    Si attiva con S.multiYear nel config dell'anno 2: spento, l'app è identica a prima. */
@@ -176,7 +176,9 @@ function linkPanel(){ const groups=MULTI?YEARS.map(y=>[y,((yState(y)||{}).reside
      return `<button data-act="claim" data-id="${r.id}" ${taken?"disabled":""} ${conf?'style="background:var(--accent);color:var(--accent-ink);border-color:var(--accent)"':""}>${conf?"Confermo: sono "+esc(gy?`(${r.year||gy}) ${r.name}`:rName(r)):esc(gy?`(${r.year||gy}) ${r.name}`:rName(r))}${taken?' <span class="cnt">già associato</span>':""}</button>`;}).join("")}</div>`).join("")}
    ${anyFree?"":`<p class="muted" style="margin:0">Tutti i nomi sono già associati: se il tuo è stato preso per errore, avvisa chi gestisce il tool.</p>`}</div>`; }
 /* un account = una sola persona: se è già associato (anche in un altro anno) non si sceglie più */
-function claimPanel(why){ const pid=myAnyPid(); if(!pid) return linkPanel(); const y=MULTI?yearOfPid(pid):null;
+function claimPanel(why){ const pid=myAnyPid(); const mine=CLAIMDOCS.find(x=>x.u===MYUID);
+  if(!pid&&mine&&!OWNER) return `<div class="panel" style="border:2px solid var(--bad)"><h2>Associazione da sistemare</h2><p style="margin:0;font-size:.9rem">Il tuo account risulta già associato a un nome (${esc(rNameAny(mine.pid))}) che appartiene a un altro collega o non esiste più. Chiedi al proprietario di scollegarti: poi potrai scegliere il tuo nome.</p></div>`;
+  if(!pid) return linkPanel(); const y=MULTI?yearOfPid(pid):null;
   return `<div class="panel"><p style="margin:0;font-size:.9rem">Il tuo account è associato a <strong>${esc(rNameAny(pid))}</strong>${y&&y!==CURY?` del ${y}° anno: qui puoi solo guardare. Per le tue indisponibilità e i tuoi cambi scegli in alto il ${y}° anno.`:"."}</p>${y&&y!==CURY?`<div class="row"><button class="btn primary" data-act="year" data-v="${y}">Vai al ${y}° anno</button></div>`:""}</div>`; }
 function rNameAny(pid){ for(const y of YEARS){ const st=yState(y); const r=st&&(st.residents||[]).find(x=>x.id===pid); if(r) return `(${r.year||st.groupYear||y}) ${r.name}`; } return resName(pid); }
 function claimPanelOld(why){ return `<div class="panel"><h2>Chi sei?</h2><p class="muted" style="margin:0;font-size:.88rem">${why}</p>
@@ -563,7 +565,7 @@ function render(){
   if(!S){app.innerHTML=`<div class="empty">Caricamento dati…</div>`;return;}
   const yLoaded=!MULTI||YEARS.every(y=>yState(y)||(RAW[y]&&RAW[y].cfg===null));
   const needLink=db&&MYUID&&yLoaded&&(MULTI||S.residents.length)&&!myAnyPid();
-  if(needLink&&!OWNER){ app.innerHTML=`<section class="view">${linkPanel()}</section>`; return; }
+  if(needLink&&!OWNER){ app.innerHTML=`<section class="view">${claimPanel("")}</section>`; return; }
   app.innerHTML=`<section class="view">${yearBar()}${needLink?linkPanel():""}${({mese:vMese,indisp:vIndisp,turni:vTurni,cambi:vCambi,imp:vImp}[UI.tab]||vMese)()}</section>`;
 }
 /* mese il cui periodo (primo lunedì → ultima domenica) contiene la data di oggi */
@@ -807,7 +809,9 @@ function vCambi(){ if(!S.residents.length) return monthBar()+noRes();
   const done=all.filter(x=>x.status!=="pending").reverse();
   h+=`<div class="panel"><h2>Storico cambi di ${monthName(mk)}</h2>${done.length?`<div class="stack" style="gap:8px">${done.map(x=>swCard(x,false,false,ADMIN()&&(x.status!=="accepted"||x.applied))).join("")}</div>`:`<p class="muted" style="margin:0">Nessun cambio per ora.</p>`}</div>`;
   return h; }
-function linkedPanel(){ let h=""; if(OWNER){ const linked=S.residents.filter(r=>CLAIMS[r.id]);
+function linkedPanel(){ let h=""; if(OWNER){ const bad=CLAIMDOCS.filter(x=>CLAIMS[x.pid]!==x.u||!(MULTI?yearOfPid(x.pid):S.residents.some(r=>r.id===x.pid)));
+    if(bad.length) h+=`<div class="panel" style="border:2px solid var(--bad)"><h2>Associazioni da sistemare</h2><p class="muted" style="margin:0;font-size:.85rem">Account associati a un nome già preso da un altro account o a un nome che non esiste più. Scollegali: potranno scegliere di nuovo il proprio nome.</p>
+      <div class="list">${bad.map(x=>`<div class="item"><span class="stack" style="gap:2px"><span class="name-strong">${esc(x.email||("account "+x.u.slice(0,6)+"…"))}</span><span class="muted" style="font-size:.8rem">scelto: ${esc(rNameAny(x.pid))}${CLAIMS[x.pid]&&CLAIMS[x.pid]!==x.u?" · già preso da un altro account":" · nome inesistente"}</span></span><button class="btn danger ${UI.confirm==="unlu-"+x.u?"confirm":""}" data-act="unlinku" data-u="${x.u}">${UI.confirm==="unlu-"+x.u?"Conferma":"Scollega"}</button></div>`).join("")}</div></div>`; const linked=S.residents.filter(r=>CLAIMS[r.id]);
     h+=`<div class="panel"><h2>Account collegati</h2><p class="muted" style="margin:0;font-size:.85rem">${linked.length} su ${S.residents.length}. Se qualcuno ha toccato il nome sbagliato, scollegalo.</p>${linked.length?`<div class="list">${linked.map(r=>`<div class="item"><span class="name-strong">${esc(rName(r))}</span><button class="btn danger ${UI.confirm==="unl-"+r.id?"confirm":""}" data-act="unlink" data-id="${r.id}">${UI.confirm==="unl-"+r.id?"Conferma":"Scollega"}</button></div>`).join("")}</div>`:""}</div>`; } return h; }
 function warnBox(w,me,other){ return `<div class="alerts"><strong>Il cambio forza queste regole</strong><ul>${w.from.map(t=>`<li><strong>per te</strong>: ${t}</li>`).join("")}${w.to.map(t=>`<li><strong>per ${esc(resName(other))}</strong>: ${t}</li>`).join("")}</ul><span style="font-size:.85rem">${esc(resName(other))} vedrà questo avviso e dovrà confermarlo.</span></div>`; }
 /* cambio inserito direttamente da un gestore: niente richiesta, si applica subito e finisce nello storico e nei cambi da inserire */
@@ -1101,8 +1105,10 @@ document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]"); if(!el) return;
   let a=el.dataset.act;
   if(a==="close"){ if(e.target===el||el.tagName==="BUTTON"){closeSheet();render();} return; }
-  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","clrext","refresh","refrot","years","accall","accw","drop","hopen","unlink","swdel","mswgo"].includes(a)) UI.confirm=null;
-  if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(Object.values(CLAIMS).includes(MYUID)){ toast(OWNER?"Il tuo account è già associato a un nome: per cambiarlo prima scollegalo in Impostazioni → Account collegati":"Il tuo account è già associato a un nome: solo il proprietario può cambiarlo"); return; } if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString()}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} const y=MULTI?yearOfPid(pid):null; if(y&&y!==CURY) switchYear(y); UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
+  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","clrext","refresh","refrot","years","accall","accw","drop","hopen","unlink","unlinku","swdel","mswgo"].includes(a)) UI.confirm=null;
+  if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(Object.values(CLAIMS).includes(MYUID)||CLAIMDOCS.some(x=>x.u===MYUID)){ toast(OWNER?"Il tuo account è già associato a un nome: per cambiarlo prima scollegalo in Impostazioni → Account collegati":"Il tuo account è già associato a un nome: solo il proprietario può cambiarlo"); return; } if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString(),email:(USER&&USER.email&&USER.email())||""}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} const y=MULTI?yearOfPid(pid):null; if(y&&y!==CURY) switchYear(y); UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
+  if(a==="unlinku"){ const u=el.dataset.u; if(UI.confirm!=="unlu-"+u){UI.confirm="unlu-"+u;render();return;} UI.confirm=null;
+    db.doc("claims/"+u).delete().then(()=>{ toast("Account scollegato: ora può scegliere il suo nome"); render(); }).catch(()=>toast("Non riesco a scollegare")); return; }
   if(a==="unlink"){ const pid=el.dataset.id; if(UI.confirm!=="unl-"+pid){UI.confirm="unl-"+pid;render();return;} UI.confirm=null; const u=CLAIMS[pid]; if(!u) return; db.doc("claims/"+u).delete().then(()=>{delete CLAIMS[pid];render();}).catch(()=>toast("Non riesco a scollegare")); return; }
   if(a==="swsend"){ const F=UI.sw||{}, me=myPid(); if(!F.a||!F.to||!me) return; const [ad,ak]=F.a.split("#");
     const x={id:uid()+uid(),mk:UI.mk,from:me,to:F.to,a:{d:ad,k:ak},b:F.b?{d:F.b.split("#")[0],k:F.b.split("#")[1]}:null,extra:(UI.swExtra||[]).map(e=>({d:e.d,k:e.k,giver:e.giver,taker:e.taker})),status:"pending",created:new Date().toISOString()};
@@ -1337,7 +1343,7 @@ render();
     /* claims/<account> = {pid}: ognuno può scrivere solo il proprio; se due account scelgono lo stesso nome vale il primo */
     db.collection("claims").limit(500).onSnapshot(qs=>{ for(const k in CLAIMS) delete CLAIMS[k];
       const list=qs.docs.map(doc=>({u:doc.id,...(doc.data()||{})})).filter(x=>x.pid).sort((a,b)=>(a.at||"").localeCompare(b.at||""));
-      for(const x of list) if(!CLAIMS[x.pid]) CLAIMS[x.pid]=x.u;
+      for(const x of list) if(!CLAIMS[x.pid]) CLAIMS[x.pid]=x.u; CLAIMDOCS=list;
       syncSubs(list.map(x=>x.u)); recomputeUnav(); syncRoles(); autoYear(); if(S&&!layer.innerHTML) render(); }, ()=>{});
     syncSubs([]);
     if(OWNER) db.collection("accessRequests").limit(200).onSnapshot(qs=>{ REQS=qs.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.email).sort((a,b)=>(a.at||"").localeCompare(b.at||"")); 
