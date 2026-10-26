@@ -739,8 +739,10 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   if(UI.view==="giorni"){
     /* filtro per metodica: sale della rotazione (solo mattina/pomeriggio) oppure notti e guardie */
     const myY=ADMIN()?null:yLab((MULTI&&myAnyPid()&&yearOfPid(myAnyPid()))||CURY);
-    const cols0=columns(SC,p).filter(c=>myY===null||yearsFor(c.post).includes(myY)), fgs=FGROUPS.filter(([id])=>cols0.some(c=>(c.s==="M"||c.s==="P")&&fgOf(c.post)===id));
-    const F=fgs.some(([id])=>id===UI.filt)||UI.filt==="NG"?UI.filt:"", cols=cols0.filter(c=>!F||(F==="NG"?(c.s==="N"||c.s==="D"):(fgOf(c.post)===F&&(c.s==="M"||c.s==="P")))), used=S.posts.filter(x=>cols.some(c=>c.post===x));
+    const cols0=columns(SC,p).filter(c=>myY===null||yearsFor(c.post).includes(myY)), fgs=FGROUPS.filter(([id])=>S.posts.some(x=>fgOf(x)===id));
+    /* filtri per metodica visibili a tutti: con un filtro si vedono tutte le sale della metodica, anche di altri anni */
+    const F=fgs.some(([id])=>id===UI.filt)||UI.filt==="NG"?UI.filt:"";
+    const cols=!F?cols0:F==="NG"?cols0.filter(c=>c.s==="N"||c.s==="D"):S.posts.filter(x=>fgOf(x)===F).flatMap(post=>["M","P"].filter(s=>Object.values(post.on||{}).some(a=>(a||[]).includes(s))).map(s=>({post,s,k:post.id+"|"+s}))), used=S.posts.filter(x=>cols.some(c=>c.post===x));
     body=`<div class="pickers sm" style="margin-bottom:6px"><button data-act="filt" data-v="" aria-pressed="${!F}">Tutte</button>${fgs.map(([id,name])=>`<button data-act="filt" data-v="${id}" aria-pressed="${F===id}">${esc(name)}</button>`).join("")}<button data-act="filt" data-v="NG" aria-pressed="${F==="NG"}">Notti e guardie</button></div>`;
     body+=`<div class="scroll"><table class="grid"><thead><tr><th class="sticky" rowspan="2">Giorno</th>${used.map(x=>`<th class="roomh" colspan="${cols.filter(c=>c.post===x).length}">${esc(x.name)}</th>`).join("")}</tr>
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
