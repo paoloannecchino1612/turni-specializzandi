@@ -1407,11 +1407,14 @@ function sheetAlign(mk){ TICK++; if(!ADMIN()||!S) return 0; const mo=M(mk), sh=s
   for(const ak in sh.all){ const [d,rk,s]=ak.split("|"), p=s==="N"?night:by[rk]; if(!p) continue;
     sh.all[ak].forEach(v=>{ const id=ourId[v.replace(/^\(\s*\d\s*\)\s*/,"").trim().toLowerCase()]; if(id){ own++; const k=d+"|"+p.id+"|"+s; (ownMap[k]=ownMap[k]||[]).includes(id)||ownMap[k].push(id); } }); }
   const seen=new Set((sh.rooms||[]).map(x=>{ if(x==="N") return "N"; const [rk,s]=x.split("|"), p=by[rk]; return p?p.id+"|"+s:null; }).filter(Boolean));
-  mo.sheetAt=sh.at; return alignOwn(mo,{own,ownMap,seen,colDays:sh.days||[]}); }
+  const rst=mo.extReset||{}; mo.sheetAt=sh.at; return alignOwn(mo,{own,ownMap,seen,colDays:(sh.days||[]).filter(d=>!(rst[d]&&rst[d]>=sh.at))}); }
 /* aggiornamento automatico dal link salvato del foglio "BOZZA ORARI": quando un rappresentante apre l'app, al massimo ogni 3 ore,
    per il mese corrente e i successivi visibili. Aggiorna solo i turni coperti da altri anni (mattina/pomeriggio dal foglio;
    notti e guardie solo se il foglio le riporta); restano quelli segnati a mano. Poi si usa "Aggiorna l'orario". */
 /* allinea la bozza ai nostri specializzandi come risultano nel foglio (sale/turni presenti nel foglio); restituisce quante caselle cambia */
+/* giorni azzerati con «Azzera tutto»: l'aggiornamento automatico dal foglio non li riempie più (solo un nuovo import a mano li riprende) */
+function skipReset(mo,res){ const rst=mo.extReset||{}; if(!Object.keys(rst).length) return res; const ok=k=>!rst[k.split("|")[0]], f=o=>Object.fromEntries(Object.entries(o||{}).filter(([k])=>ok(k)));
+  const ownMap=f(res.ownMap); return {...res,map:f(res.map),all:f(res.all),ownMap,own:Object.values(ownMap).reduce((a,v)=>a+v.length,0),colDays:(res.colDays||[]).filter(d=>!rst[d])}; }
 function alignOwn(mo,res){ let moved=0; TICK++;
   const base=(hasDraft(mo)?mo.draft.sched:mo.sched)||{};
     if(res.own>0){ const nightKey=S.posts.find(x=>Object.values(x.on||{}).some(a=>(a||[]).includes("N")));
@@ -1434,7 +1437,7 @@ async function autoSyncSheet(){ if(AUTOSYNC||!db||!S||!ADMIN()||!S.extSheetUrl||
         const wb=XLSX.read(txt,{type:"string",raw:true}), rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:""}), p=parseExt(rows,mk);
         if(p.cols>=7&&!p.bad){ res=p; break; } }catch(e){} }
     if(!res) continue; months++;
-    const mo=M(mk), old=mo.ext||{}, next={};
+    const mo=M(mk); res=skipReset(mo,res); const old=mo.ext||{}, next={};
     for(const kk in old){ const sh=kk.split("|")[2]; if(old[kk].includes(EXT_MAN)) next[kk]=[EXT_MAN]; if((sh==="N"||sh==="D")&&!res.map[kk]) next[kk]=[...(next[kk]||[]),...old[kk].filter(x=>x!==EXT_MAN)]; }
     for(const kk in res.map) next[kk]=[...res.map[kk],...((next[kk]||[]).filter(x=>x===EXT_MAN))];
     const all=new Set([...Object.keys(old),...Object.keys(next)]); let ch=0; all.forEach(kk=>{ if(JSON.stringify(old[kk]||[])!==JSON.stringify(next[kk]||[])) ch++; });
@@ -1802,7 +1805,7 @@ document.addEventListener("click",e=>{
       const box=document.getElementById("extErr"); if(box) box.textContent="Non riesco a leggere il foglio ("+err.message+"). Controlla che sia condiviso come «Chiunque abbia il link può visualizzare», oppure scaricalo in Excel e usa «da file»."; });
     return; }
   if(a==="extsave"){ const mo=M(UI.mk), r=UI.extRes; if(!r) return; const man={}; for(const k in (mo.ext||{})) if((mo.ext[k]||[]).includes(EXT_MAN)) man[k]=[EXT_MAN];
-    mo.ext={...r.map}; for(const k in man) mo.ext[k]=[...(mo.ext[k]||[]),EXT_MAN]; sheetSave(mo,r); SEXC.key=null; syncExt(mo); const mv=alignOwn(mo,r); UI.extRes=null; UI.extWb=null; persist(); closeSheet(); render();
+    mo.ext={...r.map}; for(const k in man) mo.ext[k]=[...(mo.ext[k]||[]),EXT_MAN]; if(mo.extReset){ mo.extReset={...mo.extReset}; (r.colDays||[]).forEach(d=>delete mo.extReset[d]); } sheetSave(mo,r); SEXC.key=null; syncExt(mo); const mv=alignOwn(mo,r); UI.extRes=null; UI.extWb=null; persist(); closeSheet(); render();
     toast(`${Object.keys(r.map).length} turni coperti da altri anni salvati`+(mv?`; ${mv} turni dei nostri aggiornati nella bozza come nel foglio (da accettare)`:"")+((mo.generated||hasDraft(mo))?". Usa «Aggiorna l'orario» per ridistribuire":"")); return; }
   if(a==="clrone"||a==="clrall"||a==="clrsched"){ if(UI.confirm!==a){UI.confirm=a;render();return;} UI.confirm=null;
     if(a==="clrsched"){ const mo=M(UI.mk); mo.sched=null; mo.generated=null; mo.fixed={}; delete mo.draft; toast("Turni e bozza eliminati"); }
