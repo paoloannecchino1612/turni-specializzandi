@@ -850,7 +850,10 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
       <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" data-act="nightlink">Notti e guardie programmate da link</button><label class="btn">Notti e guardie da file<input type="file" id="nightfile" accept=".xlsx,.xls,.csv" hidden></label></div>
       <div class="row" style="gap:8px;flex-wrap:wrap">${(mo.sched||hasDraft(mo))?`<button class="btn" data-act="xlsx">Scarica Excel</button><button class="btn" data-act="xbozza">Excel formato BOZZA ORARI</button>`:""}<button class="btn" data-act="manualstart">Inserisci turni a mano</button><button class="btn" data-act="hist">Storico bozze</button></div>
       ${histBox(UI.mk)}
-      ${(mo.sched||hasDraft(mo))?`<div class="row">${clrBtn("clrsched","Elimina tutti i turni del mese")}</div>`:""}</div>`:""}`:"";
+      ${(mo.sched||hasDraft(mo))?`<div class="stack" style="gap:6px;border-top:1px solid var(--line);padding-top:10px"><span class="label">Azzera i turni</span>
+        <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><select id="rstWk" data-rstwk="1"><option value="">Tutto il mese</option>${Array.from({length:nW},(_,w)=>`<option value="${w}" ${String(UI.rstWk??"")===String(w)?"selected":""}>Settimana ${w+1}: ${fmt(p.days[w*7])} – ${fmt(p.days[w*7+6])}</option>`).join("")}</select>
+         <button class="btn danger ${UI.confirm==="reset"?"confirm":""}" data-act="reset">${UI.confirm==="reset"?"Tocca di nuovo: azzera":"Azzera"}</button></div>
+        <p class="muted" style="margin:0;font-size:.8rem">Svuota tutte le caselle (anche i turni fissi inseriti a mano) del periodo scelto. Va nella bozza: l'orario pubblicato cambia solo quando premi «Pubblica»; con «Annulla» torni indietro.</p></div>`:""}</div>`:""}`:"";
   const pubBar=ADMIN()&&hasDraft(mo)?`<div style="height:84px"></div><div class="pubbar"><span class="name-strong">Bozza non pubblicata${(()=>{ const c=draftChanges(mo,true); return c?` · ${c.size} ${mo.sched?"caselle cambiate":"caselle nuove"}`:""; })()}</span>
       <button class="btn ${UI.confirm==="accall"?"confirm":"primary"}" data-act="accall">${UI.confirm==="accall"?"Tocca di nuovo: pubblica":"Pubblica"}</button>
       ${clrBtn("drop","Annulla")}
@@ -1552,7 +1555,7 @@ document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]"); if(!el) return;
   let a=el.dataset.act;
   if(a==="close"){ if(e.target===el||el.tagName==="BUTTON"){closeSheet();render();} return; }
-  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","clrext","refresh","refrot","years","accall","accw","drop","hopen","hdel","unlink","unlinku","swdel","mswgo"].includes(a)) UI.confirm=null;
+  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","reset","clrext","refresh","refrot","years","accall","accw","drop","hopen","hdel","unlink","unlinku","swdel","mswgo"].includes(a)) UI.confirm=null;
   if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(Object.values(CLAIMS).includes(MYUID)||CLAIMDOCS.some(x=>x.u===MYUID)){ toast(OWNER?"Il tuo account è già associato a un nome: per cambiarlo prima scollegalo in Impostazioni → Account collegati":"Il tuo account è già associato a un nome: solo il proprietario può cambiarlo"); return; } if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString(),email:(USER&&USER.email&&USER.email())||""}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} const y=MULTI?yearOfPid(pid):null; if(y&&y!==CURY) switchYear(y); UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
   if(a==="unlinku"){ const u=el.dataset.u; if(UI.confirm!=="unlu-"+u){UI.confirm="unlu-"+u;render();return;} UI.confirm=null;
     db.doc("claims/"+u).delete().then(()=>{ toast("Account scollegato: ora può scegliere il suo nome"); render(); }).catch(()=>toast("Non riesco a scollegare")); return; }
@@ -1733,6 +1736,14 @@ document.addEventListener("click",e=>{
       Object.keys(fx).filter(z=>z.startsWith(pre)).forEach(z=>delete fx[z]); pins.forEach((x,j)=>{ if(x) fx[pre+j]=x; }); }
     else { arr[i]=null; delete fx[pre+i]; }
     persist(); closeSheet(); render(); return; }
+  if(a==="reset"){ if(UI.confirm!=="reset"){UI.confirm="reset";render();return;} UI.confirm=null;
+    const mo=M(UI.mk), p=period(UI.mk), wk=UI.rstWk===""||UI.rstWk===undefined||UI.rstWk===null?null:+UI.rstWk, days=wk===null?p.days:p.days.slice(wk*7,wk*7+7);
+    if(!hasDraft(mo)) mo.draft={sched:mo.sched?clone(mo.sched):{},at:new Date().toISOString(),acc:{}};
+    const W=mo.draft.sched, fx=mo.fixed||{};
+    days.forEach(d=>{ W[d]={}; slotsOfDay(d).forEach(x=>{ W[d][x.key]=extCovered(mo,d,x.key)?[]:[null]; }); Object.keys(fx).filter(z=>z.startsWith(d+"|")).forEach(z=>delete fx[z]); });
+    mo.fixed=fx; mo.draft.at=new Date().toISOString(); const n=p.days.length/7; for(let w=0;w<n;w++) if(wk===null||w===wk) delete (mo.draft.acc||{})[w];
+    UI.draftView=true; histAdd(UI.mk,wk===null?"Bozza azzerata (tutto il mese)":`Bozza azzerata: settimana ${wk+1}`,W); persist(); render();
+    toast(wk===null?"Mese azzerato nella bozza: pubblica per renderlo effettivo":`Settimana ${wk+1} azzerata nella bozza: pubblica per renderla effettiva`); return; }
   if(a==="manualstart"){ const mo=M(UI.mk); if(!hasDraft(mo)){ const sc={}; period(UI.mk).days.forEach(d=>{ sc[d]={}; slotsOfDay(d).forEach(x=>{ sc[d][x.key]=extCovered(mo,d,x.key)?[]:[null]; }); }); mo.draft={sched:mo.sched?clone(mo.sched):sc,at:new Date().toISOString(),acc:{}}; } UI.draftView=true;
     UI.view="giorni"; persist(); render(); return; }
   if(a==="del"){ const id=el.dataset.id; if(UI.confirm!=="del-"+id){UI.confirm="del-"+id;render();return;}
@@ -1777,6 +1788,7 @@ document.addEventListener("change",e=>{
   if(t.dataset.msw){ const F=UI.msw=UI.msw||{}; const k=t.dataset.msw; F[k]=t.value; if(k==="from") F.a=""; if(k==="to") F.b=""; F.ex={}; UI.confirm=null; render(); return; }
   if(t.dataset.refrot){ UI.refRot=t.value; UI.confirm=null; render(); return; }
   if(t.dataset.genwk){ UI.genWk=t.value; UI.confirm=null; render(); return; }
+  if(t.dataset.rstwk){ UI.rstWk=t.value; UI.confirm=null; render(); return; }
   if(t.dataset.who){ UI.who=t.value; render(); return; }
   if(t.dataset.sw){ const F=UI.sw=UI.sw||{}; F[t.dataset.sw]=t.value; if(t.dataset.sw==="to") F.b=""; F.ex={}; UI.swPrev=null; render(); return; }
   if(t.dataset.rot){ const mo=M(UI.mk); if(t.value) mo.rot[t.dataset.rot]=t.value; else delete mo.rot[t.dataset.rot]; persist(); render(); }
