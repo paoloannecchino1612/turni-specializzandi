@@ -40,6 +40,37 @@ const LEVELS=[1,2,3,4], RAW={};
 function YRS(mk){ const sh=yShift(mk||UI.mk); return LEVELS.map(l=>l-sh); }
 function ALLY(){ const set=new Set(); try{ const [y,m]=todayMk().split("-").map(Number); for(let k=-KEEP_MONTHS;k<=KEEP_MONTHS;k++) YRS(mkOf(y,m+k)).forEach(c=>set.add(c)); }catch(e){ LEVELS.forEach(c=>set.add(c)); } return [...set].sort((a,b)=>a-b); } let CURY=2, MULTI=false, RAWV=0, REBUILD=null, YAUTO=false;
 function yDocs(y){ return y===2?{cfg:"config/main",mon:"planner/state"}:{cfg:"config/y"+y,mon:"planner/y"+y}; }
+/* ---------- mesi salvati uno per documento: planner/<anno>_<mese> (es. planner/state_2026-11, planner/y3_2026-11) ----------
+   Il vecchio documento (planner/state, planner/yN) resta come copia; quando un gestore apre l'app i mesi vengono copiati
+   nei documenti per mese e il vecchio documento viene segnato con split:true. Da lì si leggono e si scrivono solo i mesi.
+   Se le regole del database non lo permettono ancora, si continua con il vecchio documento (niente si perde). */
+function monPath(y,mk){ return "planner/"+(y===2?"state":"y"+y)+"_"+mk; }
+const MS={}, MSPLIT={}, MIGR={};
+function monWindow(){ const [y0,m0]=todayMk().split("-").map(Number); const out=[]; for(let k=-KEEP_MONTHS;k<=KEEP_MONTHS;k++) out.push(mkOf(y0,m0+k)); return out; }
+/* stringa {months} come prima (undefined = non ancora arrivato, null = niente salvato) */
+function assembleMon(y){ const st=MS[y]; if(!st||st.legacy===undefined) return undefined; const win=monWindow(); if(win.some(mk=>st.m[mk]===undefined)) return undefined;
+  const anyM=win.some(mk=>st.m[mk]); const split=!!(st.legacy&&st.legacy.split)||(!st.legacy&&anyM); MSPLIT[y]=split;
+  if(!split){ if(!st.legacy) return {raw:null,split:false};
+    /* un mese salvato da solo più di recente del vecchio documento (es. scritto prima che un'app vecchia riscrivesse il documento) vince */
+    let obj=null; try{ obj=st.legacy.raw?JSON.parse(st.legacy.raw):null; }catch(e){}
+    const newer=win.filter(mk=>st.m[mk]&&(st.mu[mk]||"")>(st.legacy.at||""));
+    if(!obj||!newer.length) return {raw:st.legacy.raw,split:false};
+    obj.months=obj.months||{}; newer.forEach(mk=>{ try{ obj.months[mk]=JSON.parse(st.m[mk]); }catch(e){} }); return {raw:JSON.stringify(obj),split:false}; }
+  let legacy={}; try{ legacy=(st.legacy&&st.legacy.raw?JSON.parse(st.legacy.raw).months:null)||{}; }catch(e){}
+  const months={}; for(const mk of win){ const r=st.m[mk]; if(r){ try{ months[mk]=JSON.parse(r); }catch(e){} } else if(legacy[mk]) months[mk]=legacy[mk]; }
+  return {raw:JSON.stringify({months}),split:true}; }
+/* salva i mesi di un anno: per mese se già diviso, altrimenti nel vecchio documento */
+function saveYearMonths(y,months,mks){ if(!db) return Promise.resolve(); const at=new Date().toISOString();
+  if(MSPLIT[y]) return Promise.all((mks||Object.keys(months)).filter(mk=>months[mk]).map(mk=>db.doc(monPath(y,mk)).set({state:JSON.stringify(months[mk]),updated:at})));
+  return db.doc(yDocs(y).mon).set({state:JSON.stringify({months}),updated:at}); }
+/* copia dei mesi dal vecchio documento ai documenti per mese (una volta, da un gestore di quell'anno) */
+/* si attiva dal proprietario (Impostazioni → "Salvataggio per mese") dopo aver aggiornato le regole del database */
+function splitEnabled(){ const st2=yState(2); return !!(st2&&st2.splitMonths); }
+async function splitMonths(y){ const st=MS[y]; if(MIGR[y]||!db||!st||!st.legacy||st.legacy.split||!canMgr(y)||!splitEnabled()) return; MIGR[y]=true;
+  let months={}; try{ months=(st.legacy.raw?JSON.parse(st.legacy.raw).months:null)||{}; }catch(e){ return; }
+  try{ const at=new Date().toISOString(); for(const mk of Object.keys(months)){ if(st.m[mk]&&(st.mu[mk]||"")>(st.legacy.at||"")) continue; await db.doc(monPath(y,mk)).set({state:JSON.stringify(months[mk]),updated:at}); }
+    const now=MS[y].legacy; await db.doc(yDocs(y).mon).set({state:(now&&now.raw)||st.legacy.raw,updated:at,split:true}); }
+  catch(e){ MIGR[y]="ko"; if(y===CURY&&OWNER) toast("Per salvare i mesi separatamente (più veloce) aggiorna le regole del database: per ora si continua come prima"); } }
 const PARSED={};
 /* anni che coprono ogni sala: elenco unico per tutti (config/years), lo modificano proprietario e gestori di qualsiasi anno.
    chiave = nome sala normalizzato; senza indicazione la sala è di tutti gli anni */
@@ -288,7 +319,10 @@ async function flush(){
   try{
     const at=new Date().toISOString();
     if(ADMIN()&&cfg!==lastCfg){ await cfgRef.set({state:cfg,updated:at}); lastCfg=cfg; }
-    if(ADMIN()&&mon!==lastMon){ await docRef.set({state:mon,updated:at}); lastMon=mon; }
+    if(ADMIN()&&mon!==lastMon){ const y=CURY;
+      if(MSPLIT[y]){ const L=(MS[y]&&MS[y].last)||{}; for(const mk of Object.keys(S.months||{})){ const j=JSON.stringify(S.months[mk]); if(L[mk]===j) continue; await db.doc(monPath(y,mk)).set({state:j,updated:at}); L[mk]=j; } if(MS[y]) MS[y].last=L; }
+      else await db.doc(yDocs(y).mon).set({state:mon,updated:at});
+      lastMon=mon; }
     setSync("Salvato");
   }catch(e){ const ro=e&&e.code==="invalid_argument"; setSync(ro?"Sola lettura: non puoi salvare":"Salvataggio non riuscito, riprovo…"); if(!ro) setTimeout(flush,4000); }
   saving=false; if(pending){pending=false;flush();}
@@ -565,7 +599,7 @@ function rebalanceRooms(mk,onlyPids,onlyCover,from){ const days=period(mk).days,
   /* altri anni (solo proprietario): si salva il loro orario */
   /* per gli altri anni le modifiche diventano una loro bozza: le accettano i loro gestori */
   for(const y of changed){ if(y===CURY||!db) continue; const st=mon[y], months={...(st.months||{})}; months[mk]={...months[mk],draft:{...((months[mk]||{}).draft||{}),sched:sch[y],at:new Date().toISOString(),acc:{}}};
-    db.doc(yDocs(y).mon).set({state:JSON.stringify({months}),updated:new Date().toISOString()}).catch(()=>toast("Non riesco a salvare l'orario del "+y+"° anno")); }
+    saveYearMonths(y,months,[mk]).catch(()=>toast("Non riesco a salvare l'orario del "+y+"° anno")); }
   return moved; }
 /* aggiorna: i turni già assegnati restano (fissi solo per questa generazione), si tolgono quelli in conflitto con indisponibilità/ferie/congressi e si ricopre il resto */
 /* aggiorna solo da oggi alla fine del mese: i giorni passati restano come sono */
@@ -776,6 +810,12 @@ function clampMk(mk){ return mk<oldestMk()?oldestMk():mk>newestMk()?newestMk():m
 let PRUNED=false;
 /* il mese si toglie dal documento solo dopo averne salvato una copia nello storico (se la copia non riesce resta dov'è) */
 async function pruneOld(){ if(PRUNED||!db||!S||!ADMIN()) return; PRUNED=true; const cut=oldestMk(), y=CURY, st=S; let n=0;
+  /* mesi salvati per documento: quelli appena usciti dai 7 visibili vanno nello storico e il loro documento si cancella */
+  if(MSPLIT[y]){ const [cy,cm]=cut.split("-").map(Number); for(let k=1;k<=3;k++){ const mk=mkOf(cy,cm-k);
+      try{ const sn=await db.doc(monPath(y,mk)).get(); if(!sn.exists) continue; const m=JSON.parse(sn.data().state||"{}");
+        if(m&&(m.sched||m.draft)) await db.collection(`hist/y${y}_${mk}/v`).doc().set({mk,kind:"Archivio (mese chiuso)",by:"automatico",at:new Date().toISOString(),
+          state:JSON.stringify({sched:m.sched||null,draft:m.draft||null,fixed:m.fixed||{},ext:m.ext||{},rot:m.rot||{}})});
+        await db.doc(monPath(y,mk)).delete(); }catch(e){} } }
   for(const mk of Object.keys(st.months||{})){ if(mk>=cut) continue; const m=st.months[mk];
     try{ if(m&&(m.sched||m.draft)) await db.collection(`hist/y${y}_${mk}/v`).doc().set({mk,kind:"Archivio (mese chiuso)",by:"automatico",at:new Date().toISOString(),
         state:JSON.stringify({sched:m.sched||null,draft:m.draft||null,fixed:m.fixed||{},ext:m.ext||{},rot:m.rot||{}})});
@@ -982,6 +1022,8 @@ function vImp2(){
    <input type="file" id="impfile" accept=".json,application/json"></div>
    <div class="panel"><h2>Copia di sicurezza</h2><p class="muted" style="margin:0;font-size:.85rem">Scarica in un file tutti i dati: impostazioni e turni di tutti gli anni, indisponibilità, ferie, congressi e preferenze, cambi, associazioni nome-account, email autorizzate e gestori. Per ripristinarli carica il file qui sopra in «Importa dati» (sovrascrive i dati attuali con quelli della copia). Lo storico delle bozze non è incluso.</p>
    <div class="row"><button class="btn primary" data-act="backup">Scarica copia di sicurezza</button></div></div>`:"";
+  const splitPanel=OWNER&&db&&CURY===2?`<div class="panel"><h2>Salvataggio per mese</h2><p class="muted" style="margin:0;font-size:.85rem">${S.splitMonths?"Attivo: ogni mese di ogni anno è salvato in un documento a sé (salvataggi e aggiornamenti più leggeri). Il vecchio documento con tutti i mesi resta come copia.":"Salva ogni mese in un documento a sé: a ogni modifica si salva e si riscarica solo quel mese invece di tutti, e l'app è più veloce, soprattutto da telefono. <strong>Prima di attivarlo pubblica le regole del database aggiornate</strong> (altrimenti i gestori non riescono a salvare). Il vecchio documento resta come copia; scarica comunque prima una copia di sicurezza."}</p>
+   ${S.splitMonths?"":`<div class="row"><button class="btn ${UI.confirm==="splitOn"?"confirm":"primary"}" data-act="splitOn">${UI.confirm==="splitOn"?"Tocca di nuovo: le regole sono aggiornate, attiva":"Attiva il salvataggio per mese"}</button></div>`}</div>`:"";
   const yearsPanel=OWNER&&db&&CURY===2?`<div class="panel"><h2>Più anni</h2><p class="muted" style="margin:0;font-size:.85rem">${S.multiYear?"Attivo: in alto scegli l'anno. Ogni anno ha nomi, sale, rotazioni e gestori propri (si impostano qui, scegliendo l'anno). Si genera a cascata: prima il 4°, poi il 3° vede i turni del 4° come già coperti, e così via. Disattivando, l'app torna com'era: i dati degli altri anni restano salvati e ricompaiono se lo riattivi.":"Aggiunge 1°, 3° e 4° anno, ognuno con i propri dati. I vostri dati (2° anno) non vengono toccati e disattivando si torna esattamente a come è ora. Nomi presi da «Elenco Spec»: (2)→3° anno, (3)→4° anno; il 1° anno è vuoto."}</p>
    <div class="row"><button class="btn ${UI.confirm==="years"?"confirm":S.multiYear?"danger":"primary"}" data-act="years">${UI.confirm==="years"?"Tocca di nuovo per confermare":S.multiYear?"Disattiva più anni":"Attiva più anni"}</button></div></div>`:"";
   const covPanel=ADMIN()&&db?(()=>{ const rows=[], seen=new Set();
@@ -994,7 +1036,7 @@ function vImp2(){
    <p class="muted" style="margin:0;font-size:.85rem">${HIDESWAPS?"Gli specializzandi vedono solo i cambi in cui sono coinvolti. Tu e i gestori vedete tutto.":"Tutti vedono lo storico dei cambi di tutti (con il filtro «Solo i miei»). Attivandolo ognuno vede solo i cambi in cui è coinvolto."}</p></div>`:"";
   const colPanel=ADMIN()&&db?`<div class="panel"><h2>Colori degli anni</h2><p class="muted" style="margin:0;font-size:.85rem">Usati per i turni scoperti assegnati a un anno ("scoperto · II anno"). Li modificate tu e i gestori di qualsiasi anno.</p>
    <div class="row" style="gap:16px;flex-wrap:wrap">${LEVELS.map(l=>`<label style="display:flex;gap:8px;align-items:center"><input type="color" data-ycol="${l}" value="${ycol(l)}" style="width:42px;height:32px;border:0;background:none;padding:0"> ${ROMAN[l]} anno</label>`).join("")}</div></div>`:"";
-  return reqPanel+yearsPanel+privPanel+covPanel+colPanel+mgPanel+allowPanel+linkedPanel()+importPanel+`
+  return reqPanel+splitPanel+yearsPanel+privPanel+covPanel+colPanel+mgPanel+allowPanel+linkedPanel()+importPanel+`
   <div class="panel"><h2>Specializzandi</h2>
    <form class="row" id="addform"><input id="newname" placeholder="Cognome Nome" style="flex:1 1 12em" autocomplete="off"><select id="newyear" aria-label="Anno">${[1,2,3,4].map(y=>`<option ${y===2?"selected":""}>${y}° anno</option>`).join("")}</select><button class="btn primary" type="submit">Aggiungi</button></form>
    <div class="list">${S.residents.map(r=>`<div class="item"><input id="rname-${r.id}" data-rname="${r.id}" value="${esc(r.name)}" aria-label="Nome" style="font-weight:600;width:100%"><span class="pickers sm" style="flex:none"><button data-act="rflag" data-id="${r.id}" data-f="nights" aria-pressed="${canDo(r.id,"N")}">Notti</button><button data-act="rflag" data-id="${r.id}" data-f="guards" aria-pressed="${canDo(r.id,"D")}">Guardie</button></span><button class="btn danger ${UI.confirm==="del-"+r.id?"confirm":""}" data-act="del" data-id="${r.id}">${UI.confirm==="del-"+r.id?"Conferma":"Rimuovi"}</button></div>`).join("")||`<p class="muted" style="margin:0">Ancora nessuno.</p>`}</div></div>
@@ -1430,7 +1472,7 @@ function applyClosed(mk,keys,close){ const mo=M(mk), cg={...(CLOSEDG[mk]||{})}; 
     if(close){ if(isClosed(mo,d,k)) continue; cg[ck]=true; const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=[]; Object.keys(fx).filter(z=>z.startsWith(d+"|"+k+"|")).forEach(z=>delete fx[z]); n++; }
     else if(isClosed(mo,d,k)){ delete cg[ck]; if(mo.closed&&mo.closed[ck]){ mo.closed={...mo.closed}; delete mo.closed[ck]; }
       /* vecchie chiusure salvate in un altro anno (prima che fossero condivise) */
-      if(MULTI) for(const y of YRS(mk)){ if(y===CURY) continue; const st=yState(y), m=st&&st.months&&st.months[mk]; if(m&&m.closed&&m.closed[ck]&&db){ const months={...st.months,[mk]:{...m,closed:{...m.closed}}}; delete months[mk].closed[ck]; db.doc(yDocs(y).mon).set({state:JSON.stringify({months}),updated:new Date().toISOString()}).catch(()=>{}); } }
+      if(MULTI) for(const y of YRS(mk)){ if(y===CURY) continue; const st=yState(y), m=st&&st.months&&st.months[mk]; if(m&&m.closed&&m.closed[ck]&&db){ const months={...st.months,[mk]:{...m,closed:{...m.closed}}}; delete months[mk].closed[ck]; saveYearMonths(y,months,[mk]).catch(()=>{}); } }
       const W=ensureDraft(mo,d); W[d]=W[d]||{}; if(!W[d][k]||!W[d][k].length) W[d][k]=[null]; n++; } }
   CLOSEDG={...CLOSEDG,[mk]:cg}; if(n&&db) saveYearsDoc().catch(()=>toast("Non riesco a salvare le sale chiuse: aggiorna le regole del database"));
   return n; }
@@ -1536,7 +1578,8 @@ async function exportUnav(){ if(!ADMIN()) return; if(typeof XLSX==="undefined"){
 const BK_DOCS=["config/main","planner/state",...[-1,0,1,3,4,5,6].flatMap(c=>["config/y"+c,"planner/y"+c]),"config/years","config/privacy","access/allow","roles/managers"];
 async function exportBackup(){ if(!OWNER||!db) return; toast("Preparo la copia di sicurezza…");
   try{ const out={type:"turni-backup",version:1,at:new Date().toISOString(),docs:{},cols:{}};
-    for(const p of BK_DOCS){ const sn=await db.doc(p).get(); if(sn.exists) out.docs[p]=sn.data(); }
+    const mdocs=[-1,0,1,2,3,4,5,6].flatMap(y=>monWindow().map(mk=>monPath(y,mk)));
+    for(const p of [...BK_DOCS,...mdocs]){ try{ const sn=await db.doc(p).get(); if(sn.exists) out.docs[p]=sn.data(); }catch(e){} }
     const col=async p=>{ const r=await db.collection(p).limit(5000).get(); out.cols[p]=r.docs.map(d=>({id:d.id,data:d.data()})); return out.cols[p]; };
     const claims=await col("claims"); await col("swaps"); await col("accessRequests");
     for(const u of ["staff",...new Set(claims.map(c=>c.id))]) await col(`unav/${u}/m`);
@@ -1608,7 +1651,7 @@ document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]"); if(!el) return;
   let a=el.dataset.act;
   if(a==="close"){ if(e.target===el||el.tagName==="BUTTON"){closeSheet();render();} return; }
-  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","reset","clrgen","clrext","refresh","refrot","years","accall","accw","drop","hopen","hdel","unlink","unlinku","swdel","mswgo"].includes(a)) UI.confirm=null;
+  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","reset","clrgen","clrext","splitOn","refresh","refrot","years","accall","accw","drop","hopen","hdel","unlink","unlinku","swdel","mswgo"].includes(a)) UI.confirm=null;
   if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(Object.values(CLAIMS).includes(MYUID)||CLAIMDOCS.some(x=>x.u===MYUID)){ toast(OWNER?"Il tuo account è già associato a un nome: per cambiarlo prima scollegalo in Impostazioni → Account collegati":"Il tuo account è già associato a un nome: solo il proprietario può cambiarlo"); return; } if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString(),email:(USER&&USER.email&&USER.email())||""}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} const y=MULTI?yearOfPid(pid):null; if(y&&y!==CURY) switchYear(y); UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
   if(a==="unlinku"){ const u=el.dataset.u; if(UI.confirm!=="unlu-"+u){UI.confirm="unlu-"+u;render();return;} UI.confirm=null;
     db.doc("claims/"+u).delete().then(()=>{ toast("Account scollegato: ora può scegliere il suo nome"); render(); }).catch(()=>toast("Non riesco a scollegare")); return; }
@@ -1700,6 +1743,7 @@ document.addEventListener("click",e=>{
     const r=refreshSched(UI.mk); if(r.past){ toast("Il mese è già passato: non c'è niente da aggiornare"); return; } if(hasDraft(mo)) histAdd(UI.mk,"Bozza preparata",mo.draft.sched); persist(); render();
     toast(`Bozza pronta: ${r.added} turni assegnati, ${r.removed} tolti per indisponibilità${r.wrong?`, ${r.wrong} tolti perché fuori rotazione`:""}, ${r.covered} lasciati ad altri anni, ${r.moved} spostati tra sale`); return; }
   if(a==="daywk"){ UI.dayWk=UI.dayWk||{}; UI.dayWk[UI.mk]=el.dataset.v==="all"?"all":+el.dataset.v; render(); return; }
+  if(a==="splitOn"){ if(!OWNER||CURY!==2) return; if(UI.confirm!=="splitOn"){UI.confirm="splitOn";render();return;} UI.confirm=null; S.splitMonths=true; persist(); render(); toast("Salvataggio per mese attivato: i mesi vengono copiati nei nuovi documenti"); setTimeout(()=>{ for(const yy in MS) splitMonths(+yy); },1500); return; }
   if(a==="filt"){ UI.filt=el.dataset.v; render(); return; }
   if(a==="dview"){ UI.draftView=el.dataset.v==="1"; render(); return; }
   if(a==="accall"){ if(UI.confirm!=="accall"){UI.confirm="accall";render();return;} UI.confirm=null; const n=period(UI.mk).days.length/7, acc=(M(UI.mk).draft||{}).acc||{};
@@ -1868,16 +1912,21 @@ render();
       const mon=rawMon?JSON.parse(rawMon):null, cfg=rawCfg?JSON.parse(rawCfg):(mon?(({months,...c})=>c)(mon):null);
       S=load(cfg?JSON.stringify({...cfg,months:(mon&&mon.months)||{}}):null);
       const sp=splitS(); lastCfg=rawCfg?sp.cfg:""; lastMon=rawMon&&!(!rawCfg&&mon&&mon.residents)?sp.mon:"";
+      if(MS[CURY]){ const L={}; for(const mk in (S.months||{})) L[mk]=JSON.stringify(S.months[mk]); MS[CURY].last=L; }
       setSync(cfg?"Salvato":OWNER?"Nessun dato ancora":"In attesa dei dati");
       if(OWNER&&(migrated||!rawCfg&&cfg)){migrated=false;persist();}
+      for(const yy in MS) if(MS[yy].legacy&&!MS[yy].legacy.split) splitMonths(+yy);
       checkMulti(); pruneOld(); autoSyncSheet(); runSheetAlign(); if(HIDEUNAV) recomputeUnav(); filterSW(); consolidate(); autoInvalidate(); syncRoles(); autoYear(); if(!layer.innerHTML) render(); };
     REBUILD=rebuild;
     const subY={};
-    const watchYear=y=>{ if(subY[y]) return; subY[y]=true; RAW[y]=RAW[y]||{}; const d=yDocs(y);
-      const on=k=>snap=>{ const raw=snap.exists?snap.data().state:null; if(raw===RAW[y][k]) return; RAW[y][k]=raw; RAWV++;
-        if(y===CURY) rebuild(); else { if(y===2) checkMulti(); if(raw===null&&k==="cfg") ensureCohorts(); syncRoles(); autoYear(); if(S&&!layer.innerHTML) render(); } };
-      db.doc(d.cfg).onSnapshot(on("cfg"),()=>setSync("Connessione persa: ricarica la pagina"));
-      db.doc(d.mon).onSnapshot(on("mon"),()=>setSync("Connessione persa: ricarica la pagina")); };
+    const watchYear=y=>{ if(subY[y]) return; subY[y]=true; RAW[y]=RAW[y]||{}; const d=yDocs(y); MS[y]=MS[y]||{legacy:undefined,m:{},mu:{},last:{}};
+      const after=(k,raw)=>{ if(y===CURY) rebuild(); else { if(y===2) checkMulti(); if(raw===null&&k==="cfg") ensureCohorts(); syncRoles(); autoYear(); if(S&&!layer.innerHTML) render(); } };
+      const lost=()=>setSync("Connessione persa: ricarica la pagina");
+      db.doc(d.cfg).onSnapshot(snap=>{ const raw=snap.exists?snap.data().state:null; if(raw===RAW[y].cfg) return; RAW[y].cfg=raw; RAWV++; after("cfg",raw); },lost);
+      /* mesi: vecchio documento + un documento per ciascuno dei 7 mesi visibili */
+      const monChanged=()=>{ const a=assembleMon(y); if(a===undefined) return; if(!a.split) splitMonths(y); if(a.raw===RAW[y].mon) return; RAW[y].mon=a.raw; RAWV++; after("mon",a.raw); };
+      db.doc(d.mon).onSnapshot(snap=>{ MS[y].legacy=snap.exists?{raw:snap.data().state||null,split:!!snap.data().split,at:snap.data().updated||""}:null; monChanged(); },lost);
+      monWindow().forEach(mk=>db.doc(monPath(y,mk)).onSnapshot(snap=>{ MS[y].m[mk]=snap.exists?(snap.data().state||null):null; MS[y].mu[mk]=snap.exists?(snap.data().updated||""):""; monChanged(); },()=>{ MS[y].m[mk]=null; monChanged(); })); };
     /* più anni acceso/spento: lo decide il config dell'anno 2 */
     const checkMulti=()=>{ const st2=yState(2); const on=!!(st2&&st2.multiYear); if(on===MULTI) return; MULTI=on; EXTC.key=null;
       if(MULTI){ ALLY().forEach(watchYear); ensureCohorts(); } else if(CURY!==2) switchYear(2); watchCov(); filterSW(); };
