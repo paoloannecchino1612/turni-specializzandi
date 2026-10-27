@@ -170,6 +170,9 @@ function incl(mo,pid){ return false; }
 /* chi è al Bambin Gesù non entra mai nei turni generati, ma un gestore può assegnarlo a mano */
 function isBG(rot){ return rot==="BG"; }
 function inGem(mo,pid){ return !isExt(mo.rot[pid])||incl(mo,pid); }
+/* rotazioni ibride: chi è in RX/Eco copre sia le sale RX sia quelle di Ecografia (circa metà e metà, con precedenza a RX) */
+const HYB={RXECO:["RX","ECO"]};
+function rotCovers(rot,cov){ return rot===cov||(HYB[rot]||[]).includes(cov); }
 function isJolly(rot){const r=S.rotations.find(x=>x.id===rot);return !!(r&&r.jolly);}
 function unavOf(mo,pid,d){return (mo.unav[pid]||{})[d]||"";}
 const FULL={G:"Indisponibile",F:"Ferie",C:"Congresso"};
@@ -195,7 +198,7 @@ function slotsWith(d,day){ const base=slotsOfDay(d), have=new Set(base.map(x=>x.
 function covOf(post,s){ return (post.all||[]).includes(s)?"ALL":post.cover; }
 function pools(mo,post,s){ const inG=S.residents.filter(r=>inGem(mo,r.id)), cov=covOf(post,s);
   if(cov==="ALL") return {pri:inG,jol:[]};
-  return {pri:inG.filter(r=>mo.rot[r.id]===cov), jol:isJolly(cov)?[]:inG.filter(r=>mo.rot[r.id]!==cov&&(isJolly(mo.rot[r.id])||incl(mo,r.id)))}; }
+  return {pri:inG.filter(r=>rotCovers(mo.rot[r.id],cov)), jol:isJolly(cov)?[]:inG.filter(r=>!rotCovers(mo.rot[r.id],cov)&&(isJolly(mo.rot[r.id])||incl(mo,r.id)))}; }
 
 let saveT=null, saving=false, pending=false, lastJSON="";
 function setSync(t){document.getElementById("sync").textContent=t;}
@@ -285,6 +288,7 @@ function load(raw){ const st=raw?JSON.parse(raw):clone(DEFAULT);
   if(!st._v6){ const MP=()=>({fer:["M","P"],sab:["M","P"],fes:[]});
     [["TCCEMI","TC 0 CEMI","TC"],["SALA8","Sala 8","RX"]].forEach(([id,name,cover])=>{ if(!st.posts.some(p=>p.id===id||normRoom(p.name)===normRoom(name))) st.posts.push({id,name,cover,on:MP()}); });
     st._v6=true; migrated=true; }
+  if(!st._v7){ if(!st.rotations.some(r=>r.id==="RXECO")) st.rotations.push({id:"RXECO",name:"RX/Eco",jolly:false}); st._v7=true; migrated=true; }
   return st; }
 
 /* ---------- generazione ---------- */
@@ -418,8 +422,11 @@ function generate(mk,wk,only2){ TICK++; /* only2: Set di pid a cui si possono da
       sched[d][x.key]=[null]; slots.push({d,i,w,t,post:x.post,s:x.s,key:x.key,ext:extHas(mo,d,x.key)}); }); });
   const pri=x=>x.s==="N"?0:x.s==="D"?1:(x.t!=="fer"?2:3);
   slots.forEach(x=>x.r=rand()); slots.sort((a,b)=>pri(a)-pri(b)||a.i-b.i||a.r-b.r);
+  const covCnt=(p,cov)=>{ let n=0; for(const id in p.pc){ const q=postOf(id); if(q&&q.cover===cov) n+=p.pc[id]; } return n; };
   const pick=(sl,cands,cap,forceG,mcap)=>{ let best=null,bk=null; if(mcap===undefined) mcap=mMain;
     for(const r of cands){ if(only2&&!only2.has(r.id)) continue; const p=st[r.id];
+      /* RX/Eco: si alternano RX ed Eco (metà e metà, RX sempre per primo); oltre i turni ideali solo dove serve, prima RX */
+      if(HYB[mo.rot[r.id]]&&cap===soft){ const rx=covCnt(p,"RX"), ec=covCnt(p,"ECO"); if(sl.post.cover==="ECO"&&ec>=rx) continue; if(sl.post.cover==="RX"&&rx>ec) continue; }
       if(sl.s==="N"&&capN&&(p.N>=capN.per||nDone.N>=capN.year)) continue; if(sl.s==="D"&&capD&&(p.D>=capD.per||nDone.D>=capD.year)) continue; if(!ok(mo,p,r.id,sl.d,sl.s,sl.w,cap,forceG)) continue; if(mcap&&p.tot>=mcap) continue;
       const j=p.jit+rand()*0.5;
       const mp=(sl.s==="M"||sl.s==="P")?p[sl.s]-(sl.s==="M"?p.P:p.M):0, pc=p.pc[sl.post.id]||0, same=p.last[sl.d]===undefined&&p.last[add(sl.d,-1)]===sl.post.id?1:0;
@@ -457,7 +464,7 @@ function generate(mk,wk,only2){ TICK++; /* only2: Set di pid a cui si possono da
     for(const pr of [0,1,2,3]) for(const list of ((pr<2&&(capN||capD))?byDay.map(l=>({l,o:rand()})).sort((a,b)=>a.o-b.o).map(x=>x.l):byDay)){
       const todo=list.filter(sl=>pri(sl)===pr&&!sl.ext&&!sched[sl.d][sl.key][0]);
       todo.forEach(sl=>sl.r=rand());
-      todo.sort((a,b)=>(fill[a.key]||0)-(fill[b.key]||0)||a.r-b.r);
+      todo.sort((a,b)=>(a.post.cover==="ECO")-(b.post.cover==="ECO")||(fill[a.key]||0)-(fill[b.key]||0)||a.r-b.r); /* RX prima di Eco (RX/Eco) */
       for(const sl of todo){ const r=pick(sl,pools(mo,sl.post,sl.s)[grp],cap); if(r){ put(sl,r); fill[sl.key]=(fill[sl.key]||0)+1; } } }
   /* regola prioritaria: chi ha segnato "tutta la giornata" viene inserito lo stesso se il turno resterebbe scoperto
      (ferie, congressi e indisponibilità di singoli turni restano vincolanti); si distribuisce tra chi è stato forzato meno */
@@ -555,7 +562,7 @@ function derive(mk,override){
         {const u=unavOf(mo,pid,d); if(blocked(u,s)) issues.push(`${resName(pid)}: ${u==="F"?"in ferie":u==="C"?"a congresso":u==="G"?"indisponibile tutto il giorno, inserito perché il turno sarebbe rimasto scoperto,":"indisponibile"} ${fmt(d)} (${SHN[s]})`);}
         const rot=mo.rot[pid];
         if(isExt(rot)&&!isBG(rot)) issues.push(`${resName(pid)}: in turno il ${fmt(d)} ma è ${rot?"a "+rotName(rot):"senza rotazione"}`);
-        else if(!extra&&!isBG(rot)&&covOf(post,s)!=="ALL"&&rot!==covOf(post,s)&&!(isJolly(rot)&&!isJolly(covOf(post,s)))) issues.push(`${resName(pid)}: in ${post.name} il ${fmt(d)} ma la rotazione è ${rotName(rot)}`);
+        else if(!extra&&!isBG(rot)&&covOf(post,s)!=="ALL"&&!rotCovers(rot,covOf(post,s))&&!(isJolly(rot)&&!isJolly(covOf(post,s)))) issues.push(`${resName(pid)}: in ${post.name} il ${fmt(d)} ma la rotazione è ${rotName(rot)}`);
       }); }); });
   { const PRF=PR(mk); for(const pid in PRF){ if(!per[pid]||!canPref(pid)) continue; for(const d in PRF[pid]){ const code=PRF[pid][d]; if(!code||!days.includes(d)) continue;
       const [pp,sh]=code.includes("|")?code.split("|"):[null,code]; const okk=Object.entries(SC[d]||{}).some(([k,a])=>a.includes(pid)&&k.endsWith("|"+sh)&&(!pp||k.startsWith(pp+"|")));
@@ -605,7 +612,7 @@ function personIssues(mk,sc,pid){ const mo=M(mk), {days}=period(mk), out=[], on=
       const u=unavOf(mo,pid,d);
       if(!canDo(pid,s)) out.push(`${s==="N"?"notte":"guardia"} il ${fmt(d)}, ma non è abilitato/a ${s==="N"?"alle notti":"alle guardie"}`);
       if(blocked(u,s)) out.push(u==="F"?`lavora durante le ferie: ${fmt(d)} (${SHN[s]})`:u==="C"?`lavora durante il congresso: ${fmt(d)} (${SHN[s]})`:`indisponibilità non rispettata: ${fmt(d)} (${SHN[s]})`);
-      if(post){ const cov=covOf(post,s), rot=mo.rot[pid]; if(cov!=="ALL"&&rot!==cov&&!isBG(rot)&&!(isJolly(rot)&&!isJolly(cov))) out.push(`copre ${esc(post.name)} il ${fmt(d)}, fuori dalla sua rotazione (${esc(rotName(rot))})`); } } });
+      if(post){ const cov=covOf(post,s), rot=mo.rot[pid]; if(cov!=="ALL"&&!rotCovers(rot,cov)&&!isBG(rot)&&!(isJolly(rot)&&!isJolly(cov))) out.push(`copre ${esc(post.name)} il ${fmt(d)}, fuori dalla sua rotazione (${esc(rotName(rot))})`); } } });
   for(const d in on){ if(on[d].length>1) out.push(on[d].includes("N")?`lavora di giorno il ${fmt(d)}, giorno di monto (ha la notte)`:`doppio turno il ${fmt(d)} (${on[d].map(s=>SHN[s]).join(" + ")})`);
     if(on[d].includes("N")&&on[add(d,1)]) out.push(`lavora il ${fmt(add(d,1))}, giorno di smonto`); }
   for(const w in wk) if(wk[w]>S.maxWeek) out.push(`${wk[w]} turni nella settimana dal ${fmt(period(mk).days[w*7])} (max ${S.maxWeek})`);
