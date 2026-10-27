@@ -933,8 +933,9 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
         <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><select id="rstWk" data-rstwk="1"><option value="">Tutto il mese</option>${Array.from({length:nW},(_,w)=>`<option value="${w}" ${String(UI.rstWk??"")===String(w)?"selected":""}>Settimana ${w+1}: ${fmt(p.days[w*7])} – ${fmt(p.days[w*7+6])}</option>`).join("")}</select>
          <button class="btn ${UI.confirm==="clrmine"?"confirm":""}" data-act="clrmine">${UI.confirm==="clrmine"?"Tocca di nuovo: elimina":"Elimina i turni del tuo anno"}</button>
          <button class="btn ${UI.confirm==="clrgen"?"confirm":""}" data-act="clrgen">${UI.confirm==="clrgen"?"Tocca di nuovo: elimina":"Elimina i turni generati"}</button>
-         <button class="btn danger ${UI.confirm==="reset"?"confirm":""}" data-act="reset">${UI.confirm==="reset"?"Tocca di nuovo: azzera tutto":"Azzera tutto"}</button></div>
-        <p class="muted" style="margin:0;font-size:.8rem"><strong>Elimina i turni del tuo anno</strong>: toglie i turni messi dal generatore solo nell'anno che stai guardando.<br><strong>Elimina i turni generati</strong>: lo stesso, ma in tutti gli anni.<br>In entrambi restano i turni inseriti a mano o arrivati dal foglio (link/file), le sale chiuse, i turni coperti da altri anni e gli anni assegnati ai turni scoperti.<br><strong>Azzera tutto</strong> (tutti gli anni): svuota tutte le caselle (anche i turni inseriti a mano o dal foglio) e toglie per quel periodo sale chiuse, turni coperti da altri anni e anni assegnati ai turni scoperti.<br>Indisponibilità, ferie e congressi non vengono mai toccati. I turni vanno nella bozza: l'orario pubblicato cambia quando premi «Pubblica» («Annulla» torna indietro).</p></div>`:""}</div>`:""}`:"";
+         <button class="btn danger ${UI.confirm==="reset"?"confirm":""}" data-act="reset">${UI.confirm==="reset"?"Tocca di nuovo: azzera tutto":"Azzera tutto"}</button>
+         <button class="btn ${UI.confirm==="restpub"?"confirm":""}" data-act="restpub">${UI.confirm==="restpub"?"Tocca di nuovo: riprendi":"Riprendi l'orario pubblicato"}</button></div>
+        <p class="muted" style="margin:0;font-size:.8rem"><strong>Elimina i turni del tuo anno</strong>: toglie i turni messi dal generatore solo nell'anno che stai guardando.<br><strong>Elimina i turni generati</strong>: lo stesso, ma in tutti gli anni.<br>In entrambi restano i turni inseriti a mano o arrivati dal foglio (link/file), le sale chiuse, i turni coperti da altri anni e gli anni assegnati ai turni scoperti.<br><strong>Azzera tutto</strong> (tutti gli anni): svuota tutte le caselle (anche i turni inseriti a mano o dal foglio) e toglie per quel periodo sale chiuse, turni coperti da altri anni e anni assegnati ai turni scoperti.<br><strong>Riprendi l'orario pubblicato</strong> (tutti gli anni): rimette nella bozza l'orario pubblicato finora per quel periodo, con quello che «Azzera tutto» aveva tolto (turni fissi, coperti da altri anni, sale chiuse, anni degli scoperti).<br>Indisponibilità, ferie e congressi non vengono mai toccati. I turni vanno nella bozza: l'orario pubblicato cambia quando premi «Pubblica» («Annulla» torna indietro).</p></div>`:""}</div>`:""}`:"";
   const pubBar=ADMIN()&&hasDraft(mo)?`<div style="height:84px"></div><div class="pubbar"><span class="name-strong">Bozza non pubblicata${(()=>{ const c=draftChanges(mo,true); return c?` · ${c.size} ${mo.sched?"caselle cambiate":"caselle nuove"}`:""; })()}</span>
       <button class="btn ${UI.confirm==="accall"?"confirm":"primary"}" data-act="accall">${UI.confirm==="accall"?"Tocca di nuovo: pubblica":"Pubblica"}</button>
       ${clrBtn("drop","Annulla")}
@@ -981,7 +982,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
      ${shownDays.map((d,i0)=>{const i=i0+offs, t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
        if(isClosed(mo,d,c.k)&&!(arr||[]).some(x=>x)) return `<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Sala chiusa"><span class="muted" style="font-size:.75rem;font-weight:600">Chiusa</span></td>`;
-       if(!arr){ const due=postActive(c.post)&&((c.post.on||{})[dayType(d)]||[]).includes(c.s), ex0=EXT(mo)[d+"|"+c.k];
+       if(!arr){ const opn=((c.post.on||{})[dayType(d)]||[]).includes(c.s), due=opn, ex0=EXT(mo)[d+"|"+c.k];
          if(ex0) return `<td class="cell${selC(d,c.k)}" ${(due||UI.clsel)&&ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni"><span class="muted" style="font-size:.72rem;display:block">${xNames(d,c.k,ex0)}</span></td>`;
          return due?`<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`}>${holeLabel(d,c.k)}</td>`:UI.clsel&&ADMIN()?`<td class="cell${selC(d,c.k)}" data-act="cell" data-d="${d}" data-k="${c.k}"><span class="muted">·</span></td>`:`<td class="cell none">·</td>`; }
        const ex=EXT(mo)[d+"|"+c.k], lw=lowerOnly(mo,d,c.k), exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${xNames(d,c.k,ex)}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${xNames(d,c.k,lw)}</span>`:"");
@@ -1084,14 +1085,16 @@ function vImp2(){
 /* modifiche al proprio orario fatte dai rappresentanti (accettando una bozza): finché non si tocca "Ho visto" */
 function myChanges(){ const pid=myAnyPid(); if(!pid) return {pid,list:[]}; const st=S.residents.some(r=>r.id===pid)?S:yState(yearOfPid(pid)); if(!st) return {pid,list:[]};
   let seen=""; try{ seen=localStorage.getItem("turni.chseen."+pid)||""; }catch(e){}
-  const list=[]; for(const mk in (st.months||{})) ((st.months[mk]||{}).changes||[]).forEach(c=>{ if(c.pid===pid&&c.at>seen) list.push(c); });
+  const list=[]; for(const mk in (st.months||{})) ((st.months[mk]||{}).changes||[]).forEach(c=>{ if(c.pid===pid&&c.at>seen) list.push({...c,mk}); });
   list.sort((a,b)=>a.d.localeCompare(b.d)||a.at.localeCompare(b.at)); return {pid,list,st}; }
 function changesPanel(){ const {list,st}=myChanges(); if(!list.length) return "";
   const nm=k=>{ const [pid,sh]=k.split("|"), post=(st.posts||[]).find(x=>x.id===pid); return sh==="N"?"Notte":sh==="D"?"Guardia":`${esc(post?post.name:pid)} ${SHN[sh]}`; };
   const desc=ks=>ks.length?ks.map(nm).join(" + "):"Libero";
   /* per ogni giorno l'ultima modifica, confrontata con lo stato di partenza */
-  const by={}; list.forEach(c=>{ if(!by[c.d]) by[c.d]={from:c.from,to:c.to,who:c.by}; else { by[c.d].to=c.to; if(c.by) by[c.d].who=c.by; } });
-  const rows=Object.keys(by).sort().filter(d=>by[d].from.join()!==by[d].to.join());
+  const by={}; list.forEach(c=>{ if(!by[c.d]) by[c.d]={from:c.from,to:c.to,who:c.by,mk:c.mk}; else { by[c.d].to=c.to; if(c.by) by[c.d].who=c.by; } });
+  /* solo le modifiche ancora in vigore: l'orario di oggi (con i cambi accettati) deve essere quello della modifica */
+  const pid=myAnyPid(), nowOf=(mk,d)=>{ const sc=st===S?(effSched(mk)||{}):(((st.months||{})[mk]||{}).sched||{}); return Object.keys(sc[d]||{}).filter(k=>(sc[d][k]||[]).includes(pid)).sort().join(); };
+  const rows=Object.keys(by).sort().filter(d=>by[d].from.join()!==by[d].to.join()&&nowOf(by[d].mk,d)===[...by[d].to].sort().join());
   if(!rows.length) return "";
   return `<div class="panel" style="border:2px solid var(--accent)"><h2>Modifiche al tuo orario</h2><p class="muted" style="margin:0;font-size:.85rem">L'orario pubblicato è stato aggiornato:</p>
     <ul style="margin:0;padding-left:18px">${rows.map(d=>`<li><strong>${fmt(d,true)}</strong>: ${desc(by[d].from)} → <strong>${desc(by[d].to)}</strong>${by[d].who?` <span class="muted" style="font-size:.82rem">· modificato da ${esc(by[d].who)}</span>`:""}</li>`).join("")}</ul>
@@ -1510,6 +1513,7 @@ function eachOtherYear(mk,fn){ if(!MULTI||!db) return 0; let n=0; for(const y of
     saveYearMonths(y,months,[mk]).catch(()=>toast("Non riesco a salvare il "+yLab(y)+"° anno")); } return n; }
 function draftOf(m){ if(!(m.draft&&m.draft.sched)) m.draft={sched:m.sched?JSON.parse(JSON.stringify(m.sched)):{},at:new Date().toISOString(),acc:{}}; return m.draft.sched; }
 function resetOther(m,days,wk,nWeeks){ if(!m.sched&&!(m.draft&&m.draft.sched)&&!Object.keys(m.ext||{}).length) return false; const dset=new Set(days), now=new Date().toISOString();
+  bakReset(m,dset);
   m.ext={...(m.ext||{})}; Object.keys(m.ext).forEach(k=>{ if(dset.has(k.split("|")[0])) delete m.ext[k]; }); m.extReset={...(m.extReset||{})}; days.forEach(d=>m.extReset[d]=now);
   if(m.closed){ m.closed={...m.closed}; Object.keys(m.closed).forEach(k=>{ if(dset.has(k.split("|")[0])) delete m.closed[k]; }); }
   const W=draftOf(m), fx=m.fixed||{}; days.forEach(d=>{ const day=W[d]||(m.sched||{})[d]||{}; W[d]=Object.fromEntries(Object.keys(day).map(k=>[k,[null]])); Object.keys(fx).filter(z=>z.startsWith(d+"|")).forEach(z=>delete fx[z]); });
@@ -1518,12 +1522,33 @@ function clearGenOther(m,days,wk,nWeeks){ if(!m.sched&&!(m.draft&&m.draft.sched)
   days.forEach(d=>{ const day=W[d]||{}; for(const k in day){ const pre=d+"|"+k+"|", keepP=Object.keys(fx).filter(z=>z.startsWith(pre)).map(z=>fx[z]); const arr=(day[k]||[]).filter(x=>x), keep=arr.filter(x=>keepP.includes(x));
       Object.keys(fx).filter(z=>z.startsWith(pre)).forEach(z=>delete fx[z]); keep.forEach((x,i)=>fx[pre+i]=x); day[k]=keep.length?keep:((day[k]||[]).length===0?[]:[null]); } });
   m.fixed=fx; m.draft.at=new Date().toISOString(); for(let w=0;w<nWeeks;w++) if(wk===null||w===wk) delete (m.draft.acc||{})[w]; }
+/* copia di ciò che «Azzera tutto» toglie (coperti da altri anni, turni fissi; per l'anno che si guarda anche sale chiuse e anni degli scoperti), per poterlo riprendere */
+function bakReset(m,dset,mk){ const b=m.rstBak=m.rstBak||{ext:{},fixed:{},closed:{},holes:{}}; const inD=k=>dset.has(k.split("|")[0]);
+  for(const k in (m.ext||{})) if(inD(k)&&!b.ext[k]) b.ext[k]=m.ext[k]; for(const k in (m.fixed||{})) if(inD(k)&&!b.fixed[k]) b.fixed[k]=m.fixed[k];
+  if(mk){ for(const k in (CLOSEDG[mk]||{})) if(inD(k)) b.closed[k]=true; for(const k in (HOLEY[mk]||{})) if(inD(k)) b.holes[k]=HOLEY[mk][k]; } }
+/* riprende nella bozza l'orario pubblicato (dopo «Azzera tutto»): per il periodo scelto e per tutti gli anni */
+function restOne(m,days,mk){ const dset=new Set(days), b=m.rstBak||{ext:{},fixed:{},closed:{},holes:{}}, inD=k=>dset.has(k.split("|")[0]);
+  if(m.draft&&m.draft.sched){ const W=m.draft.sched; days.forEach(d=>{ if((m.sched||{})[d]) W[d]=JSON.parse(JSON.stringify(m.sched[d])); else delete W[d]; }); m.draft.at=new Date().toISOString(); }
+  m.ext={...(m.ext||{})}; for(const k in b.ext) if(inD(k)){ if(!m.ext[k]) m.ext[k]=b.ext[k]; delete b.ext[k]; }
+  m.fixed={...(m.fixed||{})}; for(const k in b.fixed) if(inD(k)){ if(!m.fixed[k]) m.fixed[k]=b.fixed[k]; delete b.fixed[k]; }
+  if(m.extReset){ m.extReset={...m.extReset}; days.forEach(d=>delete m.extReset[d]); }
+  if(mk){ let ch=false; const c={...(CLOSEDG[mk]||{})}, h={...(HOLEY[mk]||{})};
+    for(const k in b.closed) if(inD(k)){ c[k]=true; delete b.closed[k]; ch=true; } for(const k in b.holes) if(inD(k)){ if(!h[k]) h[k]=b.holes[k]; delete b.holes[k]; ch=true; }
+    if(ch){ CLOSEDG={...CLOSEDG,[mk]:c}; HOLEY={...HOLEY,[mk]:h}; if(db) saveYearsDoc().catch(()=>{}); } }
+  /* bozza uguale al pubblicato: si toglie */
+  if(m.draft&&m.draft.sched&&m.sched){ const dr=m.draft.sched, pub=m.sched, ds=new Set([...Object.keys(dr),...Object.keys(pub)]); let same=true;
+    for(const d of ds){ const ks=new Set([...Object.keys(dr[d]||{}),...Object.keys(pub[d]||{})]); for(const k of ks) if(!sameCell((dr[d]||{})[k],(pub[d]||{})[k])){ same=false; break; } if(!same) break; }
+    if(same) m.draft=null; } }
+function restorePublished(mk,wk){ const mo=M(mk), p=period(mk), days=wk===null?p.days:p.days.slice(wk*7,wk*7+7);
+  restOne(mo,days,mk); SEXC.key=null; TICK++; const oth=eachOtherYear(mk,m=>{ restOne(m,days); });
+  if(!hasDraft(mo)) UI.draftView=false; histAdd(mk,"Ripreso l'orario pubblicato",(mo.draft&&mo.draft.sched)||mo.sched); persist(); render();
+  toast((wk===null?"Mese":`Settimana ${wk+1}`)+": ripreso l'orario pubblicato"+(oth?" (tutti gli anni)":"")+", con turni fissi, coperti da altri anni, sale chiuse e anni degli scoperti tolti con «Azzera tutto»"); }
 function resetRange(mk,wk){
     const mo=M(mk), p=period(mk), days=wk===null?p.days:p.days.slice(wk*7,wk*7+7);
     if(!hasDraft(mo)) mo.draft={sched:mo.sched?clone(mo.sched):{},at:new Date().toISOString(),acc:{}};
     const W=mo.draft.sched, fx=mo.fixed||{};
     /* via anche turni coperti da altri anni (foglio e a mano), sale chiuse e anni assegnati agli scoperti di quei giorni; mai le indisponibilità */
-    const now=new Date().toISOString(), dset=new Set(days); mo.ext={...(mo.ext||{})}; Object.keys(mo.ext).forEach(k=>{ if(dset.has(k.split("|")[0])) delete mo.ext[k]; });
+    const now=new Date().toISOString(), dset=new Set(days); bakReset(mo,dset,mk); mo.ext={...(mo.ext||{})}; Object.keys(mo.ext).forEach(k=>{ if(dset.has(k.split("|")[0])) delete mo.ext[k]; });
     mo.extReset={...(mo.extReset||{})}; days.forEach(d=>mo.extReset[d]=now); SEXC.key=null; TICK++;
     if(CLOSEDG[mk]){ const c={...CLOSEDG[mk]}; Object.keys(c).forEach(k=>{ if(dset.has(k.split("|")[0])) delete c[k]; }); CLOSEDG={...CLOSEDG,[mk]:c}; }
     if(HOLEY[mk]){ const h={...HOLEY[mk]}; Object.keys(h).forEach(k=>{ if(dset.has(k.split("|")[0])) delete h[k]; }); HOLEY={...HOLEY,[mk]:h}; }
@@ -1565,6 +1590,24 @@ function daySheet(d){ const mo=M(UI.mk), u=unavOf(mo,UI.sel,d), avail=shiftsOfDa
    ${ADMIN()&&conflictsOf(UI.mk,UI.sel,d).length?`<div class="alerts bad"><strong>${esc(resName(UI.sel))} è già in turno: ${conflictsOf(UI.mk,UI.sel,d).map(c=>slotLabel(c)).join(", ")}</strong><button class="btn primary" data-act="planday" data-d="${d}">Programma un cambio</button></div>`:""}
    <div class="row"><button class="btn" data-act="u" data-v="">Disponibile</button><button class="btn primary" data-act="close">Fatto</button></div>`);
   layer.dataset.d=d; }
+/* specializzandi di altri anni inseriti a mano in una casella: vanno nella bozza del loro anno (turno fisso) */
+function othCell(mk,d,k){ const out=[]; if(!MULTI) return out; const [pid0,s]=k.split("|"), post=postOf(pid0); if(!post) return out;
+  for(const y of YRS(mk)){ if(y===CURY) continue; const st=yState(y), m=st&&st.months&&st.months[mk]; if(!m) continue; const sc=(m.draft&&m.draft.sched)||m.sched||{};
+    const py=(st.posts||[]).find(p=>normRoom(p.name)===normRoom(post.name)); if(!py) continue;
+    ((sc[d]||{})[py.id+"|"+s]||[]).forEach(x=>{ const r=(st.residents||[]).find(z=>z.id===x); if(r) out.push({y,pid:x,name:`(${yLab(r.year||st.groupYear||y)}) ${r.name}`}); }); }
+  return out; }
+function othBusy(mk,y,pid,d){ const st=yState(y), m=st&&st.months&&st.months[mk]; if(!m) return ""; const sc=(m.draft&&m.draft.sched)||m.sched||{};
+  for(const k in (sc[d]||{})) if((sc[d][k]||[]).includes(pid)){ const sh=k.split("|")[1]; return "già di "+SHN[sh].toLowerCase(); }
+  for(const k in (sc[add(d,-1)]||{})) if(k.endsWith("|N")&&(sc[add(d,-1)][k]||[]).includes(pid)) return "giorno di smonto"; return ""; }
+function othEdit(mk,y,d,k,pid,addIt){ const st=yState(y); if(!st||!db) return; const [pid0,s]=k.split("|"), post=postOf(pid0), py=(st.posts||[]).find(p=>normRoom(p.name)===normRoom(post.name));
+  if(!py){ toast("Il "+yLab(y)+"° anno non ha questa sala"); return; }
+  const months=JSON.parse(JSON.stringify(st.months||{})), m=months[mk]=months[mk]||{rot:{}}, key=py.id+"|"+s, W=draftOf(m); W[d]=W[d]||{};
+  let arr=(W[d][key]||[]).filter(x=>x); const fx=m.fixed=m.fixed||{}, pre=d+"|"+key+"|", wasFx=new Set(Object.keys(fx).filter(z=>z.startsWith(pre)).map(z=>fx[z]));
+  if(addIt){ if(!arr.includes(pid)) arr.push(pid); wasFx.add(pid); } else { arr=arr.filter(x=>x!==pid); wasFx.delete(pid); }
+  Object.keys(fx).filter(z=>z.startsWith(pre)).forEach(z=>delete fx[z]); arr.forEach((x,i)=>{ if(wasFx.has(x)) fx[pre+i]=x; });
+  W[d][key]=arr.length?arr:[null]; m.draft.at=new Date().toISOString(); m.draft.who={...(m.draft.who||{}),[d+"|"+key]:whoAmI()};
+  const w=Math.floor(period(mk).days.indexOf(d)/7); if(m.draft.acc) delete m.draft.acc[w];
+  saveYearMonths(y,months,[mk]).then(()=>{ toast(addIt?"Aggiunto nella bozza del "+yLab(y)+"° anno":"Tolto dalla bozza del "+yLab(y)+"° anno"); }).catch(()=>toast("Non riesco a salvare il "+yLab(y)+"° anno")); }
 function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf(postId), arr=((editSched(mo)||{})[d]||{})[k]||[null], {per}=derive(UI.mk,viewSched(UI.mk)||undefined);
   const w=Math.floor(period(UI.mk).days.indexOf(d)/7), {pri,jol}=pools(mo,post,s), cov=covOf(post,s);
   const why=pid=>{ const p=per[pid], u=unavOf(mo,pid,d); if(!canDo(pid,s)) return s==="N"?"non abilitato alle notti":"non abilitato alle guardie";
@@ -1592,6 +1635,12 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
         if(!others.length) return "";
         return `<span class="groupname">Altri specializzandi (fuori rotazione)</span>${others.sort((a,b)=>!!why(a.id)-!!why(b.id)).map(r=>btn(r,i,cur,true)).join("")}`; })()}
      ${cur?`<button class="btn danger" data-act="assign" data-i="${i}" data-id="">${arr.filter(x=>x).length>1?"Togli":"Lascia scoperto"}</button>`:""}</div>`).join("")}
+   ${MULTI&&ADMIN()?(()=>{ const inC=othCell(UI.mk,d,k), inSet=new Set(inC.map(x=>x.y+"|"+x.pid));
+      const groups=YRS(UI.mk).filter(y=>y!==CURY).map(y=>{ const st=yState(y); return {y,res:((st&&st.residents)||[]).filter(r=>!inSet.has(y+"|"+r.id))}; }).filter(g=>g.res.length).sort((a,b)=>yLab(b.y)-yLab(a.y));
+      return `<details class="stack" style="gap:6px"><summary class="groupname" style="cursor:pointer">Specializzandi di altri anni${inC.length?` (${inC.length} qui)`:""}</summary>
+        ${inC.length?`<div class="stack" style="gap:4px">${inC.map(x=>`<div class="row" style="justify-content:space-between"><span class="name-strong">${esc(x.name)}</span><button class="btn sm danger" data-act="othdel" data-y="${x.y}" data-id="${x.pid}">Togli</button></div>`).join("")}</div>`:""}
+        <p class="muted" style="margin:0;font-size:.8rem">Va nella bozza del suo anno (turno fisso): la pubblicano i rappresentanti di quell'anno.</p>
+        ${groups.map(g=>`<span class="groupname">${ROMAN[yLab(g.y)]} anno</span>${g.res.map(r=>{ const b=othBusy(UI.mk,g.y,r.id,d); return `<button class="cand" data-act="othadd" data-y="${g.y}" data-id="${r.id}"><span><span class="name-strong">(${yLab(r.year||(yState(g.y)||{}).groupYear||g.y)}) ${esc(r.name)}</span>${b?`<br><span class="why">${b}</span>`:""}</span></button>`; }).join("")}`).join("")}</details>`; })():""}
    <div class="row">${(mo.ext||{})[d+"|"+k]&&(mo.ext[d+"|"+k]||[]).includes(EXT_MAN)?`<button class="btn" data-act="extmark" data-v="0">Togli «coperto da altri anni»</button>`:`<button class="btn" data-act="extmark" data-v="1">Coperto da altri anni</button>`}
      ${isClosed(mo,d,k)?`<button class="btn" data-act="closeroom" data-v="0">Riapri la sala</button>`:`<button class="btn" data-act="closeroom" data-v="1">Sala chiusa (questo turno)</button><button class="btn" data-act="closeroom" data-v="2">Sala chiusa tutto il giorno</button>`}</div>`);
   layer.dataset.d=d; layer.dataset.k=k; }
@@ -1695,7 +1744,7 @@ document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]"); if(!el) return;
   let a=el.dataset.act;
   if(a==="close"){ if(e.target===el||el.tagName==="BUTTON"){closeSheet();render();} return; }
-  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","reset","clrgen","clrmine","clrext","refresh","refrot","years","accall","accw","drop","hopen","hdel","unlink","unlinku","swdel","mswgo"].includes(a)) UI.confirm=null;
+  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","reset","clrgen","clrmine","restpub","clrext","refresh","refrot","years","accall","accw","drop","hopen","hdel","unlink","unlinku","swdel","mswgo"].includes(a)) UI.confirm=null;
   if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(Object.values(CLAIMS).includes(MYUID)||CLAIMDOCS.some(x=>x.u===MYUID)){ toast(OWNER?"Il tuo account è già associato a un nome: per cambiarlo prima scollegalo in Impostazioni → Account collegati":"Il tuo account è già associato a un nome: solo il proprietario può cambiarlo"); return; } if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString(),email:(USER&&USER.email&&USER.email())||""}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} const y=MULTI?yearOfPid(pid):null; if(y&&y!==CURY) switchYear(y); UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
   if(a==="unlinku"){ const u=el.dataset.u; if(UI.confirm!=="unlu-"+u){UI.confirm="unlu-"+u;render();return;} UI.confirm=null;
     db.doc("claims/"+u).delete().then(()=>{ toast("Account scollegato: ora può scegliere il suo nome"); render(); }).catch(()=>toast("Non riesco a scollegare")); return; }
@@ -1871,6 +1920,8 @@ document.addEventListener("click",e=>{
   if(a==="clapply"){ const n=applyClosed(UI.mk,[...UI.clsel],el.dataset.v==="1"); UI.clsel=null; persist(); render();
     toast(n?(el.dataset.v==="1"?`${n} turni chiusi (nella bozza, da accettare)`:`${n} turni riaperti (nella bozza)`):"Nessuna modifica"); return; }
   if(a==="cell"){ if(hasDraft(M(UI.mk))) UI.draftView=true;cellSheet(el.dataset.d,el.dataset.k);return;}
+  if(a==="othadd"||a==="othdel"){ othEdit(UI.mk,+el.dataset.y,layer.dataset.d,layer.dataset.k,el.dataset.id,a==="othadd"); closeSheet(); render(); return; }
+  if(a==="restpub"){ if(UI.confirm!=="restpub"){UI.confirm="restpub";render();return;} UI.confirm=null; restorePublished(UI.mk,UI.rstWk===""||UI.rstWk===undefined||UI.rstWk===null?null:+UI.rstWk); return; }
   if(a==="assign"){ const mo=M(UI.mk), d=layer.dataset.d, k=layer.dataset.k, i=+el.dataset.i, id=el.dataset.id||null;
     const W=ensureDraft(mo,d); mo.draft.who={...(mo.draft.who||{}),[d+"|"+k]:whoAmI()}; /* chi ha modificato la casella (per il messaggio di cambio) */ W[d]=W[d]||{}; W[d][k]=W[d][k]||[null]; const arr=W[d][k], fx=mo.fixed=mo.fixed||{}, pre=d+"|"+k+"|";
     if(id){ arr[i]=id; fx[pre+i]=id; }
