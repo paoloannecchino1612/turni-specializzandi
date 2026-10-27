@@ -917,9 +917,10 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
       ${histBox(UI.mk)}
       ${(mo.sched||hasDraft(mo))?`<div class="stack" style="gap:6px;border-top:1px solid var(--line);padding-top:10px"><span class="label">Azzera i turni</span>
         <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><select id="rstWk" data-rstwk="1"><option value="">Tutto il mese</option>${Array.from({length:nW},(_,w)=>`<option value="${w}" ${String(UI.rstWk??"")===String(w)?"selected":""}>Settimana ${w+1}: ${fmt(p.days[w*7])} – ${fmt(p.days[w*7+6])}</option>`).join("")}</select>
-         <button class="btn ${UI.confirm==="clrgen"?"confirm":""}" data-act="clrgen">${UI.confirm==="clrgen"?"Tocca di nuovo: elimina":"Elimina i turni del tuo anno"}</button>
+         <button class="btn ${UI.confirm==="clrmine"?"confirm":""}" data-act="clrmine">${UI.confirm==="clrmine"?"Tocca di nuovo: elimina":"Elimina i turni del tuo anno"}</button>
+         <button class="btn ${UI.confirm==="clrgen"?"confirm":""}" data-act="clrgen">${UI.confirm==="clrgen"?"Tocca di nuovo: elimina":"Elimina i turni generati"}</button>
          <button class="btn danger ${UI.confirm==="reset"?"confirm":""}" data-act="reset">${UI.confirm==="reset"?"Tocca di nuovo: azzera tutto":"Azzera tutto"}</button></div>
-        <p class="muted" style="margin:0;font-size:.8rem"><strong>Elimina i turni del tuo anno</strong>: toglie solo i turni messi dal generatore; restano quelli inseriti a mano o arrivati dal foglio (link/file), le sale chiuse, i turni coperti da altri anni e gli anni assegnati ai turni scoperti.<br>Valgono per tutti gli anni.<br><strong>Azzera tutto</strong>: svuota tutte le caselle (anche i turni inseriti a mano o dal foglio) e toglie per quel periodo sale chiuse, turni coperti da altri anni e anni assegnati ai turni scoperti.<br>Indisponibilità, ferie e congressi non vengono mai toccati. I turni vanno nella bozza: l'orario pubblicato cambia quando premi «Pubblica» («Annulla» torna indietro).</p></div>`:""}</div>`:""}`:"";
+        <p class="muted" style="margin:0;font-size:.8rem"><strong>Elimina i turni del tuo anno</strong>: toglie i turni messi dal generatore solo nell'anno che stai guardando.<br><strong>Elimina i turni generati</strong>: lo stesso, ma in tutti gli anni.<br>In entrambi restano i turni inseriti a mano o arrivati dal foglio (link/file), le sale chiuse, i turni coperti da altri anni e gli anni assegnati ai turni scoperti.<br><strong>Azzera tutto</strong> (tutti gli anni): svuota tutte le caselle (anche i turni inseriti a mano o dal foglio) e toglie per quel periodo sale chiuse, turni coperti da altri anni e anni assegnati ai turni scoperti.<br>Indisponibilità, ferie e congressi non vengono mai toccati. I turni vanno nella bozza: l'orario pubblicato cambia quando premi «Pubblica» («Annulla» torna indietro).</p></div>`:""}</div>`:""}`:"";
   const pubBar=ADMIN()&&hasDraft(mo)?`<div style="height:84px"></div><div class="pubbar"><span class="name-strong">Bozza non pubblicata${(()=>{ const c=draftChanges(mo,true); return c?` · ${c.size} ${mo.sched?"caselle cambiate":"caselle nuove"}`:""; })()}</span>
       <button class="btn ${UI.confirm==="accall"?"confirm":"primary"}" data-act="accall">${UI.confirm==="accall"?"Tocca di nuovo: pubblica":"Pubblica"}</button>
       ${clrBtn("drop","Annulla")}
@@ -1508,7 +1509,7 @@ function resetRange(mk,wk){
     const oth=eachOtherYear(mk,m=>resetOther(m,days,wk,n));
     UI.draftView=true; histAdd(mk,wk===null?"Bozza azzerata (tutto il mese)":`Bozza azzerata: settimana ${wk+1}`,W); persist(); render();
     toast((wk===null?"Mese azzerato":`Settimana ${wk+1} azzerata`)+(oth?` per tutti gli anni`:"")+" nella bozza: pubblica per renderlo effettivo"); }
-function clearGenerated(mk,wk){
+function clearGenerated(mk,wk,onlyMine){
     const mo=M(mk), p=period(mk), days=wk===null?p.days:p.days.slice(wk*7,wk*7+7), fx=mo.fixed||{}; let n=0;
     if(!hasDraft(mo)) mo.draft={sched:mo.sched?clone(mo.sched):{},at:new Date().toISOString(),acc:{}};
     const W=mo.draft.sched;
@@ -1518,7 +1519,7 @@ function clearGenerated(mk,wk){
         Object.keys(fx).filter(z=>z.startsWith(pre)).forEach(z=>delete fx[z]); keep.forEach((x,i)=>fx[pre+i]=x);
         day[k]=keep.length?keep:((day[k]||[]).length===0?[]:[null]); } });
     mo.fixed=fx; mo.draft.at=new Date().toISOString(); const nw=p.days.length/7; for(let w=0;w<nw;w++) if(wk===null||w===wk) delete (mo.draft.acc||{})[w];
-    const oth=eachOtherYear(mk,m=>clearGenOther(m,days,wk,nw));
+    const oth=onlyMine?0:eachOtherYear(mk,m=>clearGenOther(m,days,wk,nw));
     UI.draftView=true; histAdd(mk,"Turni generati eliminati",W); persist(); render(); toast(`${n} turni generati tolti dalla bozza${oth?" (e quelli degli altri anni)":""}; restano quelli inseriti a mano o dal foglio`); }
 function sheet(html){layer.innerHTML=`<div class="scrim" data-act="close"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;}
 function closeSheet(){layer.innerHTML="";}
@@ -1668,7 +1669,7 @@ document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]"); if(!el) return;
   let a=el.dataset.act;
   if(a==="close"){ if(e.target===el||el.tagName==="BUTTON"){closeSheet();render();} return; }
-  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","reset","clrgen","clrext","refresh","refrot","years","accall","accw","drop","hopen","hdel","unlink","unlinku","swdel","mswgo"].includes(a)) UI.confirm=null;
+  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","reset","clrgen","clrmine","clrext","refresh","refrot","years","accall","accw","drop","hopen","hdel","unlink","unlinku","swdel","mswgo"].includes(a)) UI.confirm=null;
   if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(Object.values(CLAIMS).includes(MYUID)||CLAIMDOCS.some(x=>x.u===MYUID)){ toast(OWNER?"Il tuo account è già associato a un nome: per cambiarlo prima scollegalo in Impostazioni → Account collegati":"Il tuo account è già associato a un nome: solo il proprietario può cambiarlo"); return; } if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString(),email:(USER&&USER.email&&USER.email())||""}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} const y=MULTI?yearOfPid(pid):null; if(y&&y!==CURY) switchYear(y); UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
   if(a==="unlinku"){ const u=el.dataset.u; if(UI.confirm!=="unlu-"+u){UI.confirm="unlu-"+u;render();return;} UI.confirm=null;
     db.doc("claims/"+u).delete().then(()=>{ toast("Account scollegato: ora può scegliere il suo nome"); render(); }).catch(()=>toast("Non riesco a scollegare")); return; }
@@ -1854,6 +1855,7 @@ document.addEventListener("click",e=>{
     persist(); closeSheet(); render(); return; }
   if(a==="reset"){ if(UI.confirm!=="reset"){UI.confirm="reset";render();return;} UI.confirm=null; resetRange(UI.mk,UI.rstWk===""||UI.rstWk===undefined||UI.rstWk===null?null:+UI.rstWk); return; }
   if(a==="clrgen"){ if(UI.confirm!=="clrgen"){UI.confirm="clrgen";render();return;} UI.confirm=null; clearGenerated(UI.mk,UI.rstWk===""||UI.rstWk===undefined||UI.rstWk===null?null:+UI.rstWk); return; }
+  if(a==="clrmine"){ if(UI.confirm!=="clrmine"){UI.confirm="clrmine";render();return;} UI.confirm=null; clearGenerated(UI.mk,UI.rstWk===""||UI.rstWk===undefined||UI.rstWk===null?null:+UI.rstWk,true); return; }
   if(a==="manualstart"){ const mo=M(UI.mk); if(!hasDraft(mo)){ const sc={}; period(UI.mk).days.forEach(d=>{ sc[d]={}; slotsOfDay(d).forEach(x=>{ sc[d][x.key]=extCovered(mo,d,x.key)?[]:[null]; }); }); mo.draft={sched:mo.sched?clone(mo.sched):sc,at:new Date().toISOString(),acc:{}}; } UI.draftView=true;
     UI.view="giorni"; persist(); render(); return; }
   if(a==="del"){ const id=el.dataset.id; if(UI.confirm!=="del-"+id){UI.confirm="del-"+id;render();return;}
