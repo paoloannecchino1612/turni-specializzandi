@@ -269,6 +269,8 @@ function slotsWith(d,day){ const base=slotsOfDay(d), have=new Set(base.map(x=>x.
 /* DEA (mattina e pomeriggio), notti e guardie: le può fare chiunque, senza guardare la rotazione */
 function covOf(post,s){ return (post.all||[]).includes(s)||post.cover==="DEA"||s==="N"||s==="D"?"ALL":post.cover; }
 function pools(mo,post,s){ const inG=S.residents.filter(r=>inGem(mo,r.id)), cov=covOf(post,s);
+  /* DEA mattina/pomeriggio: la può fare chiunque, ma prima chi è in rotazione DEA; gli altri solo se serve */
+  if(post.cover==="DEA"&&(s==="M"||s==="P")) return {pri:inG.filter(r=>rotCovers(mo.rot[r.id],"DEA")),jol:inG.filter(r=>!rotCovers(mo.rot[r.id],"DEA"))};
   if(cov==="ALL") return {pri:inG,jol:[]};
   /* i jolly (Angiografia, DEA) coprono solo TC e RM: le altre sale solo chi è nella loro rotazione */
   return {pri:inG.filter(r=>rotCovers(mo.rot[r.id],cov)), jol:(isJolly(cov)||!(cov==="TC"||cov==="RM"))?[]:inG.filter(r=>!rotCovers(mo.rot[r.id],cov)&&(isJolly(mo.rot[r.id])||incl(mo,r.id)))}; }
