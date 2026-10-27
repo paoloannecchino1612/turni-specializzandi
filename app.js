@@ -266,7 +266,8 @@ function slotsWith(d,day){ const base=slotsOfDay(d), have=new Set(base.map(x=>x.
   for(const k in (day||{})){ if(have.has(k)||!(day[k]||[]).some(x=>x)) continue; const [pid,s]=k.split("|"), post=postOf(pid); if(post&&SH.includes(s)) out.push({post,s,key:k,extra:true}); }
   return out; }
 /* chi può coprire una postazione: primari, poi jolly */
-function covOf(post,s){ return (post.all||[]).includes(s)?"ALL":post.cover; }
+/* DEA (mattina e pomeriggio), notti e guardie: le può fare chiunque, senza guardare la rotazione */
+function covOf(post,s){ return (post.all||[]).includes(s)||post.cover==="DEA"||s==="N"||s==="D"?"ALL":post.cover; }
 function pools(mo,post,s){ const inG=S.residents.filter(r=>inGem(mo,r.id)), cov=covOf(post,s);
   if(cov==="ALL") return {pri:inG,jol:[]};
   /* i jolly (Angiografia, DEA) coprono solo TC e RM: le altre sale solo chi è nella loro rotazione */
@@ -501,11 +502,13 @@ function generate(mk,wk,only2,from){ TICK++; /* from: i giorni prima restano com
     sched[d]={};
     slotsOfDay(d).forEach(x=>{ if(isClosed(mo,d,x.key)||extCovered(mo,d,x.key)){ sched[d][x.key]=[]; return; }
       /* tanti posti quante persone servono a quest'anno; se gli altri anni arrivano già al minimo resta un posto facoltativo (fino al massimo) */
-      const need=needOf(mo,d,x.key); sched[d][x.key]=[null];
-      for(let k=0;k<need;k++) slots.push({d,i,w,t,post:x.post,s:x.s,key:x.key,k,ext:false});
-      /* sale "una per anno" (DEA, guardia): anche se il minimo è già raggiunto, quest'anno prova a mettere la sua persona (senza farne un buco) */
-      if(!need) slots.push({d,i,w,t,post:x.post,s:x.s,key:x.key,k:0,ext:!capOf(x.post,x.s).py}); }); });
-  const pri=x=>x.s==="N"?0:x.s==="D"?1:(x.t!=="fer"?2:3);
+      const {need,nL,nO}=myNeed(mo,d,x.key); sched[d][x.key]=[null];
+      /* i posti degli scoperti assegnati a quest'anno vengono per primi (tag) */
+      for(let k=0;k<need;k++) slots.push({d,i,w,t,post:x.post,s:x.s,key:x.key,k,ext:false,tag:k<nL});
+      /* sale "una per anno" (DEA, guardia): anche se il minimo è già raggiunto, quest'anno prova a mettere la sua persona (senza farne un buco);
+         non se la casella è stata assegnata a un altro anno */
+      if(!need&&!nO) slots.push({d,i,w,t,post:x.post,s:x.s,key:x.key,k:0,ext:!capOf(x.post,x.s).py}); }); });
+  const pri=x=>x.tag?-1:x.s==="N"?0:x.s==="D"?1:(x.t!=="fer"?2:3);
   slots.forEach(x=>x.r=rand()); slots.sort((a,b)=>pri(a)-pri(b)||a.i-b.i||a.r-b.r);
   const covCnt=(p,cov)=>{ let n=0; for(const id in p.pc){ const q=postOf(id); if(q&&q.cover===cov) n+=p.pc[id]; } return n; };
   const pick=(sl,cands,cap,forceG,mcap)=>{ let best=null,bk=null; if(mcap===undefined) mcap=mMain;
@@ -548,7 +551,7 @@ function generate(mk,wk,only2,from){ TICK++; /* from: i giorni prima restano com
       cands.sort((a,b)=>(a.ext-b.ext)||((fill[a.key]||0)-(fill[b.key]||0)));
       for(const sl of cands){ if(pick(sl,[r],maxCap,false,sl.ext?fair:undefined)){ put(sl,r); fill[sl.key]=(fill[sl.key]||0)+1; break; } } } }
   for(const [grp,cap] of [["pri",soft],["jol",soft],["pri",maxCap],["jol",maxCap]])
-    for(const pr of [0,1,2,3]) for(const list of ((pr<2&&(capN||capD))?byDay.map(l=>({l,o:rand()})).sort((a,b)=>a.o-b.o).map(x=>x.l):byDay)){
+    for(const pr of [-1,0,1,2,3]) for(const list of ((pr<2&&(capN||capD))?byDay.map(l=>({l,o:rand()})).sort((a,b)=>a.o-b.o).map(x=>x.l):byDay)){
       const todo=list.filter(sl=>pri(sl)===pr&&!sl.ext&&!filled(sl));
       todo.forEach(sl=>sl.r=rand());
       todo.sort((a,b)=>(a.post.cover==="ECO")-(b.post.cover==="ECO")||(fill[a.key]||0)-(fill[b.key]||0)||a.r-b.r); /* RX prima di Eco (RX/Eco) */
@@ -645,7 +648,7 @@ function derive(mk,override){
     slotsWith(d,SC[d]).forEach(({post,s,key,extra})=>{ const arr=(SC[d]||{})[key]||[null];
       if(!extra){
       if(arr.some(x=>x)&&isClosed(mo,d,key)) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: sala chiusa ma con ${arr.filter(x=>x).map(resName).join(", ")}`);
-      { const nd=needOf(mo,d,key), oc=arr.filter(x=>x).length; if(oc<nd&&!isClosed(mo,d,key)) holes.push({d,post:post.name,s,n:nd-oc}); }
+      { const nd=myNeed(mo,d,key).need, oc=arr.filter(x=>x).length; if(oc<nd&&!isClosed(mo,d,key)) holes.push({d,post:post.name,s,n:nd-oc}); }
       { const c=capOf(post,s), oc=arr.filter(x=>x).length, oth=othersIn(mo,d,key); if(oc&&oc+oth>c.max) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: ${oc+oth} persone (massimo ${c.max})`); }
       if((post.cover==="TC"||post.cover==="RM")&&multiPost(post,s)){ const o=arr.filter(x=>x); if(o.length>1) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: ${o.length} dello stesso anno (${o.map(resName).join(", ")})${sameYearOk(curYear())?"":" — non previsto per questo anno"}`);
       } }
@@ -1353,6 +1356,10 @@ const ROOM_MAX=3;
 function curYear(){ return yLab(S.groupYear||2); }
 function sameYearOk(y){ return y===2||y===3; }
 function othersIn(mo,d,key){ return (EXT(mo)[d+"|"+key]||[]).length+(lowerOnly(mo,d,key)||[]).length; }
+/* turni scoperti assegnati a un anno: spettano solo a quell'anno (gli altri anni non li coprono) e per quell'anno vengono per primi */
+function myNeed(mo,d,key){ const base=needOf(mo,d,key), tags=unsatTags(mo,d,key,[]); if(!tags.length) return {need:base,nL:0,nO:0};
+  const L=curYear(), nL=tags.filter(l=>l===L).length, nO=tags.length-nL, [pid,s]=key.split("|"), p=postOf(pid), room=p?Math.max(0,capOf(p,s).max-othersIn(mo,d,key)):0;
+  return {need:Math.min(room,Math.max(base-nO,nL)),nL,nO}; }
 function roomCovered(mo,d,key){ return needOf(mo,d,key)===0; }
 /* allinea l'orario già presente: i turni coperti da altri anni restano vuoti (non buchi), gli altri tornano da coprire */
 function syncExt(mo){ TICK++; for(const sc of [mo.sched,hasDraft(mo)?mo.draft.sched:null]){ if(!sc) continue;
