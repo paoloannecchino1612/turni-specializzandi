@@ -721,7 +721,10 @@ function render(){ TICK++;
   const yLoaded=!MULTI||ALLY().every(y=>yState(y)||(RAW[y]&&RAW[y].cfg===null));
   const needLink=db&&MYUID&&yLoaded&&(MULTI||S.residents.length)&&!myAnyPid();
   if(needLink&&!OWNER){ app.innerHTML=`<section class="view">${claimPanel("")}</section>`; return; }
+  /* la tabella "Per giorno" scorre dentro il suo riquadro: dopo ogni aggiornamento resta dove era (es. selezionando più caselle) */
+  const rk=UI.tab+"|"+UI.mk+"|"+UI.view+"|"+CURY, tw=app.querySelector(".scroll.tall"), keep=tw&&render.rk===rk?{t:tw.scrollTop,l:tw.scrollLeft,y:window.scrollY}:null; render.rk=rk;
   app.innerHTML=`<section class="view">${todayBanner()}${yearBar()}${needLink?linkPanel():""}${({mese:vMese,indisp:vIndisp,turni:()=>ADMIN()?asResident(vTurni):vTurni(),modturni:vTurni,cambi:vCambi,imp:vImp}[UI.tab]||vMese)()}</section>`;
+  if(keep){ const nw=app.querySelector(".scroll.tall"); if(nw){ nw.scrollTop=keep.t; nw.scrollLeft=keep.l; } if(Math.abs(window.scrollY-keep.y)>2) window.scrollTo(0,keep.y); }
 }
 /* banner in alto: il turno di oggi e di domani di chi ha un nome associato (orario pubblicato, con i cambi accettati) */
 function mkOfDay(d){ const [y,m]=d.split("-").map(Number); for(const dm of [0,1,-1]){ const mk=mkOf(y,m+dm), p=period(mk); if(d>=p.first&&d<=p.last) return mk; } return null; }
