@@ -108,6 +108,7 @@ table.grid td.cell.chg{background:var(--chg-soft);box-shadow:inset 0 0 0 2px var
 table.grid td.cell.sel{outline:3px solid var(--accent);outline-offset:-3px;background:var(--accent-soft)}
 table.grid td.cell.none:hover{background:none}
 .who{display:block;white-space:nowrap}
+.pubbar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--surface);border-top:2px solid var(--accent);padding:10px 16px calc(10px + env(safe-area-inset-bottom));display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:center;box-shadow:0 -4px 14px rgba(0,0,0,.12)}
 .hole{display:inline-block;font:600 .72rem var(--f-mono);color:var(--bad);background:var(--bad-soft);padding:1px 6px;border-radius:4px}
 td.num{font-family:var(--f-mono);text-align:right;font-variant-numeric:tabular-nums}
 .code{font:600 .72rem var(--f-mono);text-align:center}
@@ -200,7 +201,7 @@ body{margin:0;font-size:15px} img{max-width:100%} [hidden]{display:none!importan
 <div id="layer"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script type="module" src="fb.js?v=97"></script>
-<script type="module" src="app.js?v=97"></script>
+<script type="module" src="fb.js?v=98"></script>
+<script type="module" src="app.js?v=98"></script>
 <script>if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});</script>
 </body></html>

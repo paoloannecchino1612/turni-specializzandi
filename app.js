@@ -399,7 +399,7 @@ function acceptDraft(mk,weeks){ const mo=M(mk); if(!hasDraft(mo)) return 0; cons
   if(chg.length) mo.changes=[...(mo.changes||[]),...chg].slice(-300);
   mo.draft.acc={...(mo.draft.acc||{})}; weeks.forEach(w=>mo.draft.acc[w]=true); mo.generated=new Date().toISOString();
   const all=Array.from({length:n},(_,w)=>w).every(w=>mo.draft.acc[w]);
-  histAdd(mk,weeks.length===n?"Accettata (tutto il mese)":`Accettata: ${weeks.map(w=>"settimana "+(w+1)).join(", ")}`,mo.draft.sched);
+  histAdd(mk,weeks.length===n?"Pubblicata (tutto il mese)":`Pubblicata: ${weeks.map(w=>"settimana "+(w+1)).join(", ")}`,mo.draft.sched);
   if(all) delete mo.draft; return weeks.length; }
 /* equilibrio tra gli anni (con più anni attivo): un anno che ha anni sotto di sé nella cascata si ferma alla quota
    media settimanale per persona (turni da coprire in tutte le sale ÷ specializzandi presenti di tutti gli anni), così il resto va agli anni successivi */
@@ -810,30 +810,37 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   const noRot=S.residents.filter(r=>!mo.rot[r.id]);
   const head=monthBar()+`<div class="panel"><div class="row" style="justify-content:space-between">
     <div class="stack" style="gap:2px"><h2>Turni del mese</h2><span class="muted" style="font-size:.82rem">${mo.generated?`Pubblicati il ${new Date(mo.generated).toLocaleString("it-IT",{dateStyle:"short",timeStyle:"short"})}`:"Non ancora pubblicati"}${ADMIN()&&hasDraft(mo)?" · bozza in corso":""}</span></div>
-    <div class="row">${!ADMIN()?"":(mo.sched||hasDraft(mo))?`<button class="btn primary" data-act="xlsx">Scarica Excel</button><button class="btn" data-act="xbozza">Excel formato BOZZA ORARI</button>${clrBtn("clrsched","Elimina tutti i turni")}`:""}</div></div>
-    ${ADMIN()?(()=>{ const nw=p.days.length/7, cur=UI.genWk??"";
+    </div>
+    ${ADMIN()?(()=>{ const nw=p.days.length/7, cur=UI.genWk??"", fresh=!mo.sched&&!hasDraft(mo);
       const filled=w=>p.days.slice(w*7,w*7+7).some(d=>Object.values((workSched(mo)||{})[d]||{}).some(a=>a.some(x=>x)));
-      return `<div class="row" style="gap:8px"><label class="row" style="gap:6px"><span class="label">Genera</span><select id="genWk" data-genwk="1"><option value="" ${cur===""?"selected":""}>Tutto il mese</option>${Array.from({length:nw},(_,w)=>`<option value="${w}" ${String(cur)===String(w)?"selected":""}>Settimana ${w+1}: ${fmt(p.days[w*7])} – ${fmt(p.days[w*7+6])}${filled(w)?" ✓":""}</option>`).join("")}</select></label>
-       <button class="btn ${UI.confirm==="genwk"?"confirm":""}" data-act="genwk">${UI.confirm==="genwk"?"Tocca di nuovo: sovrascrive questa parte":cur===""?"Genera il mese":"Genera la settimana"}</button></div>
-       <p class="muted" style="margin:0;font-size:.82rem">Generando una settimana, le altre restano come sono e vengono considerate per equità, riposi, monto e smonto.</p>
-       ${(mo.sched||hasDraft(mo))?`<div class="row" style="gap:8px"><button class="btn ${UI.confirm==="refresh"?"confirm":""}" data-act="refresh">${UI.confirm==="refresh"?"Tocca di nuovo: aggiorna i turni":"Aggiorna l'orario"}</button></div>
-       <div class="row" style="gap:8px"><select id="refRot" data-refrot="1" aria-label="Rotazione"><option value="">Rotazione…</option>${S.rotations.map(r=>`<option value="${r.id}" ${UI.refRot===r.id?"selected":""}>${esc(r.name)}</option>`).join("")}</select><button class="btn ${UI.confirm==="refrot"?"confirm":""}" data-act="refrot" ${UI.refRot?"":"disabled"}>${UI.confirm==="refrot"?"Tocca di nuovo: aggiorna la rotazione":"Aggiorna la rotazione"}</button></div>
-       <p class="muted" style="margin:0;font-size:.82rem">«Aggiorna la rotazione» fa lo stesso solo per chi è nella rotazione scelta: gli altri non vengono toccati.</p>
-       <p class="muted" style="margin:0;font-size:.82rem">Tiene fermi i turni già assegnati; toglie quelli in conflitto con indisponibilità, ferie o congressi e quelli ora coperti da altri anni; poi ridistribuisce: ricopre i turni scoperti dando la precedenza a chi ha meno turni e pareggia le persone tra le sale della stessa metodica (TC, RM), spostando prima i più giovani.</p>`:""}
-       <div class="row" style="gap:8px"><button class="btn" data-act="nightlink">Notti e guardie programmate da link</button><label class="btn">Notti e guardie da file<input type="file" id="nightfile" accept=".xlsx,.xls,.csv" hidden></label></div>
-       <div class="row" style="gap:8px"><button class="btn" data-act="extlink">Turni degli altri anni da link</button><label class="btn">Turni degli altri anni da file<input type="file" id="extfile" accept=".xlsx,.xls,.csv" hidden></label>${Object.keys(mo.ext||{}).length?`<span class="chip">${Object.keys(mo.ext).length} turni coperti da altri anni</span>${clrBtn("clrext","Rimuovi")}`:""}</div>`; })():""}
+      return `<div class="row" style="gap:8px;align-items:center"><button class="btn primary" data-act="prep">${fresh?"Prepara la bozza del mese":"Prepara la bozza"}</button>
+         <button class="btn" data-act="optopen" aria-expanded="${!!UI.optOpen}">Opzioni ${UI.optOpen?"▴":"▾"}</button>
+         ${hasDraft(mo)&&mo.sched?`<button class="btn" data-act="dview" data-v="${draftView(mo)?"0":"1"}" style="border:0;text-decoration:underline;background:none">${draftView(mo)?"Vedi l'orario pubblicato":"Torna alla bozza"}</button>`:""}</div>
+       <p class="muted" style="margin:0;font-size:.82rem">${fresh?"Genera tutto il mese (i turni già inseriti a mano restano). Poi controlli e pubblichi.":"Tiene i turni già assegnati, toglie quelli in conflitto con ferie, congressi o indisponibilità e quelli già coperti da altri anni, copre i buchi e pareggia le sale. Il risultato va nella bozza: la pubblichi dalla barra in basso."}</p>
+       ${UI.optOpen?`<div class="stack" style="gap:8px;padding:10px;border:1px solid var(--line);border-radius:8px">
+         <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><span class="label">Rifai da zero</span><select id="genWk" data-genwk="1"><option value="" ${cur===""?"selected":""}>Tutto il mese</option>${Array.from({length:nw},(_,w)=>`<option value="${w}" ${String(cur)===String(w)?"selected":""}>Settimana ${w+1}: ${fmt(p.days[w*7])} – ${fmt(p.days[w*7+6])}${filled(w)?" ✓":""}</option>`).join("")}</select>
+          <button class="btn ${UI.confirm==="genwk"?"confirm":""}" data-act="genwk">${UI.confirm==="genwk"?"Tocca di nuovo: sovrascrive questa parte":"Rigenera"}</button></div>
+         <p class="muted" style="margin:0;font-size:.8rem">Ricrea la bozza da capo (restano solo i turni fissi inseriti a mano). Con una settimana, le altre restano come sono.</p>
+         ${fresh?"":`<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><span class="label">Solo una rotazione</span><select id="refRot" data-refrot="1" aria-label="Rotazione"><option value="">Rotazione…</option>${S.rotations.map(r=>`<option value="${r.id}" ${UI.refRot===r.id?"selected":""}>${esc(r.name)}</option>`).join("")}</select><button class="btn ${UI.confirm==="refrot"?"confirm":""}" data-act="refrot" ${UI.refRot?"":"disabled"}>${UI.confirm==="refrot"?"Tocca di nuovo":"Prepara solo questa"}</button></div>
+         <p class="muted" style="margin:0;font-size:.8rem">Come «Prepara la bozza», ma tocca solo chi è nella rotazione scelta: gli altri restano fermi.</p>`}</div>`:""}`; })():""}
     ${noRot.length?`<p class="muted" style="margin:0;font-size:.85rem">Senza rotazione questo mese: ${noRot.map(r=>esc(rName(r))).join(", ")}.</p>`:""}</div>`;
   if(!mo.generated&&!ADMIN()) return head+`<div class="panel empty"><h2>Turni non ancora pubblicati</h2><p>Appena verranno generati li vedrai qui.</p></div>`;
   const nW=p.days.length/7, acc=(mo.draft&&mo.draft.acc)||{};
-  const draft=ADMIN()?(hasDraft(mo)?`<div class="panel" style="border:2px solid var(--accent)"><div class="row" style="justify-content:space-between"><h2>Bozza${mo.draft.at?` del ${new Date(mo.draft.at).toLocaleString("it-IT",{dateStyle:"short",timeStyle:"short"})}`:""}</h2>
-      <span class="pickers sm"><button data-act="dview" data-v="1" aria-pressed="${draftView(mo)}">Bozza</button><button data-act="dview" data-v="0" aria-pressed="${!draftView(mo)}">Pubblicato</button></span></div>
-     <p class="muted" style="margin:0;font-size:.84rem">La bozza la vedete solo tu e i gestori di quest'anno. Accettandola (tutta o una settimana alla volta) diventa l'orario pubblicato: lo vedono tutti e passa agli altri anni.</p>
-     <div class="row" style="gap:6px"><button class="btn ${UI.confirm==="accall"?"confirm":"primary"}" data-act="accall">${UI.confirm==="accall"?"Tocca di nuovo: pubblica":"Accetta tutta la bozza"}</button>
-      ${Array.from({length:nW},(_,w)=>acc[w]?`<span class="chip tag-F">Sett. ${w+1} accettata</span>`:`<button class="btn ${UI.confirm==="accw-"+w?"confirm":""}" data-act="accw" data-w="${w}">${UI.confirm==="accw-"+w?"Tocca di nuovo":`Accetta sett. ${w+1} (${fmt(p.days[w*7]).slice(4)})`}</button>`).join("")}
-      ${clrBtn("drop","Elimina la bozza")}</div>
-     <div class="row"><button class="btn" data-act="hist">Storico bozze</button></div>${histBox(UI.mk)}</div>`
-    :`<div class="row"><button class="btn" data-act="hist">Storico bozze</button></div>${histBox(UI.mk)}`):"";
-  if(!mo.sched&&!hasDraft(mo)) return head+draft+`<div class="panel empty"><h2>Pronto per generare</h2><p>Controlla rotazioni e indisponibilità, poi scegli sopra se generare tutto il mese o una settimana. Potrai cambiare a mano ogni turno toccandolo.</p><p>Se alcuni turni sono già decisi, inseriscili prima a mano: la generazione non li tocca.</p><button class="btn" data-act="manualstart">Inserisci turni a mano</button></div>`;
+  /* strumenti (chiusi di base) e barra "Pubblica" fissa in basso quando c'è una bozza */
+  const tools=ADMIN()?`<div class="row" style="margin:6px 0"><button class="btn" data-act="toolsopen" aria-expanded="${!!UI.toolsOpen}">Strumenti ${UI.toolsOpen?"▴":"▾"}</button></div>
+    ${UI.toolsOpen?`<div class="panel"><h2>Strumenti</h2>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" data-act="extlink">Turni degli altri anni da link</button><label class="btn">Turni degli altri anni da file<input type="file" id="extfile" accept=".xlsx,.xls,.csv" hidden></label>${Object.keys(mo.ext||{}).length?`<span class="chip">${Object.keys(mo.ext).length} turni coperti da altri anni</span>${clrBtn("clrext","Rimuovi")}`:""}</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" data-act="nightlink">Notti e guardie programmate da link</button><label class="btn">Notti e guardie da file<input type="file" id="nightfile" accept=".xlsx,.xls,.csv" hidden></label></div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">${(mo.sched||hasDraft(mo))?`<button class="btn" data-act="xlsx">Scarica Excel</button><button class="btn" data-act="xbozza">Excel formato BOZZA ORARI</button>`:""}<button class="btn" data-act="manualstart">Inserisci turni a mano</button><button class="btn" data-act="hist">Storico bozze</button></div>
+      ${histBox(UI.mk)}
+      ${(mo.sched||hasDraft(mo))?`<div class="row">${clrBtn("clrsched","Elimina tutti i turni del mese")}</div>`:""}</div>`:""}`:"";
+  const pubBar=ADMIN()&&hasDraft(mo)?`<div style="height:84px"></div><div class="pubbar"><span class="name-strong">Bozza non pubblicata${(()=>{ const c=draftChanges(mo,true); return mo.sched&&c?` · ${c.size} caselle cambiate`:""; })()}</span>
+      <button class="btn ${UI.confirm==="accall"?"confirm":"primary"}" data-act="accall">${UI.confirm==="accall"?"Tocca di nuovo: pubblica":"Pubblica"}</button>
+      ${clrBtn("drop","Annulla")}
+      <button class="btn" data-act="pubwk" aria-expanded="${!!UI.pubWk}">Solo una settimana ${UI.pubWk?"▴":"▾"}</button>
+      ${UI.pubWk?`<div class="row" style="gap:6px;flex-wrap:wrap;width:100%;justify-content:center">${Array.from({length:nW},(_,w)=>acc[w]?`<span class="chip tag-F">Sett. ${w+1} pubblicata</span>`:`<button class="btn sm ${UI.confirm==="accw-"+w?"confirm":""}" data-act="accw" data-w="${w}">${UI.confirm==="accw-"+w?"Tocca di nuovo":`Pubblica sett. ${w+1} (${fmt(p.days[w*7]).slice(4)})`}</button>`).join("")}</div>`:""}</div>`:"";
+  const draft=tools;
+  if(!mo.sched&&!hasDraft(mo)) return head+draft+`<div class="panel empty"><h2>Pronto per generare</h2><p>Controlla rotazioni e indisponibilità, poi tocca «Prepara la bozza del mese». Potrai cambiare a mano ogni turno toccandolo e poi pubblicare.</p><p>Se alcuni turni sono già decisi, inseriscili prima a mano: la generazione non li tocca.</p><button class="btn" data-act="manualstart">Inserisci turni a mano</button></div>`;
   let alerts="";
   let holesBox="";
   if(holes.length&&ADMIN()&&(mo.generated||draftView(mo))){ const g={}; holes.forEach(h=>{const k=fmt(h.d);(g[k]=g[k]||[]).push(`${h.post} ${h.s}${h.n>1?" ×"+h.n:""}`);});
@@ -901,7 +908,8 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
       if(rows.length) body+=`<h3 style="margin-top:6px">Equità su più mesi</h3><p class="muted" style="margin:0;font-size:.82rem">Notti, guardie e turni nel weekend dei 3 mesi precedenti (orario pubblicato) + questo mese. Generando, chi ne ha fatti di più rispetto alla media ne riceve meno.</p>
         <div class="scroll"><table class="grid"><thead><tr><th class="sticky">Specializzando</th><th>Notti</th><th>Guardie</th><th>Weekend</th><th>Mesi</th></tr></thead><tbody>${rows.map(r=>{ const a=h[r.id], c=cur[r.id]; const f=(x,y)=>`${x+y} <span class="muted">(${x}+${y})</span>`;
           return `<tr><td class="sticky name-strong">${esc(rName(r))}</td><td class="num">${f(a.N,c.N)}</td><td class="num">${f(a.D,c.D)}</td><td class="num">${f(a.we,c.we)}</td><td class="num">${a.months}</td></tr>`; }).join("")}</tbody></table></div>`; } }
-  return head+draft+alerts+tabs+body+holesBox;
+  const summ=ADMIN()&&draftView(mo)?`<div class="row" style="gap:8px;flex-wrap:wrap;font-size:.86rem;margin:4px 0 8px"><span class="name-strong">Bozza:</span>${mo.sched?`<span class="chip" style="background:var(--chg-soft);color:var(--ink)">${(CHG||draftChanges(mo)||new Set()).size} caselle cambiate</span>`:""}<span class="chip" style="background:var(--bad-soft);color:var(--bad)">${holes.reduce((a,h)=>a+(h.n||1),0)} scoperti</span><span class="chip">${issues.length} da controllare</span></div>`:"";
+  return head+draft+alerts+summ+tabs+body+holesBox+pubBar;
 }
 function code(mo,per,pid,d){ const p=per[pid]; if(p&&p.on[d]) return p.on[d]; if(p&&p.on[add(d,-1)]==="N") return "S"; const u=unavOf(mo,pid,d); return u==="G"?"X":u==="F"?"F":u==="C"?"C":""; }
 function label(c,postName){ if(c==="S")return "smonto"; if(c==="X")return "✕"; if(c==="F")return "ferie"; if(c==="C")return "congr."; if(c==="D")return "G"; if(c==="N")return "monto"; if(c)return esc(postName||"")+" "+c; return ""; }
@@ -1365,7 +1373,7 @@ const layer=document.getElementById("layer");
 function selC(d,k){ return (UI.clsel&&UI.clsel.has(d+"|"+k)?" sel":"")+(CHG&&CHG.has(d+"|"+k)?" chg":""); }
 /* caselle della bozza diverse dall'orario pubblicato (evidenziate in arancione nella vista Bozza) */
 let CHG=null; const sameCell=(a,b)=>{ const x=(a||[]).filter(v=>v).sort().join(), y=(b||[]).filter(v=>v).sort().join(); return x===y; };
-function draftChanges(mo){ if(!draftView(mo)||!mo.sched) return null; const out=new Set(), dr=mo.draft.sched||{};
+function draftChanges(mo,force){ if(!(force?hasDraft(mo):draftView(mo))||!mo.sched) return null; const out=new Set(), dr=mo.draft.sched||{};
   for(const d in dr){ if(!mo.sched[d]) continue; const keys=new Set([...Object.keys(dr[d]||{}),...Object.keys(mo.sched[d]||{})]); keys.forEach(k=>{ if(!sameCell(dr[d][k],mo.sched[d][k])) out.add(d+"|"+k); }); }
   return out; }
 /* chiude/riapre per tutti gli anni (config/years); per l'anno che si guarda aggiorna anche la bozza */
@@ -1610,12 +1618,19 @@ document.addEventListener("click",e=>{
   if(a==="holeadd"){ const dk=layer.dataset.d+"|"+layer.dataset.k; addHoleTag(UI.mk,dk,+el.dataset.v); cellSheet(layer.dataset.d,layer.dataset.k); render(); return; }
   if(a==="holedel"){ const dk=layer.dataset.d+"|"+layer.dataset.k, i=+el.dataset.i; editHoleTags(UI.mk,dk,t=>t.filter((x,j)=>j!==i)); cellSheet(layer.dataset.d,layer.dataset.k); render(); return; }
   if(a==="holesel"){ const n=setHoleTag(UI.mk,[...UI.clsel],+el.dataset.v); UI.clsel=null; render(); toast(n?(+el.dataset.v?`${n} turni scoperti assegnati al ${ROMAN[+el.dataset.v]} anno`:`${n} turni scoperti senza anno`):"Nessuna modifica"); return; }
+  if(a==="optopen"){ UI.optOpen=!UI.optOpen; render(); return; }
+  if(a==="toolsopen"){ UI.toolsOpen=!UI.toolsOpen; render(); return; }
+  if(a==="pubwk"){ UI.pubWk=!UI.pubWk; render(); return; }
+  if(a==="prep"){ const mo=M(UI.mk);
+    if(!mo.sched&&!hasDraft(mo)){ generate(UI.mk); histAdd(UI.mk,"Bozza generata (tutto il mese)",mo.draft.sched); persist(); render(); toast("Bozza pronta: controllala e pubblicala dalla barra in basso"); return; }
+    const r=refreshSched(UI.mk); if(hasDraft(mo)) histAdd(UI.mk,"Bozza preparata",mo.draft.sched); persist(); render();
+    toast(`Bozza pronta: ${r.added} turni assegnati, ${r.removed} tolti per indisponibilità, ${r.covered} lasciati ad altri anni, ${r.moved} spostati tra sale`); return; }
   if(a==="filt"){ UI.filt=el.dataset.v; render(); return; }
   if(a==="dview"){ UI.draftView=el.dataset.v==="1"; render(); return; }
   if(a==="accall"){ if(UI.confirm!=="accall"){UI.confirm="accall";render();return;} UI.confirm=null; const n=period(UI.mk).days.length/7, acc=(M(UI.mk).draft||{}).acc||{};
-    acceptDraft(UI.mk,Array.from({length:n},(_,w)=>w).filter(w=>!acc[w])); persist(); consolidate(); render(); toast("Bozza accettata: orario pubblicato"); return; }
+    acceptDraft(UI.mk,Array.from({length:n},(_,w)=>w).filter(w=>!acc[w])); persist(); consolidate(); render(); toast("Orario pubblicato"); return; }
   if(a==="accw"){ const w=+el.dataset.w; if(UI.confirm!=="accw-"+w){UI.confirm="accw-"+w;render();return;} UI.confirm=null;
-    acceptDraft(UI.mk,[w]); persist(); render(); toast(`Settimana ${w+1} accettata e pubblicata`); return; }
+    acceptDraft(UI.mk,[w]); persist(); render(); toast(`Settimana ${w+1} pubblicata`); return; }
   if(a==="drop"){ if(UI.confirm!=="drop"){UI.confirm="drop";render();return;} UI.confirm=null; delete M(UI.mk).draft; persist(); render(); toast("Bozza eliminata (una copia resta nello storico, da cui puoi eliminarla)"); return; }
   if(a==="hist"){ const mk=UI.mk; UI.hist=UI.hist||{}; if(UI.hist[mk]&&UI.hist[mk]!=="loading"){ delete UI.hist[mk]; render(); return; } UI.hist[mk]="loading"; render();
     db.collection(`hist/y${CURY}_${mk}/v`).limit(100).get().then(r=>{ UI.hist[mk]=r.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.at||"").localeCompare(a.at||"")); render(); })
@@ -1679,7 +1694,7 @@ document.addEventListener("click",e=>{
   if(a==="genwk"){ const mo=M(UI.mk), p=period(UI.mk), wk=UI.genWk===""||UI.genWk===undefined?null:+UI.genWk;
     const has=hasDraft(mo)&&(wk===null?p.days:p.days.slice(wk*7,wk*7+7)).some(d=>Object.values((mo.draft.sched||{})[d]||{}).some(a=>a.some(x=>x)));
     if(has&&UI.confirm!=="genwk"){UI.confirm="genwk";render();return;} UI.confirm=null;
-    generate(UI.mk, wk===null?undefined:wk); histAdd(UI.mk,wk===null?"Bozza generata (tutto il mese)":`Bozza generata: settimana ${wk+1}`,mo.draft.sched); persist(); render(); toast("Bozza pronta: controllala e accettala per pubblicarla"); return; }
+    generate(UI.mk, wk===null?undefined:wk); histAdd(UI.mk,wk===null?"Bozza generata (tutto il mese)":`Bozza generata: settimana ${wk+1}`,mo.draft.sched); persist(); render(); toast("Bozza pronta: controllala e pubblicala dalla barra in basso"); return; }
   if(a==="gen"){ const mo=M(UI.mk); if(mo.sched&&UI.confirm!=="gen"){UI.confirm="gen";render();return;}
     UI.confirm=null; generate(UI.mk); persist(); render(); toast("Turni generati"); return; }
   if(a==="xlsx"){ if(ADMIN()) exportXlsx(); return;}
