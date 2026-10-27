@@ -46,18 +46,28 @@ const PARSED={};
 let COVY={}, CLOSEDG={}, YCOL={}, HOLEY={}; /* colori degli anni (livello 1–4 → colore) e turni scoperti assegnati a un anno: mk → {giorno|sala|turno: livello} (config/years) */
 const YCOL_DEF={1:"#0d9488",2:"#db2777",3:"#b45309",4:"#4f46e5"}, ROMAN={1:"I",2:"II",3:"III",4:"IV"};
 function ycol(l){ return YCOL[l]||YCOL_DEF[l]||"#666"; }
-function holeTag(mk,d,key){ const [pid,sh]=key.split("|"), p=postOf(pid); return p&&HOLEY[mk]?HOLEY[mk][d+"|"+normRoom(p.name)+"|"+sh]||null:null; }
-function holeLabel(d,key){ const l=holeTag(UI.mk,d,key); return l?`<span class="hole" style="color:#fff;background:${ycol(l)}">scoperto · ${ROMAN[l]} anno</span>`:`<span class="hole">scoperto</span>`; }
-/* turno assegnato a un anno (anche "buco parziale"): soddisfatto se nella casella c'è già qualcuno di quell'anno o la sala è piena */
-function tagSatisfied(mo,d,key,arr,L){ const [pid,s]=key.split("|"), p=postOf(pid); const names=[...(arr||[]).filter(x=>x).map(resName),...(EXT(mo)[d+"|"+key]||[]),...(lowerOnly(mo,d,key)||[])];
-  if(names.some(n=>{ const m=/^\(\s*(\d)\s*\)/.exec(n); return m&&+m[1]===L; })) return true; return !!p&&(arr||[]).filter(x=>x).length+othersIn(mo,d,key)>=capOf(p,s).max; }
-/* etichetta per caselle con persone ma non complete: "manca 1" o "manca · II anno" */
-function partialLabel(mo,d,key,arr){ const oc=(arr||[]).filter(x=>x).length; if(!oc||isClosed(mo,d,key)) return ""; const L=holeTag(mo.mk,d,key);
-  const n=needOf(mo,d,key)-oc;
-  if(L&&(n>0||!tagSatisfied(mo,d,key,arr,L))) return `<span class="hole" style="display:block;margin-top:2px;color:#fff;background:${ycol(L)}">manca${n>1?" "+n:""} · ${ROMAN[L]} anno</span>`;
-  return n>0?`<span class="hole" style="display:block;margin-top:2px">manca ${n}</span>`:""; }
-function setHoleTag(mk,keys,lev){ const m={...(HOLEY[mk]||{})}; let n=0; keys.forEach(dk=>{ const [d,pid,sh]=dk.split("|"), p=postOf(pid); if(!p) return; const k=d+"|"+normRoom(p.name)+"|"+sh; if(lev){ if(m[k]!==lev){ m[k]=lev; n++; } } else if(m[k]){ delete m[k]; n++; } });
-  HOLEY={...HOLEY,[mk]:m}; if(n&&db) saveYearsDoc().catch(()=>toast("Non riesco a salvare: le regole del database vanno aggiornate")); return n; } /* sale chiuse condivise tra tutti gli anni: mk → {giorno|sala|turno: true} (in config/years) */
+/* anni assegnati alle persone mancanti di una casella (anche più di una): valore = elenco di livelli (vecchi dati: un numero) */
+function hkOf(d,key){ const [pid,sh]=key.split("|"), p=postOf(pid); return p?d+"|"+normRoom(p.name)+"|"+sh:null; }
+function holeTags(mk,d,key){ const k=hkOf(d,key), v=k&&HOLEY[mk]?HOLEY[mk][k]:null; return v==null?[]:Array.isArray(v)?v.map(Number):[+v]; }
+function holeTag(mk,d,key){ return holeTags(mk,d,key)[0]||null; }
+/* anni assegnati non ancora coperti: ogni anno è soddisfatto da una persona di quell'anno presente nella casella; sala piena = tutti soddisfatti */
+function unsatTags(mo,d,key,arr){ const tags=holeTags(mo.mk,d,key); if(!tags.length) return []; const [pid,s]=key.split("|"), p=postOf(pid);
+  const names=[...(arr||[]).filter(x=>x).map(resName),...(EXT(mo)[d+"|"+key]||[]),...(lowerOnly(mo,d,key)||[])];
+  if(p&&(arr||[]).filter(x=>x).length+othersIn(mo,d,key)>=capOf(p,s).max) return [];
+  const cnt={}; names.forEach(n=>{ const m=/^\(\s*(\d)\s*\)/.exec(n); if(m) cnt[+m[1]]=(cnt[+m[1]]||0)+1; });
+  /* con il minimo non raggiunto valgono tutti (le persone già presenti contano per il minimo) */
+  const need=needOf(mo,d,key)-(arr||[]).filter(x=>x).length; if(need>0) return tags;
+  return tags.filter(L=>{ if(cnt[L]>0){ cnt[L]--; return false; } return true; }); }
+function tagSatisfied(mo,d,key,arr,L){ return !unsatTags(mo,d,key,arr).includes(L); }
+const chipY=(l,txt)=>`<span class="hole" style="display:inline-block;margin:2px 2px 0 0;color:#fff;background:${ycol(l)}">${txt} · ${ROMAN[l]} anno</span>`;
+function holeLabel(d,key){ const mo=M(UI.mk), arr=(((viewSched(UI.mk)||{})[d]||{})[key])||[], tags=unsatTags(mo,d,key,arr); return tags.length?tags.map(l=>chipY(l,"scoperto")).join(""):`<span class="hole">scoperto</span>`; }
+/* etichetta per caselle con persone ma non complete: "manca 1" o "manca · II anno" (una per ogni persona mancante assegnata a un anno) */
+function partialLabel(mo,d,key,arr){ const oc=(arr||[]).filter(x=>x).length; if(!oc||isClosed(mo,d,key)) return ""; const n=needOf(mo,d,key)-oc, un=unsatTags(mo,d,key,arr);
+  const rest=n-un.length; return `<span style="display:block">${un.map(l=>chipY(l,"manca")).join("")}${rest>0?`<span class="hole" style="display:inline-block;margin-top:2px">manca ${rest}</span>`:""}</span>`.replace('<span style="display:block"></span>',""); }
+function setHoleTag(mk,keys,lev){ const m={...(HOLEY[mk]||{})}; let n=0; keys.forEach(dk=>{ const [d,pid,sh]=dk.split("|"), k=hkOf(d,pid+"|"+sh); if(!k) return; if(lev){ m[k]=[lev]; n++; } else if(m[k]){ delete m[k]; n++; } });
+  HOLEY={...HOLEY,[mk]:m}; if(n&&db) saveYearsDoc().catch(()=>toast("Non riesco a salvare: le regole del database vanno aggiornate")); return n; }
+function editHoleTags(mk,dk,fn){ const [d,pid,sh]=dk.split("|"), k=hkOf(d,pid+"|"+sh); if(!k) return; const m={...(HOLEY[mk]||{})}; const cur=holeTags(mk,d,pid+"|"+sh), nx=fn([...cur]);
+  if(nx.length) m[k]=nx; else delete m[k]; HOLEY={...HOLEY,[mk]:m}; if(db) saveYearsDoc().catch(()=>toast("Non riesco a salvare: le regole del database vanno aggiornate")); }
 const COV_DEF={diagsen:[1],radsen1:[1],radsen2:[1],ecocolumbus:[1],eco:[1],rxtorace:[1],rxscheletro:[1],tccolumbus:[3],tccemi0:[1],sala8:[1]};
 function yearsFor(p){ const k=normRoom(p.name), v=COVY[k]; return Array.isArray(v)?v:(COV_DEF[k]||LEVELS); }
 /* gli anni dell'elenco sono gli anni di corso effettivi del mese (es. in ottobre il vostro gruppo è 1° anno) */
@@ -827,9 +837,9 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   if(holes.length&&ADMIN()&&(mo.generated||draftView(mo))){ const g={}; holes.forEach(h=>{const k=fmt(h.d);(g[k]=g[k]||[]).push(`${h.post} ${h.s}${h.n>1?" ×"+h.n:""}`);});
     holesBox=`<div class="alerts bad"><strong>${holes.length} turni scoperti</strong><span style="font-size:.84rem">Non c'è nessuno disponibile entro i limiti. Puoi alzare il massimo settimanale, togliere postazioni oppure coprirli a mano.</span><ul>${Object.entries(g).slice(0,10).map(([k,v])=>`<li>${k}: ${v.join(", ")}</li>`).join("")}${Object.keys(g).length>10?`<li>… e altri ${Object.keys(g).length-10} giorni</li>`:""}</ul></div>`; }
   if(ADMIN()){ const lev=yLab(CURY), tags=HOLEY[UI.mk]||{}, byRn={}; S.posts.forEach(x=>byRn[normRoom(x.name)]=x); const g={}; let n=0;
-    Object.keys(tags).filter(k=>tags[k]===lev).sort().forEach(k=>{ const [d,rn,sh]=k.split("|"), post=byRn[rn];
-      if(post){ const key=post.id+"|"+sh, a=(((SC||{})[d]||{})[key]||[]); if(isClosed(mo,d,key)||(needOf(mo,d,key)<=a.filter(x=>x).length&&tagSatisfied(mo,d,key,a,lev))) return; }
-      n++; (g[fmt(d)]=g[fmt(d)]||[]).push(`${esc(post?post.name:rn)} ${SHN[sh]||sh}`); });
+    Object.keys(tags).filter(k=>[].concat(tags[k]).map(Number).includes(lev)).sort().forEach(k=>{ const [d,rn,sh]=k.split("|"), post=byRn[rn]; let m=[].concat(tags[k]).map(Number).filter(x=>x===lev).length;
+      if(post){ const key=post.id+"|"+sh, a=(((SC||{})[d]||{})[key]||[]); if(isClosed(mo,d,key)) return; m=unsatTags(mo,d,key,a).filter(x=>x===lev).length; if(!m) return; }
+      n+=m; (g[fmt(d)]=g[fmt(d)]||[]).push(`${esc(post?post.name:rn)} ${SHN[sh]||sh}${m>1?" ×"+m:""}`); });
     if(n) alerts+=`<div class="alerts" style="border-left:4px solid ${ycol(lev)}"><strong style="color:${ycol(lev)}">Turni scoperti del ${ROMAN[lev]} anno (${n})</strong><ul>${Object.entries(g).map(([k,v])=>`<li>${k}: ${v.join(", ")}</li>`).join("")}</ul></div>`; }
   if(issues.length&&ADMIN()) alerts+=`<div class="alerts"><strong>Da controllare</strong><ul>${issues.slice(0,15).map(i=>`<li>${esc(i)}</li>`).join("")}</ul></div>`;
   const pr=presence(UI.mk); alerts+=presenceBox(pr);
@@ -859,7 +869,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
          return due?`<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`}>${holeLabel(d,c.k)}</td>`:UI.clsel&&ADMIN()?`<td class="cell${selC(d,c.k)}" data-act="cell" data-d="${d}" data-k="${c.k}"><span class="muted">·</span></td>`:`<td class="cell none">·</td>`; }
        const ex=EXT(mo)[d+"|"+c.k], lw=lowerOnly(mo,d,c.k), exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${lw.map(esc).join("<br>")}</span>`:"");
        if(!arr.length) return `<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
-       return `<td class="cell${selC(d,c.k)} ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(arr.some(v=>v)||(needOf(mo,d,c.k)===0&&!(holeTag(mo.mk,d,c.k)&&!tagSatisfied(mo,d,c.k,arr,holeTag(mo.mk,d,c.k))))?"":`${holeLabel(d,c.k)}`)).join("")}${partialLabel(mo,d,c.k,arr)}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
+       return `<td class="cell${selC(d,c.k)} ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(arr.some(v=>v)||(needOf(mo,d,c.k)===0&&!unsatTags(mo,d,c.k,arr).length)?"":`${holeLabel(d,c.k)}`)).join("")}${partialLabel(mo,d,c.k,arr)}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
   } else if(UI.view==="nome"){
     if(!UI.who) UI.who=myPid()||"";
     const pid=UI.who, rows=[];
@@ -1395,7 +1405,10 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
   sheet(`<div class="row" style="justify-content:space-between"><div><h2>${esc(post.name)} · ${SHN[s]}</h2><span class="muted">${fmt(d,true)} · ${esc(S.hours[s])}</span></div><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
    ${hasDraft(mo)?(()=>{ const pub=((effSched(UI.mk)||mo.sched||{})[d]||{})[k]||[], dr=((mo.draft.sched||{})[d]||{})[k]||[], nm=a=>a.filter(x=>x).map(resName).join(", ")||(isClosed(mo,d,k)?"Chiusa":"—"), diff=!sameCell(pub,dr);
       return `<div class="stack" style="gap:2px;font-size:.88rem;padding:8px 10px;border-radius:8px;background:${diff?"var(--chg-soft)":"var(--surface-2,transparent)"};border:1px solid ${diff?"var(--chg)":"var(--line)"}"><span><span class="muted">Orario attivo:</span> <strong>${esc(nm(pub))}</strong></span><span><span class="muted">Bozza:</span> <strong>${esc(nm(dr))}</strong>${diff?' <span style="color:var(--chg);font-weight:600">· modificato</span>':""}</span></div>`; })():""}
-   ${!isClosed(mo,d,k)&&arr.filter(x=>x).length+othersIn(mo,d,k)<capOf(post,s).max?(()=>{ const cur=holeTag(UI.mk,d,k); return `<div class="row" style="gap:6px;flex-wrap:wrap;align-items:center"><span class="label">${arr.some(x=>x)?"Manca uno di:":"Scoperto di:"}</span>${LEVELS.map(l=>`<button class="btn sm" data-act="holey" data-v="${l}" style="${cur===l?`background:${ycol(l)};color:#fff;border-color:${ycol(l)}`:`border-color:${ycol(l)};color:${ycol(l)}`}">${ROMAN[l]} anno</button>`).join("")}${cur?`<button class="btn sm" data-act="holey" data-v="0">Togli</button>`:""}</div>`; })():""}
+   ${!isClosed(mo,d,k)&&arr.filter(x=>x).length+othersIn(mo,d,k)<capOf(post,s).max?(()=>{ const cur=holeTags(UI.mk,d,k), room=capOf(post,s).max-othersIn(mo,d,k)-arr.filter(x=>x).length;
+      return `<div class="stack" style="gap:6px"><span class="label">Persone mancanti di un anno${cur.length?` (${cur.length})`:""}:</span>
+       ${cur.length?`<div class="row" style="gap:6px;flex-wrap:wrap">${cur.map((l,i)=>`<button class="btn sm" data-act="holedel" data-i="${i}" style="background:${ycol(l)};color:#fff;border-color:${ycol(l)}" title="Togli">${ROMAN[l]} anno ×</button>`).join("")}</div>`:""}
+       ${cur.length<room?`<div class="row" style="gap:6px;flex-wrap:wrap;align-items:center"><span class="muted" style="font-size:.82rem">Aggiungi:</span>${LEVELS.map(l=>`<button class="btn sm" data-act="holeadd" data-v="${l}" style="border-color:${ycol(l)};color:${ycol(l)}">+ ${ROMAN[l]} anno</button>`).join("")}</div>`:""}</div>`; })():""}
    ${EXT(mo)[d+"|"+k]?`<p class="muted" style="margin:0;font-size:.84rem">Altri anni: ${EXT(mo)[d+"|"+k].map(esc).join(", ")}</p>`:""}
    ${lowerOnly(mo,d,k)?`<p class="muted" style="margin:0;font-size:.84rem;font-style:italic">Anni successivi: ${lowerOnly(mo,d,k).map(esc).join(", ")}</p>`:""}
    ${[...arr,...(multiPost(post,s)&&arr.some(x=>x)&&arr.filter(x=>x).length+othersIn(mo,d,k)<capOf(post,s).max?[undefined]:[])].map((cur,i)=>`<div class="stack" style="gap:6px"><span class="label">${cur===undefined?"Aggiungi un'altra persona":cur?`Ora: ${esc(resName(cur))}`:"Scoperto"}</span>
@@ -1592,7 +1605,8 @@ document.addEventListener("click",e=>{
     toast(el.dataset.v==="0"?"Sala riaperta per tutti gli anni (nella bozza)":"Sala chiusa per tutti gli anni: nessuno assegnato (nella bozza, da accettare)"); return; }
   if(a==="chseen"){ const {pid,list}=myChanges(); const last=list.reduce((m,c)=>c.at>m?c.at:m,""); try{ localStorage.setItem("turni.chseen."+pid,last); }catch(e){} render(); return; }
   if(a==="forcerot"){ UI.forceRot=layer.dataset.d+"|"+layer.dataset.k; cellSheet(layer.dataset.d,layer.dataset.k); return; }
-  if(a==="holey"){ setHoleTag(UI.mk,[layer.dataset.d+"|"+layer.dataset.k],+el.dataset.v); closeSheet(); render(); return; }
+  if(a==="holeadd"){ const dk=layer.dataset.d+"|"+layer.dataset.k; editHoleTags(UI.mk,dk,t=>[...t,+el.dataset.v].sort()); cellSheet(layer.dataset.d,layer.dataset.k); render(); return; }
+  if(a==="holedel"){ const dk=layer.dataset.d+"|"+layer.dataset.k, i=+el.dataset.i; editHoleTags(UI.mk,dk,t=>t.filter((x,j)=>j!==i)); cellSheet(layer.dataset.d,layer.dataset.k); render(); return; }
   if(a==="holesel"){ const n=setHoleTag(UI.mk,[...UI.clsel],+el.dataset.v); UI.clsel=null; render(); toast(n?(+el.dataset.v?`${n} turni scoperti assegnati al ${ROMAN[+el.dataset.v]} anno`:`${n} turni scoperti senza anno`):"Nessuna modifica"); return; }
   if(a==="filt"){ UI.filt=el.dataset.v; render(); return; }
   if(a==="dview"){ UI.draftView=el.dataset.v==="1"; render(); return; }
