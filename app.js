@@ -220,7 +220,8 @@ function slotsWith(d,day){ const base=slotsOfDay(d), have=new Set(base.map(x=>x.
 function covOf(post,s){ return (post.all||[]).includes(s)?"ALL":post.cover; }
 function pools(mo,post,s){ const inG=S.residents.filter(r=>inGem(mo,r.id)), cov=covOf(post,s);
   if(cov==="ALL") return {pri:inG,jol:[]};
-  return {pri:inG.filter(r=>rotCovers(mo.rot[r.id],cov)), jol:isJolly(cov)?[]:inG.filter(r=>!rotCovers(mo.rot[r.id],cov)&&(isJolly(mo.rot[r.id])||incl(mo,r.id)))}; }
+  /* i jolly (Angiografia, DEA) coprono solo TC e RM: le altre sale solo chi è nella loro rotazione */
+  return {pri:inG.filter(r=>rotCovers(mo.rot[r.id],cov)), jol:(isJolly(cov)||!(cov==="TC"||cov==="RM"))?[]:inG.filter(r=>!rotCovers(mo.rot[r.id],cov)&&(isJolly(mo.rot[r.id])||incl(mo,r.id)))}; }
 
 let saveT=null, saving=false, pending=false, lastJSON="";
 function setSync(t){document.getElementById("sync").textContent=t;}
@@ -311,6 +312,7 @@ function load(raw){ const st=raw?JSON.parse(raw):clone(DEFAULT);
     [["TCCEMI","TC 0 CEMI","TC"],["SALA8","Sala 8","RX"]].forEach(([id,name,cover])=>{ if(!st.posts.some(p=>p.id===id||normRoom(p.name)===normRoom(name))) st.posts.push({id,name,cover,on:MP()}); });
     st._v6=true; migrated=true; }
   /* associazione fissa sala → rotazione (decisa dal proprietario): TC, RM, Senologia, RX (anche RX/Eco), Ecografia (anche RX/Eco), DEA */
+  if(!st._v9){ st.rotations.forEach(r=>{ r.jolly=r.id==="ANGIO"||r.id==="DEA"; }); st._v9=true; migrated=true; }
   if(!st._v8){ st.posts.forEach(p=>{ const r=roomRot(p.name); if(r&&p.cover!=="ALL"&&p.cover!==r){ p.cover=r; } }); st._v8=true; migrated=true; }
   if(!st._v7){ if(!st.rotations.some(r=>r.id==="RXECO")) st.rotations.push({id:"RXECO",name:"RX/Eco",jolly:false}); st._v7=true; migrated=true; }
   return st; }
@@ -563,10 +565,12 @@ function rebalanceRooms(mk,onlyPids,onlyCover,from){ const days=period(mk).days,
 function refreshSched(mk,rot){ TICK++; const mo=M(mk), base0=hasDraft(mo)?mo.draft.sched:mo.sched; if(!base0) return {removed:0,added:0,covered:0,moved:0};
   const today=todayYmd(), pd=period(mk), from=today>pd.days[0]?today:null; if(from&&from>pd.days[pd.days.length-1]) return {removed:0,added:0,covered:0,moved:0,past:true};
   const inRot=rot?new Set(S.residents.filter(r=>mo.rot[r.id]===rot).map(r=>r.id)):null;
-  const old=clone(base0), keep={}, fx=mo.fixed||{}; let removed=0, covered=0;
+  const old=clone(base0), keep={}, fx=mo.fixed||{}; let removed=0, covered=0, wrong=0;
   for(const d in old) for(const k in old[d]) (old[d][k]||[]).forEach((pid,i)=>{ if(!pid) return;
     if(fx[d+"|"+k+"|"+i]===pid||(inRot&&!inRot.has(pid))||(from&&d<from)){ keep[d+"|"+k+"|"+i]=pid; return; }
     if(blocked(unavOf(mo,pid,d),k.split("|")[1])) removed++;
+    /* fuori dalla propria rotazione (non inserito a mano): si toglie e si ricopre con chi è nella rotazione */
+    else if(outOfRot(mo,pid,k)) wrong++;
     /* turno ora coperto da un altro anno (DEA, Angio, notti, guardie): si libera e il carico si ridistribuisce */
     else if(extCovered(mo,d,k)) covered++;
     else keep[d+"|"+k+"|"+i]=pid; });
@@ -575,7 +579,9 @@ function refreshSched(mk,rot){ TICK++; const mo=M(mk), base0=hasDraft(mo)?mo.dra
   let added=0; const nw=mo.draft.sched; for(const d in nw) for(const k in nw[d]){ const before=(old[d]||{})[k]||[];
     (nw[d][k]||[]).forEach(pid=>{ if(pid&&!before.includes(pid)) added++; }); }
   const moved=rebalanceRooms(mk,inRot,rot,from);
-  return {removed,added,covered,moved}; }
+  return {removed,added,covered,moved,wrong}; }
+function outOfRot(mo,pid,key){ const [id,s]=key.split("|"), post=postOf(id); if(!post||!postActive(post)) return false; const cov=covOf(post,s), rot=mo.rot[pid];
+  return cov!=="ALL"&&!isBG(rot)&&!rotCovers(rot,cov)&&!(isJolly(rot)&&(cov==="TC"||cov==="RM")); }
 function derive(mk,override){
   const mo=M(mk), {days}=period(mk), per={}; S.residents.forEach(r=>per[r.id]=newStat());
   const holes=[], issues=[], where={}, SC=override||effSched(mk);
@@ -595,7 +601,7 @@ function derive(mk,override){
         {const u=unavOf(mo,pid,d); if(blocked(u,s)) issues.push(`${resName(pid)}: ${u==="F"?"in ferie":u==="C"?"a congresso":u==="G"?"indisponibile tutto il giorno, inserito perché il turno sarebbe rimasto scoperto,":"indisponibile"} ${fmt(d)} (${SHN[s]})`);}
         const rot=mo.rot[pid];
         if(isExt(rot)&&!isBG(rot)) issues.push(`${resName(pid)}: in turno il ${fmt(d)} ma è ${rot?"a "+rotName(rot):"senza rotazione"}`);
-        else if(!extra&&!isBG(rot)&&covOf(post,s)!=="ALL"&&!rotCovers(rot,covOf(post,s))&&!(isJolly(rot)&&!isJolly(covOf(post,s)))) issues.push(`${resName(pid)}: in ${post.name} il ${fmt(d)} ma la rotazione è ${rotName(rot)}`);
+        else if(!extra&&!isBG(rot)&&covOf(post,s)!=="ALL"&&!rotCovers(rot,covOf(post,s))&&!(isJolly(rot)&&(covOf(post,s)==="TC"||covOf(post,s)==="RM"))) issues.push(`${resName(pid)}: in ${post.name} il ${fmt(d)} ma la rotazione è ${rotName(rot)}`);
       }); }); });
   { const PRF=PR(mk); for(const pid in PRF){ if(!per[pid]||!canPref(pid)) continue; for(const d in PRF[pid]){ const code=PRF[pid][d]; if(!code||!days.includes(d)) continue;
       const [pp,sh]=code.includes("|")?code.split("|"):[null,code]; const okk=Object.entries(SC[d]||{}).some(([k,a])=>a.includes(pid)&&k.endsWith("|"+sh)&&(!pp||k.startsWith(pp+"|")));
@@ -645,7 +651,7 @@ function personIssues(mk,sc,pid){ const mo=M(mk), {days}=period(mk), out=[], on=
       const u=unavOf(mo,pid,d);
       if(!canDo(pid,s)) out.push(`${s==="N"?"notte":"guardia"} il ${fmt(d)}, ma non è abilitato/a ${s==="N"?"alle notti":"alle guardie"}`);
       if(blocked(u,s)) out.push(u==="F"?`lavora durante le ferie: ${fmt(d)} (${SHN[s]})`:u==="C"?`lavora durante il congresso: ${fmt(d)} (${SHN[s]})`:`indisponibilità non rispettata: ${fmt(d)} (${SHN[s]})`);
-      if(post){ const cov=covOf(post,s), rot=mo.rot[pid]; if(cov!=="ALL"&&!rotCovers(rot,cov)&&!isBG(rot)&&!(isJolly(rot)&&!isJolly(cov))) out.push(`copre ${esc(post.name)} il ${fmt(d)}, fuori dalla sua rotazione (${esc(rotName(rot))})`); } } });
+      if(post){ const cov=covOf(post,s), rot=mo.rot[pid]; if(cov!=="ALL"&&!rotCovers(rot,cov)&&!isBG(rot)&&!(isJolly(rot)&&(cov==="TC"||cov==="RM"))) out.push(`copre ${esc(post.name)} il ${fmt(d)}, fuori dalla sua rotazione (${esc(rotName(rot))})`); } } });
   for(const d in on){ if(on[d].length>1) out.push(on[d].includes("N")?`lavora di giorno il ${fmt(d)}, giorno di monto (ha la notte)`:`doppio turno il ${fmt(d)} (${on[d].map(s=>SHN[s]).join(" + ")})`);
     if(on[d].includes("N")&&on[add(d,1)]) out.push(`lavora il ${fmt(add(d,1))}, giorno di smonto`); }
   for(const w in wk) if(wk[w]>S.maxWeek) out.push(`${wk[w]} turni nella settimana dal ${fmt(period(mk).days[w*7])} (max ${S.maxWeek})`);
@@ -975,7 +981,7 @@ function vImp2(){
      <div class="row" style="gap:8px"><span style="font-size:.82rem;width:6.5em">Coperti da tutti</span><div class="pickers sm">${SH.map(s=>`<button data-act="pall" data-id="${p.id}" data-v="${s}" aria-pressed="${(p.all||[]).includes(s)}">${SHN[s]}</button>`).join("")}</div></div>
      <div class="stack" style="gap:6px">${DT.map(([t,l])=>`<div class="row" style="gap:8px"><span style="font-size:.82rem;width:6.5em">${l}</span><div class="pickers sm">${SH.map(s=>`<button data-act="pon" data-id="${p.id}" data-t="${t}" data-v="${s}" aria-pressed="${(p.on[t]||[]).includes(s)}">${SHN[s]}</button>`).join("")}</div></div>`).join("")}</div>
    </div>`).join("")}</div>
-  <div class="panel"><h2>Rotazioni jolly</h2><p class="muted" style="margin:0;font-size:.85rem">Chi è in queste rotazioni copre le sale delle altre rotazioni (non jolly) quando chi è in rotazione non basta.</p>
+  <div class="panel"><h2>Rotazioni jolly</h2><p class="muted" style="margin:0;font-size:.85rem">Chi è in queste rotazioni copre anche TC e RM quando chi è in rotazione non basta. Le altre sale (RX, Ecografia, Senologia…) le copre solo chi è nella loro rotazione.</p>
    <div class="pickers">${S.rotations.map(r=>`<button data-act="jolly" data-id="${r.id}" aria-pressed="${!!r.jolly}">${esc(r.name)}</button>`).join("")}</div></div>
   <div class="panel"><h2>Orari e limiti</h2>
    <div class="row">${SH.map(s=>`<label class="row" style="gap:6px"><span class="chip sh-${s}">${SHN[s]}</span><input id="hour-${s}" data-hour="${s}" value="${esc(S.hours[s])}" style="width:6.5em"></label>`).join("")}</div>
@@ -1635,7 +1641,7 @@ document.addEventListener("click",e=>{
   if(a==="prep"){ const mo=M(UI.mk);
     if(!mo.sched&&!hasDraft(mo)){ generate(UI.mk); histAdd(UI.mk,"Bozza generata (tutto il mese)",mo.draft.sched); persist(); render(); toast("Bozza pronta: controllala e pubblicala dalla barra in basso"); return; }
     const r=refreshSched(UI.mk); if(r.past){ toast("Il mese è già passato: non c'è niente da aggiornare"); return; } if(hasDraft(mo)) histAdd(UI.mk,"Bozza preparata",mo.draft.sched); persist(); render();
-    toast(`Bozza pronta: ${r.added} turni assegnati, ${r.removed} tolti per indisponibilità, ${r.covered} lasciati ad altri anni, ${r.moved} spostati tra sale`); return; }
+    toast(`Bozza pronta: ${r.added} turni assegnati, ${r.removed} tolti per indisponibilità${r.wrong?`, ${r.wrong} tolti perché fuori rotazione`:""}, ${r.covered} lasciati ad altri anni, ${r.moved} spostati tra sale`); return; }
   if(a==="filt"){ UI.filt=el.dataset.v; render(); return; }
   if(a==="dview"){ UI.draftView=el.dataset.v==="1"; render(); return; }
   if(a==="accall"){ if(UI.confirm!=="accall"){UI.confirm="accall";render();return;} UI.confirm=null; const n=period(UI.mk).days.length/7, acc=(M(UI.mk).draft||{}).acc||{};
