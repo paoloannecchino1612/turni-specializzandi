@@ -93,7 +93,7 @@ function autoExt(mk,lower){ const out={};
       (m2.sched[d][k]||[]).forEach(x=>{ if(!x||!nm[x]) return; const kk=d+"|"+my.id+"|"+sh; (out[kk]=out[kk]||[]).push(nm[x]); }); } }
   return out; }
 const SEXC={key:null,map:{}};
-function sheetExtCached(mk){ const sh=sheetLatest(mk); const key=mk+"|"+CURY+"|"+(sh?sh.at:"")+"|"+S.residents.length+"|"+S.posts.length; if(SEXC.key!==key){ SEXC.key=key; SEXC.map=sh?sheetExt(mk):{}; } return SEXC.map; }
+function sheetExtCached(mk){ const sh=sheetLatest(mk); const key=mk+"|"+CURY+"|"+(sh?sh.at:"")+"|"+S.residents.length+"|"+S.posts.length+"|"+JSON.stringify((S.months[mk]||{}).extReset||{}).length; if(SEXC.key!==key){ SEXC.key=key; SEXC.map=sh?sheetExt(mk):{}; } return SEXC.map; }
 /* anni sotto (generati dopo nella cascata): solo da vedere, non cambiano la generazione */
 const LOWC={key:null,map:{}};
 function LOWER(mo){ if(!MULTI||!S) return {}; const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+S.posts.map(p=>p.id+":"+p.name).join(",");
@@ -847,13 +847,13 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   const tools=ADMIN()?`<div class="row" style="margin:6px 0"><button class="btn" data-act="toolsopen" aria-expanded="${!!UI.toolsOpen}">Strumenti ${UI.toolsOpen?"▴":"▾"}</button></div>
     ${UI.toolsOpen?`<div class="panel"><h2>Strumenti</h2>
       <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" data-act="extlink">Turni degli altri anni da link</button><label class="btn">Turni degli altri anni da file<input type="file" id="extfile" accept=".xlsx,.xls,.csv" hidden></label>${Object.keys(mo.ext||{}).length?`<span class="chip">${Object.keys(mo.ext).length} turni coperti da altri anni</span>${clrBtn("clrext","Rimuovi")}`:""}</div>
-      <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" data-act="nightlink">Notti e guardie programmate da link</button><label class="btn">Notti e guardie da file<input type="file" id="nightfile" accept=".xlsx,.xls,.csv" hidden></label></div>
       <div class="row" style="gap:8px;flex-wrap:wrap">${(mo.sched||hasDraft(mo))?`<button class="btn" data-act="xlsx">Scarica Excel</button><button class="btn" data-act="xbozza">Excel formato BOZZA ORARI</button>`:""}<button class="btn" data-act="manualstart">Inserisci turni a mano</button><button class="btn" data-act="hist">Storico bozze</button></div>
       ${histBox(UI.mk)}
       ${(mo.sched||hasDraft(mo))?`<div class="stack" style="gap:6px;border-top:1px solid var(--line);padding-top:10px"><span class="label">Azzera i turni</span>
         <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><select id="rstWk" data-rstwk="1"><option value="">Tutto il mese</option>${Array.from({length:nW},(_,w)=>`<option value="${w}" ${String(UI.rstWk??"")===String(w)?"selected":""}>Settimana ${w+1}: ${fmt(p.days[w*7])} – ${fmt(p.days[w*7+6])}</option>`).join("")}</select>
-         <button class="btn danger ${UI.confirm==="reset"?"confirm":""}" data-act="reset">${UI.confirm==="reset"?"Tocca di nuovo: azzera":"Azzera"}</button></div>
-        <p class="muted" style="margin:0;font-size:.8rem">Svuota tutte le caselle (anche i turni fissi inseriti a mano) del periodo scelto. Va nella bozza: l'orario pubblicato cambia solo quando premi «Pubblica»; con «Annulla» torni indietro.</p></div>`:""}</div>`:""}`:"";
+         <button class="btn ${UI.confirm==="clrgen"?"confirm":""}" data-act="clrgen">${UI.confirm==="clrgen"?"Tocca di nuovo: elimina":"Elimina i turni del tuo anno"}</button>
+         <button class="btn danger ${UI.confirm==="reset"?"confirm":""}" data-act="reset">${UI.confirm==="reset"?"Tocca di nuovo: azzera tutto":"Azzera tutto"}</button></div>
+        <p class="muted" style="margin:0;font-size:.8rem"><strong>Elimina i turni del tuo anno</strong>: toglie solo i turni messi dal generatore; restano quelli inseriti a mano o arrivati dal foglio (link/file), le sale chiuse, i turni coperti da altri anni e gli anni assegnati ai turni scoperti.<br><strong>Azzera tutto</strong>: svuota tutte le caselle (anche i turni inseriti a mano o dal foglio) e toglie per quel periodo sale chiuse, turni coperti da altri anni e anni assegnati ai turni scoperti.<br>Indisponibilità, ferie e congressi non vengono mai toccati. I turni vanno nella bozza: l'orario pubblicato cambia quando premi «Pubblica» («Annulla» torna indietro).</p></div>`:""}</div>`:""}`:"";
   const pubBar=ADMIN()&&hasDraft(mo)?`<div style="height:84px"></div><div class="pubbar"><span class="name-strong">Bozza non pubblicata${(()=>{ const c=draftChanges(mo,true); return c?` · ${c.size} ${mo.sched?"caselle cambiate":"caselle nuove"}`:""; })()}</span>
       <button class="btn ${UI.confirm==="accall"?"confirm":"primary"}" data-act="accall">${UI.confirm==="accall"?"Tocca di nuovo: pubblica":"Pubblica"}</button>
       ${clrBtn("drop","Annulla")}
@@ -1326,7 +1326,8 @@ function sheetLatest(mk){ let best=null; for(const y of (MULTI?ALLY():[CURY])){ 
 /* voci del foglio per l'anno corrente: chiave con la sala dell'anno, esclusi i nostri */
 function sheetExt(mk){ const sh=sheetLatest(mk); if(!sh) return {}; const by={}; S.posts.forEach(p=>by[normRoom(p.name)]=p);
   const mine=new Set(S.residents.map(r=>r.name.trim().toLowerCase())), out={};
-  for(const ak in sh.all){ const [d,rk,s]=ak.split("|"), p=rk==="N"?S.posts.find(x=>Object.values(x.on||{}).some(a=>(a||[]).includes("N"))):by[rk]; if(!p) continue;
+  const rst=((S.months[mk]||{}).extReset)||{};
+  for(const ak in sh.all){ const [d,rk,s]=ak.split("|"), p=rk==="N"?S.posts.find(x=>Object.values(x.on||{}).some(a=>(a||[]).includes("N"))):by[rk]; if(!p) continue; if(rst[d]&&rst[d]>=sh.at) continue;
     const names=sh.all[ak].filter(v=>!mine.has(v.replace(/^\(\s*\d\s*\)\s*/,"").trim().toLowerCase())); if(names.length) out[d+"|"+p.id+"|"+s]=names; }
   return out; }
 /* allinea la bozza dell'anno corrente a un foglio caricato da un altro anno (una volta per foglio) */
@@ -1407,6 +1408,33 @@ function applyClosed(mk,keys,close){ const mo=M(mk), cg={...(CLOSEDG[mk]||{})}; 
       const W=ensureDraft(mo,d); W[d]=W[d]||{}; if(!W[d][k]||!W[d][k].length) W[d][k]=[null]; n++; } }
   CLOSEDG={...CLOSEDG,[mk]:cg}; if(n&&db) saveYearsDoc().catch(()=>toast("Non riesco a salvare le sale chiuse: aggiorna le regole del database"));
   return n; }
+/* Strumenti → Azzera i turni (mai indisponibilità, ferie, congressi) */
+function resetRange(mk,wk){
+    const mo=M(mk), p=period(mk), days=wk===null?p.days:p.days.slice(wk*7,wk*7+7);
+    if(!hasDraft(mo)) mo.draft={sched:mo.sched?clone(mo.sched):{},at:new Date().toISOString(),acc:{}};
+    const W=mo.draft.sched, fx=mo.fixed||{};
+    /* via anche turni coperti da altri anni (foglio e a mano), sale chiuse e anni assegnati agli scoperti di quei giorni; mai le indisponibilità */
+    const now=new Date().toISOString(), dset=new Set(days); mo.ext={...(mo.ext||{})}; Object.keys(mo.ext).forEach(k=>{ if(dset.has(k.split("|")[0])) delete mo.ext[k]; });
+    mo.extReset={...(mo.extReset||{})}; days.forEach(d=>mo.extReset[d]=now); SEXC.key=null; TICK++;
+    if(CLOSEDG[mk]){ const c={...CLOSEDG[mk]}; Object.keys(c).forEach(k=>{ if(dset.has(k.split("|")[0])) delete c[k]; }); CLOSEDG={...CLOSEDG,[mk]:c}; }
+    if(HOLEY[mk]){ const h={...HOLEY[mk]}; Object.keys(h).forEach(k=>{ if(dset.has(k.split("|")[0])) delete h[k]; }); HOLEY={...HOLEY,[mk]:h}; }
+    if(mo.closed){ mo.closed={...mo.closed}; Object.keys(mo.closed).forEach(k=>{ if(dset.has(k.split("|")[0])) delete mo.closed[k]; }); }
+    if(db) saveYearsDoc().catch(()=>{});
+    days.forEach(d=>{ W[d]={}; slotsOfDay(d).forEach(x=>{ W[d][x.key]=[null]; }); Object.keys(fx).filter(z=>z.startsWith(d+"|")).forEach(z=>delete fx[z]); });
+    mo.fixed=fx; mo.draft.at=new Date().toISOString(); const n=p.days.length/7; for(let w=0;w<n;w++) if(wk===null||w===wk) delete (mo.draft.acc||{})[w];
+    UI.draftView=true; histAdd(mk,wk===null?"Bozza azzerata (tutto il mese)":`Bozza azzerata: settimana ${wk+1}`,W); persist(); render();
+    toast(wk===null?"Mese azzerato nella bozza: pubblica per renderlo effettivo":`Settimana ${wk+1} azzerata nella bozza: pubblica per renderla effettiva`); }
+function clearGenerated(mk,wk){
+    const mo=M(mk), p=period(mk), days=wk===null?p.days:p.days.slice(wk*7,wk*7+7), fx=mo.fixed||{}; let n=0;
+    if(!hasDraft(mo)) mo.draft={sched:mo.sched?clone(mo.sched):{},at:new Date().toISOString(),acc:{}};
+    const W=mo.draft.sched;
+    /* restano solo i turni fissi (inseriti a mano o dal foglio); i fissi si rinumerano nell'ordine della casella */
+    days.forEach(d=>{ const day=W[d]||{}; for(const k in day){ const pre=d+"|"+k+"|", keepP=Object.keys(fx).filter(z=>z.startsWith(pre)).map(z=>fx[z]);
+        const arr=(day[k]||[]).filter(x=>x), keep=arr.filter(x=>keepP.includes(x)); n+=arr.length-keep.length;
+        Object.keys(fx).filter(z=>z.startsWith(pre)).forEach(z=>delete fx[z]); keep.forEach((x,i)=>fx[pre+i]=x);
+        day[k]=keep.length?keep:((day[k]||[]).length===0?[]:[null]); } });
+    mo.fixed=fx; mo.draft.at=new Date().toISOString(); const nw=p.days.length/7; for(let w=0;w<nw;w++) if(wk===null||w===wk) delete (mo.draft.acc||{})[w];
+    UI.draftView=true; histAdd(mk,"Turni generati eliminati",W); persist(); render(); toast(`${n} turni generati tolti dalla bozza; restano quelli inseriti a mano o dal foglio`); }
 function sheet(html){layer.innerHTML=`<div class="scrim" data-act="close"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;}
 function closeSheet(){layer.innerHTML="";}
 function prefSheet(d){ const mo=M(UI.mk), pid=UI.sel, cur=(PR(UI.mk)[pid]||{})[d]||"", u=unavOf(mo,pid,d);
@@ -1555,7 +1583,7 @@ document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]"); if(!el) return;
   let a=el.dataset.act;
   if(a==="close"){ if(e.target===el||el.tagName==="BUTTON"){closeSheet();render();} return; }
-  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","reset","clrext","refresh","refrot","years","accall","accw","drop","hopen","hdel","unlink","unlinku","swdel","mswgo"].includes(a)) UI.confirm=null;
+  if(!["planapp","claim","clrF","clrC","gen","genwk","del","delpost","clrone","clrall","clrR","clrsched","reset","clrgen","clrext","refresh","refrot","years","accall","accw","drop","hopen","hdel","unlink","unlinku","swdel","mswgo"].includes(a)) UI.confirm=null;
   if(a==="claim"){ const pid=el.dataset.id; if(!db||!MYUID) return; if(Object.values(CLAIMS).includes(MYUID)||CLAIMDOCS.some(x=>x.u===MYUID)){ toast(OWNER?"Il tuo account è già associato a un nome: per cambiarlo prima scollegalo in Impostazioni → Account collegati":"Il tuo account è già associato a un nome: solo il proprietario può cambiarlo"); return; } if(UI.confirm!=="claim-"+pid){UI.confirm="claim-"+pid;render();return;} UI.confirm=null; db.doc("claims/"+MYUID).set({pid,at:new Date().toISOString(),email:(USER&&USER.email&&USER.email())||""}).then(()=>{CLAIMS[pid]=MYUID;try{localStorage.setItem("turni.me",pid);}catch(_){} const y=MULTI?yearOfPid(pid):null; if(y&&y!==CURY) switchYear(y); UI.sel=pid; render();}).catch(()=>toast("Non riesco a collegare il nome: hai i permessi?")); return; }
   if(a==="unlinku"){ const u=el.dataset.u; if(UI.confirm!=="unlu-"+u){UI.confirm="unlu-"+u;render();return;} UI.confirm=null;
     db.doc("claims/"+u).delete().then(()=>{ toast("Account scollegato: ora può scegliere il suo nome"); render(); }).catch(()=>toast("Non riesco a scollegare")); return; }
@@ -1736,14 +1764,8 @@ document.addEventListener("click",e=>{
       Object.keys(fx).filter(z=>z.startsWith(pre)).forEach(z=>delete fx[z]); pins.forEach((x,j)=>{ if(x) fx[pre+j]=x; }); }
     else { arr[i]=null; delete fx[pre+i]; }
     persist(); closeSheet(); render(); return; }
-  if(a==="reset"){ if(UI.confirm!=="reset"){UI.confirm="reset";render();return;} UI.confirm=null;
-    const mo=M(UI.mk), p=period(UI.mk), wk=UI.rstWk===""||UI.rstWk===undefined||UI.rstWk===null?null:+UI.rstWk, days=wk===null?p.days:p.days.slice(wk*7,wk*7+7);
-    if(!hasDraft(mo)) mo.draft={sched:mo.sched?clone(mo.sched):{},at:new Date().toISOString(),acc:{}};
-    const W=mo.draft.sched, fx=mo.fixed||{};
-    days.forEach(d=>{ W[d]={}; slotsOfDay(d).forEach(x=>{ W[d][x.key]=extCovered(mo,d,x.key)?[]:[null]; }); Object.keys(fx).filter(z=>z.startsWith(d+"|")).forEach(z=>delete fx[z]); });
-    mo.fixed=fx; mo.draft.at=new Date().toISOString(); const n=p.days.length/7; for(let w=0;w<n;w++) if(wk===null||w===wk) delete (mo.draft.acc||{})[w];
-    UI.draftView=true; histAdd(UI.mk,wk===null?"Bozza azzerata (tutto il mese)":`Bozza azzerata: settimana ${wk+1}`,W); persist(); render();
-    toast(wk===null?"Mese azzerato nella bozza: pubblica per renderlo effettivo":`Settimana ${wk+1} azzerata nella bozza: pubblica per renderla effettiva`); return; }
+  if(a==="reset"){ if(UI.confirm!=="reset"){UI.confirm="reset";render();return;} UI.confirm=null; resetRange(UI.mk,UI.rstWk===""||UI.rstWk===undefined||UI.rstWk===null?null:+UI.rstWk); return; }
+  if(a==="clrgen"){ if(UI.confirm!=="clrgen"){UI.confirm="clrgen";render();return;} UI.confirm=null; clearGenerated(UI.mk,UI.rstWk===""||UI.rstWk===undefined||UI.rstWk===null?null:+UI.rstWk); return; }
   if(a==="manualstart"){ const mo=M(UI.mk); if(!hasDraft(mo)){ const sc={}; period(UI.mk).days.forEach(d=>{ sc[d]={}; slotsOfDay(d).forEach(x=>{ sc[d][x.key]=extCovered(mo,d,x.key)?[]:[null]; }); }); mo.draft={sched:mo.sched?clone(mo.sched):sc,at:new Date().toISOString(),acc:{}}; } UI.draftView=true;
     UI.view="giorni"; persist(); render(); return; }
   if(a==="del"){ const id=el.dataset.id; if(UI.confirm!=="del-"+id){UI.confirm="del-"+id;render();return;}
