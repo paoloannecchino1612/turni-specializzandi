@@ -812,7 +812,9 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   if(issues.length&&ADMIN()) alerts+=`<div class="alerts"><strong>Da controllare</strong><ul>${issues.slice(0,15).map(i=>`<li>${esc(i)}</li>`).join("")}</ul></div>`;
   const pr=presence(UI.mk); alerts+=presenceBox(pr);
   if(ADMIN()&&(mo.generated||draftView(mo))&&!holes.length&&!issues.length&&!pr.length) alerts=`<div class="okline">Tutte le postazioni coperte, nessun conflitto.</div>`;
-  const tabs=`<div class="pickers"><button data-act="view" data-v="nome" aria-pressed="${UI.view==="nome"}">Per nome</button><button data-act="view" data-v="giorni" aria-pressed="${UI.view==="giorni"}">Per giorno</button><button data-act="view" data-v="persone" aria-pressed="${UI.view==="persone"}">Per specializzando</button><button data-act="view" data-v="conti" aria-pressed="${UI.view==="conti"}">Conteggi</button></div>`;
+  const vb=(v,l)=>`<button data-act="view" data-v="${v}" aria-pressed="${UI.view===v}">${l}</button>`;
+  /* in Modifica turni (gestori) prima "Per giorno", poi "Per nome" */
+  const tabs=`<div class="pickers">${ADMIN()?vb("giorni","Per giorno")+vb("nome","Per nome"):vb("nome","Per nome")+vb("giorni","Per giorno")}<button data-act="view" data-v="persone" aria-pressed="${UI.view==="persone"}">Per specializzando</button><button data-act="view" data-v="conti" aria-pressed="${UI.view==="conti"}">Conteggi</button></div>`;
   let body="";
   const people=S.residents.filter(r=>inGem(mo,r.id)||(SC&&shiftsOf(SC,r.id).length));
   CHG=UI.view==="giorni"?draftChanges(mo):null;
