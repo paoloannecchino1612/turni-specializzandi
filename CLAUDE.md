@@ -36,6 +36,7 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 
 - Prestazioni: `EXT(mo)` è memorizzato (`EXTMEMO`, ricalcolo solo se cambia `TICK`, che sale a ogni `render`, `persist`, `generate`, `refreshSched`, `alignOwn`, `syncExt`, `sheetAlign`; più mese/anno/RAWV/numero voci di `mo.ext`). Se si aggiunge codice che modifica `mo.ext` sul posto e poi usa `EXT` prima di un render, fare `TICK++`.
 
+- Tabella "Per giorno": dentro un riquadro con altezza massima dello schermo (`.scroll.tall`), intestazione (sale e turni) fissa in alto e colonna dei giorni fissa a sinistra mentre si scorre.
 - Schede: "Turni" è uguale per tutti, anche per i gestori, come la vede uno specializzando (orario pubblicato, sola lettura: `asResident(vTurni)` mette `UI.userMode` per il solo disegno); "Modifica turni" (`data-tab="modturni"`, solo gestori in modalità gestore) è la vecchia vista gestore di Turni: bozza/pubblicato, genera, aggiorna, link al foglio, notti, caselle modificabili, sale chiuse, export.
 
 ## Permessi

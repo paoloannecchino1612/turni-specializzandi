@@ -91,6 +91,11 @@ table.grid th,table.grid td{border-bottom:1px solid var(--line);border-right:1px
 table.grid thead th{position:sticky;top:0;background:var(--surface);z-index:1;font-weight:600}
 table.grid .sticky{position:sticky;left:0;background:var(--surface);z-index:2}
 table.grid thead .sticky{z-index:3}
+/* tabella "Per giorno": scorre dentro il riquadro, così le righe con le sale restano sempre visibili in alto */
+.scroll.tall{max-height:calc(100vh - 120px);max-height:calc(100dvh - 120px);overflow:auto}
+.scroll.tall thead{position:sticky;top:0;z-index:4}
+.scroll.tall thead th{position:static}
+.scroll.tall thead th.sticky{position:sticky;left:0;z-index:5}
 table.grid th.roomh{font-family:var(--f-display);text-align:center;font-size:.85rem}
 table.grid td.date{font-family:var(--f-mono);white-space:nowrap;font-size:.78rem}
 table.grid tr.we td.date{color:var(--accent);font-weight:600}
@@ -195,7 +200,7 @@ body{margin:0;font-size:15px} img{max-width:100%} [hidden]{display:none!importan
 <div id="layer"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script type="module" src="fb.js?v=91"></script>
-<script type="module" src="app.js?v=91"></script>
+<script type="module" src="fb.js?v=92"></script>
+<script type="module" src="app.js?v=92"></script>
 <script>if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});</script>
 </body></html>
