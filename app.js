@@ -936,9 +936,8 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
         <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><select id="rstWk" data-rstwk="1"><option value="">Tutto il mese</option>${Array.from({length:nW},(_,w)=>`<option value="${w}" ${String(UI.rstWk??"")===String(w)?"selected":""}>Settimana ${w+1}: ${fmt(p.days[w*7])} – ${fmt(p.days[w*7+6])}</option>`).join("")}</select>
          <button class="btn ${UI.confirm==="clrmine"?"confirm":""}" data-act="clrmine">${UI.confirm==="clrmine"?"Tocca di nuovo: elimina":"Elimina i turni del tuo anno"}</button>
          <button class="btn ${UI.confirm==="clrgen"?"confirm":""}" data-act="clrgen">${UI.confirm==="clrgen"?"Tocca di nuovo: elimina":"Elimina i turni generati"}</button>
-         <button class="btn danger ${UI.confirm==="reset"?"confirm":""}" data-act="reset">${UI.confirm==="reset"?"Tocca di nuovo: azzera tutto":"Azzera tutto"}</button>
-         <button class="btn ${UI.confirm==="restpub"?"confirm":""}" data-act="restpub">${UI.confirm==="restpub"?"Tocca di nuovo: riprendi":"Riprendi l'orario pubblicato"}</button></div>
-        <p class="muted" style="margin:0;font-size:.8rem"><strong>Elimina i turni del tuo anno</strong>: toglie i turni messi dal generatore solo nell'anno che stai guardando.<br><strong>Elimina i turni generati</strong>: lo stesso, ma in tutti gli anni.<br>In entrambi restano i turni inseriti a mano o arrivati dal foglio (link/file), le sale chiuse, i turni coperti da altri anni e gli anni assegnati ai turni scoperti.<br><strong>Azzera tutto</strong> (tutti gli anni): svuota tutte le caselle (anche i turni inseriti a mano o dal foglio) e toglie per quel periodo sale chiuse, turni coperti da altri anni e anni assegnati ai turni scoperti.<br><strong>Riprendi l'orario pubblicato</strong> (tutti gli anni): rimette nella bozza l'orario pubblicato finora per quel periodo, con quello che «Azzera tutto» aveva tolto (turni fissi, coperti da altri anni, sale chiuse, anni degli scoperti).<br>Indisponibilità, ferie e congressi non vengono mai toccati. I turni vanno nella bozza: l'orario pubblicato cambia quando premi «Pubblica» («Annulla» torna indietro).</p></div>`:""}</div>`:""}`:"";
+         <button class="btn danger ${UI.confirm==="reset"?"confirm":""}" data-act="reset">${UI.confirm==="reset"?"Tocca di nuovo: azzera tutto":"Azzera tutto"}</button></div>
+        <p class="muted" style="margin:0;font-size:.8rem"><strong>Elimina i turni del tuo anno</strong>: toglie i turni messi dal generatore solo nell'anno che stai guardando.<br><strong>Elimina i turni generati</strong>: lo stesso, ma in tutti gli anni.<br>In entrambi restano i turni inseriti a mano o arrivati dal foglio (link/file), le sale chiuse, i turni coperti da altri anni e gli anni assegnati ai turni scoperti.<br><strong>Azzera tutto</strong> (tutti gli anni): nei giorni non ancora pubblicati svuota tutte le caselle (anche i turni inseriti a mano o dal foglio) e toglie per quel periodo sale chiuse, turni coperti da altri anni e anni assegnati ai turni scoperti; i giorni già pubblicati (visibili agli specializzandi) restano come sono.<br>Indisponibilità, ferie e congressi non vengono mai toccati. I turni vanno nella bozza: l'orario pubblicato cambia quando premi «Pubblica» («Annulla» torna indietro).</p></div>`:""}</div>`:""}`:"";
   const pubBar=ADMIN()&&hasDraft(mo)?`<div style="height:84px"></div><div class="pubbar"><span class="name-strong">Bozza non pubblicata${(()=>{ const c=draftChanges(mo,true); return c?` · ${c.size} ${mo.sched?"caselle cambiate":"caselle nuove"}`:""; })()}</span>
       <button class="btn ${UI.confirm==="accall"?"confirm":"primary"}" data-act="accall">${UI.confirm==="accall"?"Tocca di nuovo: pubblica":"Pubblica"}</button>
       ${clrBtn("drop","Annulla")}
@@ -1515,12 +1514,18 @@ function eachOtherYear(mk,fn){ if(!MULTI||!db) return 0; let n=0; for(const y of
     const months=JSON.parse(JSON.stringify(st.months||{})), m=months[mk]; if(!m||fn(m,st,y)===false) continue; n++;
     saveYearMonths(y,months,[mk]).catch(()=>toast("Non riesco a salvare il "+yLab(y)+"° anno")); } return n; }
 function draftOf(m){ if(!(m.draft&&m.draft.sched)) m.draft={sched:m.sched?JSON.parse(JSON.stringify(m.sched)):{},at:new Date().toISOString(),acc:{}}; return m.draft.sched; }
-function resetOther(m,days,wk,nWeeks){ if(!m.sched&&!(m.draft&&m.draft.sched)&&!Object.keys(m.ext||{}).length) return false; const dset=new Set(days), now=new Date().toISOString();
+/* giorno pubblicato (visibile agli specializzandi): «Azzera tutto» non lo tocca */
+function pubDay(m,d){ return !!(m.generated&&m.sched&&m.sched[d]&&Object.values(m.sched[d]).some(a=>(a||[]).some(x=>x))); }
+function dropIfSame(m){ if(!(m.draft&&m.draft.sched&&m.sched)) return; const dr=m.draft.sched, pub=m.sched, ds=new Set([...Object.keys(dr),...Object.keys(pub)]);
+  for(const d of ds){ const ks=new Set([...Object.keys(dr[d]||{}),...Object.keys(pub[d]||{})]); for(const k of ks) if(!sameCell((dr[d]||{})[k],(pub[d]||{})[k])) return; } m.draft=null; }
+function resetOther(m,days0,wk,nWeeks){ if(!m.sched&&!(m.draft&&m.draft.sched)&&!Object.keys(m.ext||{}).length) return false;
+  const pubD=days0.filter(d=>pubDay(m,d)), days=days0.filter(d=>!pubDay(m,d)), dset=new Set(days), now=new Date().toISOString();
+  if(m.draft&&m.draft.sched) pubD.forEach(d=>{ m.draft.sched[d]=JSON.parse(JSON.stringify(m.sched[d])); });
   bakReset(m,dset);
   m.ext={...(m.ext||{})}; Object.keys(m.ext).forEach(k=>{ if(dset.has(k.split("|")[0])) delete m.ext[k]; }); m.extReset={...(m.extReset||{})}; days.forEach(d=>m.extReset[d]=now);
   if(m.closed){ m.closed={...m.closed}; Object.keys(m.closed).forEach(k=>{ if(dset.has(k.split("|")[0])) delete m.closed[k]; }); }
   const W=draftOf(m), fx=m.fixed||{}; days.forEach(d=>{ const day=W[d]||(m.sched||{})[d]||{}; W[d]=Object.fromEntries(Object.keys(day).map(k=>[k,[null]])); Object.keys(fx).filter(z=>z.startsWith(d+"|")).forEach(z=>delete fx[z]); });
-  m.fixed=fx; m.draft.at=now; for(let w=0;w<nWeeks;w++) if(wk===null||w===wk) delete (m.draft.acc||{})[w]; }
+  m.fixed=fx; m.draft.at=now; for(let w=0;w<nWeeks;w++) if(wk===null||w===wk) delete (m.draft.acc||{})[w]; dropIfSame(m); }
 function clearGenOther(m,days,wk,nWeeks){ if(!m.sched&&!(m.draft&&m.draft.sched)) return false; const W=draftOf(m), fx=m.fixed||{};
   days.forEach(d=>{ const day=W[d]||{}; for(const k in day){ const pre=d+"|"+k+"|", keepP=Object.keys(fx).filter(z=>z.startsWith(pre)).map(z=>fx[z]); const arr=(day[k]||[]).filter(x=>x), keep=arr.filter(x=>keepP.includes(x));
       Object.keys(fx).filter(z=>z.startsWith(pre)).forEach(z=>delete fx[z]); keep.forEach((x,i)=>fx[pre+i]=x); day[k]=keep.length?keep:((day[k]||[]).length===0?[]:[null]); } });
@@ -1547,9 +1552,11 @@ function restorePublished(mk,wk){ const mo=M(mk), p=period(mk), days=wk===null?p
   if(!hasDraft(mo)) UI.draftView=false; histAdd(mk,"Ripreso l'orario pubblicato",(mo.draft&&mo.draft.sched)||mo.sched); persist(); render();
   toast((wk===null?"Mese":`Settimana ${wk+1}`)+": ripreso l'orario pubblicato"+(oth?" (tutti gli anni)":"")+", con turni fissi, coperti da altri anni, sale chiuse e anni degli scoperti tolti con «Azzera tutto»"); }
 function resetRange(mk,wk){
-    const mo=M(mk), p=period(mk), days=wk===null?p.days:p.days.slice(wk*7,wk*7+7);
+    const mo=M(mk), p=period(mk), all=wk===null?p.days:p.days.slice(wk*7,wk*7+7);
+    /* i giorni già pubblicati (visibili agli specializzandi) restano come sono: si svuota solo il resto */
+    const pubD=all.filter(d=>pubDay(mo,d)), days=all.filter(d=>!pubDay(mo,d));
     if(!hasDraft(mo)) mo.draft={sched:mo.sched?clone(mo.sched):{},at:new Date().toISOString(),acc:{}};
-    const W=mo.draft.sched, fx=mo.fixed||{};
+    const W=mo.draft.sched, fx=mo.fixed||{}; pubD.forEach(d=>{ W[d]=clone(mo.sched[d]); });
     /* via anche turni coperti da altri anni (foglio e a mano), sale chiuse e anni assegnati agli scoperti di quei giorni; mai le indisponibilità */
     const now=new Date().toISOString(), dset=new Set(days); bakReset(mo,dset,mk); mo.ext={...(mo.ext||{})}; Object.keys(mo.ext).forEach(k=>{ if(dset.has(k.split("|")[0])) delete mo.ext[k]; });
     mo.extReset={...(mo.extReset||{})}; days.forEach(d=>mo.extReset[d]=now); SEXC.key=null; TICK++;
@@ -1559,9 +1566,9 @@ function resetRange(mk,wk){
     if(db) saveYearsDoc().catch(()=>{});
     days.forEach(d=>{ W[d]={}; slotsOfDay(d).forEach(x=>{ W[d][x.key]=[null]; }); Object.keys(fx).filter(z=>z.startsWith(d+"|")).forEach(z=>delete fx[z]); });
     mo.fixed=fx; mo.draft.at=new Date().toISOString(); const n=p.days.length/7; for(let w=0;w<n;w++) if(wk===null||w===wk) delete (mo.draft.acc||{})[w];
-    const oth=eachOtherYear(mk,m=>resetOther(m,days,wk,n));
-    UI.draftView=true; histAdd(mk,wk===null?"Bozza azzerata (tutto il mese)":`Bozza azzerata: settimana ${wk+1}`,W); persist(); render();
-    toast((wk===null?"Mese azzerato":`Settimana ${wk+1} azzerata`)+(oth?` per tutti gli anni`:"")+" nella bozza: pubblica per renderlo effettivo"); }
+    const oth=eachOtherYear(mk,m=>resetOther(m,all,wk,n));
+    histAdd(mk,wk===null?"Bozza azzerata (tutto il mese)":`Bozza azzerata: settimana ${wk+1}`,W); dropIfSame(mo); UI.draftView=hasDraft(mo); persist(); render();
+    toast((wk===null?"Mese azzerato":`Settimana ${wk+1} azzerata`)+(oth?` per tutti gli anni`:"")+(days.length?(pubD.length?`: svuotati ${days.length} giorni non pubblicati, i ${pubD.length} giorni pubblicati restano`:" nella bozza: pubblica per renderlo effettivo"):": tutti i giorni sono già pubblicati, restano come sono")); }
 function clearGenerated(mk,wk,onlyMine){
     const mo=M(mk), p=period(mk), days=wk===null?p.days:p.days.slice(wk*7,wk*7+7), fx=mo.fixed||{}; let n=0;
     if(!hasDraft(mo)) mo.draft={sched:mo.sched?clone(mo.sched):{},at:new Date().toISOString(),acc:{}};
