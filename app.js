@@ -719,6 +719,18 @@ async function enableYears(){ if(!OWNER||!db||CURY!==2) return; const base=JSON.
   S.multiYear=true; persist(); }
 /* "Turni" è uguale per tutti (come lo vede uno specializzando: orario pubblicato, sola lettura); i gestori modificano in "Modifica turni" */
 function asResident(fn){ const u=UI.userMode, sel=UI.clsel; UI.userMode=true; UI.clsel=null; try{ return fn(); } finally{ UI.userMode=u; UI.clsel=sel; } }
+/* aggiornamento della pagina "a pezzi": si cambia solo ciò che è diverso dal disegno precedente (più veloce, niente salti) */
+function morph(target,html){ const tpl=document.createElement("template"); tpl.innerHTML=html; morphKids(target,tpl.content); }
+function morphKids(a,b){ const an=[...a.childNodes], bn=[...b.childNodes], n=Math.max(an.length,bn.length);
+  for(let i=0;i<n;i++){ const x=an[i], y=bn[i]; if(!x){ a.appendChild(y); continue; } if(!y){ x.remove(); continue; } morphNode(x,y); } }
+function morphNode(x,y){ if(x.nodeType!==y.nodeType||x.nodeName!==y.nodeName){ x.replaceWith(y); return; }
+  if(x.nodeType!==1){ if(x.nodeValue!==y.nodeValue) x.nodeValue=y.nodeValue; return; }
+  if(x.isEqualNode(y)) return;
+  for(const at of [...x.attributes]) if(!y.hasAttribute(at.name)) x.removeAttribute(at.name);
+  for(const at of [...y.attributes]) if(x.getAttribute(at.name)!==at.value) x.setAttribute(at.name,at.value);
+  if(x.nodeName==="SELECT"){ morphKids(x,y); const so=[...y.querySelectorAll("option")].find(o=>o.hasAttribute("selected")); const v=so?so.value:(y.querySelector("option")||{}).value; if(v!==undefined&&x.value!==v) x.value=v; return; }
+  if(x.nodeName==="INPUT"||x.nodeName==="TEXTAREA"){ if(x.type==="checkbox"||x.type==="radio") x.checked=y.hasAttribute("checked"); else if(x.type!=="file"&&document.activeElement!==x){ const v=y.getAttribute("value")??(x.nodeName==="TEXTAREA"?y.textContent:""); if(x.value!==v) x.value=v; } if(x.nodeName==="INPUT") return; }
+  morphKids(x,y); }
 function render(){ TICK++;
   if(UI.userMode&&S&&MYUID&&Object.keys(CLAIMS).length&&!realAdmin()) setUserMode(false);
   if((!ADMIN()&&(UI.tab==="mese"||(UI.tab==="imp"&&!UI.userMode)))||(UI.tab==="modturni"&&!ADMIN()&&!anyMgr())) UI.tab="turni";
@@ -730,8 +742,8 @@ function render(){ TICK++;
   if(needLink&&!OWNER){ app.innerHTML=`<section class="view">${claimPanel("")}</section>`; return; }
   /* la tabella "Per giorno" scorre dentro il suo riquadro: dopo ogni aggiornamento resta dove era (es. selezionando più caselle) */
   const rk=UI.tab+"|"+UI.mk+"|"+UI.view+"|"+CURY+"|"+JSON.stringify((UI.dayWk||{})[UI.mk]), tw=app.querySelector(".scroll.tall"), keep=tw&&render.rk===rk?{t:tw.scrollTop,l:tw.scrollLeft,y:window.scrollY}:null; render.rk=rk;
-  app.innerHTML=`<section class="view">${todayBanner()}${yearBar()}${needLink?linkPanel():""}${({mese:vMese,indisp:vIndisp,turni:()=>ADMIN()?asResident(vTurni):vTurni(),modturni:vTurni,cambi:vCambi,imp:vImp}[UI.tab]||vMese)()}</section>`;
-  if(keep){ const nw=app.querySelector(".scroll.tall"); if(nw){ nw.scrollTop=keep.t; nw.scrollLeft=keep.l; } if(Math.abs(window.scrollY-keep.y)>2) window.scrollTo(0,keep.y); }
+  morph(app,`<section class="view">${todayBanner()}${yearBar()}${needLink?linkPanel():""}${({mese:vMese,indisp:vIndisp,turni:()=>ADMIN()?asResident(vTurni):vTurni(),modturni:vTurni,cambi:vCambi,imp:vImp}[UI.tab]||vMese)()}</section>`);
+  { const nw=app.querySelector(".scroll.tall"); if(keep){ if(nw){ nw.scrollTop=keep.t; nw.scrollLeft=keep.l; } if(Math.abs(window.scrollY-keep.y)>2) window.scrollTo(0,keep.y); } else if(nw&&tw){ nw.scrollTop=0; nw.scrollLeft=0; } }
 }
 /* banner in alto: il turno di oggi e di domani di chi ha un nome associato (orario pubblicato, con i cambi accettati) */
 function mkOfDay(d){ const [y,m]=d.split("-").map(Number); for(const dm of [0,1,-1]){ const mk=mkOf(y,m+dm), p=period(mk); if(d>=p.first&&d<=p.last) return mk; } return null; }
@@ -899,7 +911,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
     const F=fgs.some(([id])=>id===UI.filt)||UI.filt==="NG"?UI.filt:"";
     const cols=!F?cols0:F==="NG"?cols0.filter(c=>c.s==="N"||c.s==="D"):S.posts.filter(x=>fgOf(x)===F).flatMap(post=>["M","P"].filter(s=>Object.values(post.on||{}).some(a=>(a||[]).includes(s))).map(s=>({post,s,k:post.id+"|"+s}))), used=S.posts.filter(x=>cols.some(c=>c.post===x));
     body=`<div class="pickers sm" style="margin-bottom:6px"><button data-act="filt" data-v="" aria-pressed="${!F}">Tutte</button>${fgs.map(([id,name])=>`<button data-act="filt" data-v="${id}" aria-pressed="${F===id}">${esc(name)}</button>`).join("")}<button data-act="filt" data-v="NG" aria-pressed="${F==="NG"}">Notti e guardie</button></div>`;
-    if(ADMIN()) body+=UI.clsel?`<div class="row" style="gap:8px;margin-bottom:6px;flex-wrap:wrap;align-items:center"><span class="muted" style="font-size:.84rem">Tocca le caselle da chiudere o riaprire: ${UI.clsel.size} selezionate</span><button class="btn primary" data-act="clapply" data-v="1" ${UI.clsel.size?"":"disabled"}>Chiudi le selezionate</button><button class="btn" data-act="clapply" data-v="0" ${UI.clsel.size?"":"disabled"}>Riapri le selezionate</button><span class="muted" style="font-size:.84rem">Scoperti di:</span>${LEVELS.map(l=>`<button class="btn sm" data-act="holesel" data-v="${l}" ${UI.clsel.size?"":"disabled"} style="border-color:${ycol(l)};color:${ycol(l)}">${ROMAN[l]}</button>`).join("")}<button class="btn sm" data-act="holesel" data-v="0" ${UI.clsel.size?"":"disabled"}>Togli anno</button><button class="btn" data-act="clsel">Annulla</button></div>`
+    if(ADMIN()) body+=UI.clsel?`<div class="row" style="gap:8px;margin-bottom:6px;flex-wrap:wrap;align-items:center"><span class="muted" style="font-size:.84rem">Tocca le caselle da chiudere o riaprire: <span id="clselN">${UI.clsel.size}</span> selezionate</span><button class="btn primary clselbtn" data-act="clapply" data-v="1" ${UI.clsel.size?"":"disabled"}>Chiudi le selezionate</button><button class="btn clselbtn" data-act="clapply" data-v="0" ${UI.clsel.size?"":"disabled"}>Riapri le selezionate</button><span class="muted" style="font-size:.84rem">Scoperti di:</span>${LEVELS.map(l=>`<button class="btn sm clselbtn" data-act="holesel" data-v="${l}" ${UI.clsel.size?"":"disabled"} style="border-color:${ycol(l)};color:${ycol(l)}">${ROMAN[l]}</button>`).join("")}<button class="btn sm clselbtn" data-act="holesel" data-v="0" ${UI.clsel.size?"":"disabled"}>Togli anno</button><button class="btn" data-act="clsel">Annulla</button></div>`
       :`<div class="row" style="margin-bottom:6px"><button class="btn" data-act="clsel">Seleziona caselle (sale chiuse, scoperti per anno)</button></div>`;
     /* una settimana alla volta (più veloce da disegnare); di base quella di oggi, se è nel mese */
     const nWk=p.days.length/7; UI.dayWk=UI.dayWk||{}; if(UI.dayWk[UI.mk]===undefined){ const ti=p.days.indexOf(todayYmd()); UI.dayWk[UI.mk]=ti>=0?Math.floor(ti/7):0; }
@@ -1765,7 +1777,9 @@ document.addEventListener("click",e=>{
   if(a==="backup"){exportBackup();return;}
   if(a==="xbozza"){exportBozza();return;}
   if(a==="view"){UI.view=el.dataset.v;render();return;}
-  if(a==="cell"&&UI.clsel){ const kk=el.dataset.d+"|"+el.dataset.k; if(UI.clsel.has(kk)) UI.clsel.delete(kk); else UI.clsel.add(kk); render(); return; }
+  if(a==="cell"&&UI.clsel){ const kk=el.dataset.d+"|"+el.dataset.k; if(UI.clsel.has(kk)) UI.clsel.delete(kk); else UI.clsel.add(kk);
+    /* solo la casella e il contatore: niente ridisegno */
+    el.classList.toggle("sel",UI.clsel.has(kk)); const c=document.getElementById("clselN"); if(c) c.textContent=UI.clsel.size; document.querySelectorAll(".clselbtn").forEach(b=>b.disabled=!UI.clsel.size); return; }
   if(a==="clsel"){ UI.clsel=UI.clsel?null:new Set(); render(); return; }
   if(a==="clapply"){ const n=applyClosed(UI.mk,[...UI.clsel],el.dataset.v==="1"); UI.clsel=null; persist(); render();
     toast(n?(el.dataset.v==="1"?`${n} turni chiusi (nella bozza, da accettare)`:`${n} turni riaperti (nella bozza)`):"Nessuna modifica"); return; }
