@@ -1475,10 +1475,9 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
      ${pri.map(r=>btn(r,i,cur,cov==="ALL")).join("")||`<p class="muted" style="margin:0">Nessuno in questa rotazione.</p>`}
      ${jol.length?`<span class="groupname">Jolly</span>${jol.map(r=>btn(r,i,cur,true)).join("")}`:""}
      ${(()=>{const bg=S.residents.filter(r=>isBG(mo.rot[r.id])); return bg.length?`<span class="groupname">Bambin Gesù (solo a mano)</span>${bg.map(r=>btn(r,i,cur,true)).join("")}`:"";})()}
-     ${(()=>{ if(cov==="ALL"||pri.some(r=>!why(r.id))) return ""; /* nessuno della rotazione disponibile: si può forzare */
+     ${(()=>{ if(cov==="ALL") return ""; /* sempre visibili anche gli altri specializzandi (fuori rotazione), prima i disponibili */
         const inPools=new Set([...pri,...jol].map(r=>r.id)), others=S.residents.filter(r=>!inPools.has(r.id)&&!isBG(mo.rot[r.id]));
         if(!others.length) return "";
-        if(UI.forceRot!==d+"|"+k) return `<button class="btn" data-act="forcerot">Forza la rotazione</button>`;
         return `<span class="groupname">Altri specializzandi (fuori rotazione)</span>${others.sort((a,b)=>!!why(a.id)-!!why(b.id)).map(r=>btn(r,i,cur,true)).join("")}`; })()}
      ${cur?`<button class="btn danger" data-act="assign" data-i="${i}" data-id="">${arr.filter(x=>x).length>1?"Togli":"Lascia scoperto"}</button>`:""}</div>`).join("")}
    <div class="row">${(mo.ext||{})[d+"|"+k]&&(mo.ext[d+"|"+k]||[]).includes(EXT_MAN)?`<button class="btn" data-act="extmark" data-v="0">Togli «coperto da altri anni»</button>`:`<button class="btn" data-act="extmark" data-v="1">Coperto da altri anni</button>`}
