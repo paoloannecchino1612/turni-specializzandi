@@ -1427,6 +1427,7 @@ function alignOwn(mo,res){ let moved=0; TICK++;
           const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=[...res.ownMap[kk]]; res.ownMap[kk].forEach((x,i)=>{ mo.fixed=mo.fixed||{}; mo.fixed[d+"|"+k+"|"+i]=x; }); moved++; } } }
   return moved; }
 let AUTOSYNC=false;
+/* aggiornamento automatico dal foglio: disattivato su richiesta del proprietario (il foglio si importa solo a mano da Strumenti) */
 async function autoSyncSheet(){ if(AUTOSYNC||!db||!S||!ADMIN()||!S.extSheetUrl||typeof XLSX==="undefined") return; AUTOSYNC=true;
   const key="turni.autosync."+CURY; try{ const last=+localStorage.getItem(key)||0; if(Date.now()-last<3*3600*1000) return; }catch(e){}
   const id=(S.extSheetUrl.match(/\/d\/([A-Za-z0-9_-]{20,})/)||[])[1]; if(!id) return;
@@ -1937,7 +1938,7 @@ render();
       setSync(cfg?"Salvato":OWNER?"Nessun dato ancora":"In attesa dei dati");
       if(OWNER&&(migrated||!rawCfg&&cfg)){migrated=false;persist();}
       for(const yy in MS) if(MS[yy].legacy&&!MS[yy].legacy.split) splitMonths(+yy);
-      checkMulti(); pruneOld(); autoSyncSheet(); runSheetAlign(); if(HIDEUNAV) recomputeUnav(); filterSW(); consolidate(); autoInvalidate(); syncRoles(); autoYear(); if(!layer.innerHTML) render(); };
+      checkMulti(); pruneOld(); runSheetAlign(); if(HIDEUNAV) recomputeUnav(); filterSW(); consolidate(); autoInvalidate(); syncRoles(); autoYear(); if(!layer.innerHTML) render(); };
     REBUILD=rebuild;
     const subY={};
     const watchYear=y=>{ if(subY[y]) return; subY[y]=true; RAW[y]=RAW[y]||{}; const d=yDocs(y); MS[y]=MS[y]||{legacy:undefined,m:{},mu:{},last:{}};
