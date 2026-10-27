@@ -43,7 +43,13 @@ function yDocs(y){ return y===2?{cfg:"config/main",mon:"planner/state"}:{cfg:"co
 const PARSED={};
 /* anni che coprono ogni sala: elenco unico per tutti (config/years), lo modificano proprietario e gestori di qualsiasi anno.
    chiave = nome sala normalizzato; senza indicazione la sala è di tutti gli anni */
-let COVY={}, CLOSEDG={}; /* sale chiuse condivise tra tutti gli anni: mk → {giorno|sala|turno: true} (in config/years) */
+let COVY={}, CLOSEDG={}, YCOL={}, HOLEY={}; /* colori degli anni (livello 1–4 → colore) e turni scoperti assegnati a un anno: mk → {giorno|sala|turno: livello} (config/years) */
+const YCOL_DEF={1:"#0d9488",2:"#db2777",3:"#b45309",4:"#4f46e5"}, ROMAN={1:"I",2:"II",3:"III",4:"IV"};
+function ycol(l){ return YCOL[l]||YCOL_DEF[l]||"#666"; }
+function holeTag(mk,d,key){ const [pid,sh]=key.split("|"), p=postOf(pid); return p&&HOLEY[mk]?HOLEY[mk][d+"|"+normRoom(p.name)+"|"+sh]||null:null; }
+function holeLabel(d,key){ const l=holeTag(UI.mk,d,key); return l?`<span class="hole" style="color:#fff;background:${ycol(l)}">scoperto · ${ROMAN[l]} anno</span>`:`<span class="hole">scoperto</span>`; }
+function setHoleTag(mk,keys,lev){ const m={...(HOLEY[mk]||{})}; let n=0; keys.forEach(dk=>{ const [d,pid,sh]=dk.split("|"), p=postOf(pid); if(!p) return; const k=d+"|"+normRoom(p.name)+"|"+sh; if(lev){ if(m[k]!==lev){ m[k]=lev; n++; } } else if(m[k]){ delete m[k]; n++; } });
+  HOLEY={...HOLEY,[mk]:m}; if(n&&db) saveYearsDoc().catch(()=>toast("Non riesco a salvare: le regole del database vanno aggiornate")); return n; } /* sale chiuse condivise tra tutti gli anni: mk → {giorno|sala|turno: true} (in config/years) */
 const COV_DEF={diagsen:[1],radsen1:[1],radsen2:[1],ecocolumbus:[1],eco:[1],rxtorace:[1],rxscheletro:[1],tccolumbus:[3],tccemi0:[1],sala8:[1]};
 function yearsFor(p){ const k=normRoom(p.name), v=COVY[k]; return Array.isArray(v)?v:(COV_DEF[k]||LEVELS); }
 /* gli anni dell'elenco sono gli anni di corso effettivi del mese (es. in ottobre il vostro gruppo è 1° anno) */
@@ -798,6 +804,11 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   let holesBox="";
   if(holes.length&&ADMIN()&&(mo.generated||draftView(mo))){ const g={}; holes.forEach(h=>{const k=fmt(h.d);(g[k]=g[k]||[]).push(`${h.post} ${h.s}`);});
     holesBox=`<div class="alerts bad"><strong>${holes.length} turni scoperti</strong><span style="font-size:.84rem">Non c'è nessuno disponibile entro i limiti. Puoi alzare il massimo settimanale, togliere postazioni oppure coprirli a mano.</span><ul>${Object.entries(g).slice(0,10).map(([k,v])=>`<li>${k}: ${v.join(", ")}</li>`).join("")}${Object.keys(g).length>10?`<li>… e altri ${Object.keys(g).length-10} giorni</li>`:""}</ul></div>`; }
+  if(ADMIN()){ const lev=yLab(CURY), tags=HOLEY[UI.mk]||{}, byRn={}; S.posts.forEach(x=>byRn[normRoom(x.name)]=x); const g={}; let n=0;
+    Object.keys(tags).filter(k=>tags[k]===lev).sort().forEach(k=>{ const [d,rn,sh]=k.split("|"), post=byRn[rn];
+      if(post){ const key=post.id+"|"+sh; if((((SC||{})[d]||{})[key]||[]).some(x=>x)||roomCovered(mo,d,key)||isClosed(mo,d,key)) return; }
+      n++; (g[fmt(d)]=g[fmt(d)]||[]).push(`${esc(post?post.name:rn)} ${SHN[sh]||sh}`); });
+    if(n) alerts+=`<div class="alerts" style="border-left:4px solid ${ycol(lev)}"><strong style="color:${ycol(lev)}">Turni scoperti del ${ROMAN[lev]} anno (${n})</strong><ul>${Object.entries(g).map(([k,v])=>`<li>${k}: ${v.join(", ")}</li>`).join("")}</ul></div>`; }
   if(issues.length&&ADMIN()) alerts+=`<div class="alerts"><strong>Da controllare</strong><ul>${issues.slice(0,15).map(i=>`<li>${esc(i)}</li>`).join("")}</ul></div>`;
   const pr=presence(UI.mk); alerts+=presenceBox(pr);
   if(ADMIN()&&(mo.generated||draftView(mo))&&!holes.length&&!issues.length&&!pr.length) alerts=`<div class="okline">Tutte le postazioni coperte, nessun conflitto.</div>`;
@@ -813,18 +824,18 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
     const F=fgs.some(([id])=>id===UI.filt)||UI.filt==="NG"?UI.filt:"";
     const cols=!F?cols0:F==="NG"?cols0.filter(c=>c.s==="N"||c.s==="D"):S.posts.filter(x=>fgOf(x)===F).flatMap(post=>["M","P"].filter(s=>Object.values(post.on||{}).some(a=>(a||[]).includes(s))).map(s=>({post,s,k:post.id+"|"+s}))), used=S.posts.filter(x=>cols.some(c=>c.post===x));
     body=`<div class="pickers sm" style="margin-bottom:6px"><button data-act="filt" data-v="" aria-pressed="${!F}">Tutte</button>${fgs.map(([id,name])=>`<button data-act="filt" data-v="${id}" aria-pressed="${F===id}">${esc(name)}</button>`).join("")}<button data-act="filt" data-v="NG" aria-pressed="${F==="NG"}">Notti e guardie</button></div>`;
-    if(ADMIN()) body+=UI.clsel?`<div class="row" style="gap:8px;margin-bottom:6px;flex-wrap:wrap;align-items:center"><span class="muted" style="font-size:.84rem">Tocca le caselle da chiudere o riaprire: ${UI.clsel.size} selezionate</span><button class="btn primary" data-act="clapply" data-v="1" ${UI.clsel.size?"":"disabled"}>Chiudi le selezionate</button><button class="btn" data-act="clapply" data-v="0" ${UI.clsel.size?"":"disabled"}>Riapri le selezionate</button><button class="btn" data-act="clsel">Annulla</button></div>`
-      :`<div class="row" style="margin-bottom:6px"><button class="btn" data-act="clsel">Seleziona sale da chiudere</button></div>`;
+    if(ADMIN()) body+=UI.clsel?`<div class="row" style="gap:8px;margin-bottom:6px;flex-wrap:wrap;align-items:center"><span class="muted" style="font-size:.84rem">Tocca le caselle da chiudere o riaprire: ${UI.clsel.size} selezionate</span><button class="btn primary" data-act="clapply" data-v="1" ${UI.clsel.size?"":"disabled"}>Chiudi le selezionate</button><button class="btn" data-act="clapply" data-v="0" ${UI.clsel.size?"":"disabled"}>Riapri le selezionate</button><span class="muted" style="font-size:.84rem">Scoperti di:</span>${LEVELS.map(l=>`<button class="btn sm" data-act="holesel" data-v="${l}" ${UI.clsel.size?"":"disabled"} style="border-color:${ycol(l)};color:${ycol(l)}">${ROMAN[l]}</button>`).join("")}<button class="btn sm" data-act="holesel" data-v="0" ${UI.clsel.size?"":"disabled"}>Togli anno</button><button class="btn" data-act="clsel">Annulla</button></div>`
+      :`<div class="row" style="margin-bottom:6px"><button class="btn" data-act="clsel">Seleziona caselle (sale chiuse, scoperti per anno)</button></div>`;
     body+=`<div class="scroll"><table class="grid"><thead><tr><th class="sticky" rowspan="2">Giorno</th>${used.map(x=>`<th class="roomh" colspan="${cols.filter(c=>c.post===x).length}">${esc(x.name)}</th>`).join("")}</tr>
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
      ${p.days.map((d,i)=>{const t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
        if(isClosed(mo,d,c.k)&&!(arr||[]).some(x=>x)) return `<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Sala chiusa"><span class="muted" style="font-size:.75rem;font-weight:600">Chiusa</span></td>`;
        if(!arr){ const due=postActive(c.post)&&((c.post.on||{})[dayType(d)]||[]).includes(c.s), ex0=EXT(mo)[d+"|"+c.k];
          if(ex0) return `<td class="cell${selC(d,c.k)}" ${(due||UI.clsel)&&ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni"><span class="muted" style="font-size:.72rem;display:block">${ex0.map(esc).join("<br>")}</span></td>`;
-         return due?`<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`}><span class="hole">scoperto</span></td>`:UI.clsel&&ADMIN()?`<td class="cell${selC(d,c.k)}" data-act="cell" data-d="${d}" data-k="${c.k}"><span class="muted">·</span></td>`:`<td class="cell none">·</td>`; }
+         return due?`<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`}>${holeLabel(d,c.k)}</td>`:UI.clsel&&ADMIN()?`<td class="cell${selC(d,c.k)}" data-act="cell" data-d="${d}" data-k="${c.k}"><span class="muted">·</span></td>`:`<td class="cell none">·</td>`; }
        const ex=EXT(mo)[d+"|"+c.k], lw=lowerOnly(mo,d,c.k), exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${lw.map(esc).join("<br>")}</span>`:"");
        if(!arr.length) return `<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
-       return `<td class="cell${selC(d,c.k)} ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(ex||lw&&multiPost(c.post)||arr.some(v=>v)?"":`<span class="hole">scoperto</span>`)).join("")}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
+       return `<td class="cell${selC(d,c.k)} ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(ex||lw&&multiPost(c.post)||arr.some(v=>v)?"":`${holeLabel(d,c.k)}`)).join("")}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
   } else if(UI.view==="nome"){
     if(!UI.who) UI.who=myPid()||"";
     const pid=UI.who, rows=[];
@@ -889,7 +900,9 @@ function vImp2(){
    <p class="muted" style="margin:0;font-size:.85rem">${HIDEUNAV?"Gli specializzandi vedono solo le proprie indisponibilità, ferie, congressi e preferenze. Tu e i gestori vedete tutto.":"Tutti vedono le indisponibilità, ferie e congressi di tutti. Attivandolo ognuno vede solo le proprie (tu e i gestori vedete sempre tutto)."}</p>
    <div class="row" style="justify-content:space-between"><h2>Privacy cambi</h2><button class="btn ${HIDESWAPS?"primary":""}" data-act="privsw" role="switch" aria-checked="${HIDESWAPS}">${HIDESWAPS?"Attivo":"Spento"}</button></div>
    <p class="muted" style="margin:0;font-size:.85rem">${HIDESWAPS?"Gli specializzandi vedono solo i cambi in cui sono coinvolti. Tu e i gestori vedete tutto.":"Tutti vedono lo storico dei cambi di tutti (con il filtro «Solo i miei»). Attivandolo ognuno vede solo i cambi in cui è coinvolto."}</p></div>`:"";
-  return reqPanel+yearsPanel+privPanel+covPanel+mgPanel+allowPanel+linkedPanel()+importPanel+`
+  const colPanel=ADMIN()&&db?`<div class="panel"><h2>Colori degli anni</h2><p class="muted" style="margin:0;font-size:.85rem">Usati per i turni scoperti assegnati a un anno ("scoperto · II anno"). Li modificate tu e i gestori di qualsiasi anno.</p>
+   <div class="row" style="gap:16px;flex-wrap:wrap">${LEVELS.map(l=>`<label style="display:flex;gap:8px;align-items:center"><input type="color" data-ycol="${l}" value="${ycol(l)}" style="width:42px;height:32px;border:0;background:none;padding:0"> ${ROMAN[l]} anno</label>`).join("")}</div></div>`:"";
+  return reqPanel+yearsPanel+privPanel+covPanel+colPanel+mgPanel+allowPanel+linkedPanel()+importPanel+`
   <div class="panel"><h2>Specializzandi</h2>
    <form class="row" id="addform"><input id="newname" placeholder="Cognome Nome" style="flex:1 1 12em" autocomplete="off"><select id="newyear" aria-label="Anno">${[1,2,3,4].map(y=>`<option ${y===2?"selected":""}>${y}° anno</option>`).join("")}</select><button class="btn primary" type="submit">Aggiungi</button></form>
    <div class="list">${S.residents.map(r=>`<div class="item"><input id="rname-${r.id}" data-rname="${r.id}" value="${esc(r.name)}" aria-label="Nome" style="font-weight:600;width:100%"><span class="pickers sm" style="flex:none"><button data-act="rflag" data-id="${r.id}" data-f="nights" aria-pressed="${canDo(r.id,"N")}">Notti</button><button data-act="rflag" data-id="${r.id}" data-f="guards" aria-pressed="${canDo(r.id,"D")}">Guardie</button></span><button class="btn danger ${UI.confirm==="del-"+r.id?"confirm":""}" data-act="del" data-id="${r.id}">${UI.confirm==="del-"+r.id?"Conferma":"Rimuovi"}</button></div>`).join("")||`<p class="muted" style="margin:0">Ancora nessuno.</p>`}</div></div>
@@ -1166,7 +1179,8 @@ function fgOf(p){ const k=normRoom(p.name); if(/^(diagsen|radsen)/.test(k)) retu
   if(/^tc/.test(k)) return "TC"; if(/^rm/.test(k)) return "RM"; if(/^angio/.test(k)) return "ANGIO"; if(/^dea/.test(k)) return "DEA"; return p.cover; }
 /* sala chiusa (gestori, per giorno e turno): nessuno viene assegnato e non è un buco; vale per tutti gli anni (chiave con il nome normalizzato della sala) */
 function saveYearsDoc(){ const om=oldestMk(); const cl={}; for(const mk in CLOSEDG) if(mk>=om&&Object.keys(CLOSEDG[mk]).length) cl[mk]=CLOSEDG[mk]; CLOSEDG=cl;
-  return db.doc("config/years").set({state:JSON.stringify({coverage:COVY,closed:cl}),updated:new Date().toISOString()}); }
+  const hy={}; for(const mk in HOLEY) if(mk>=om&&Object.keys(HOLEY[mk]).length) hy[mk]=HOLEY[mk]; HOLEY=hy;
+  return db.doc("config/years").set({state:JSON.stringify({coverage:COVY,closed:cl,colors:YCOL,holes:hy}),updated:new Date().toISOString()}); }
 function closedN(mk,d,rn,sh){ const k=d+"|"+rn+"|"+sh; if(CLOSEDG[mk]&&CLOSEDG[mk][k]) return true; for(const y of (MULTI?YRS(mk):[CURY])){ const st=y===CURY?S:yState(y), m=st&&st.months&&st.months[mk]; if(m&&m.closed&&m.closed[k]) return true; } return false; }
 function isClosed(mo,d,key){ const [pid,sh]=key.split("|"), p=postOf(pid); return !!p&&closedN(mo.mk,d,normRoom(p.name),sh); }
 function multiPost(p){ return !!p&&(p.cover==="TC"||p.cover==="RM"); }
@@ -1341,6 +1355,7 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
   sheet(`<div class="row" style="justify-content:space-between"><div><h2>${esc(post.name)} · ${SHN[s]}</h2><span class="muted">${fmt(d,true)} · ${esc(S.hours[s])}</span></div><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
    ${hasDraft(mo)?(()=>{ const pub=((effSched(UI.mk)||mo.sched||{})[d]||{})[k]||[], dr=((mo.draft.sched||{})[d]||{})[k]||[], nm=a=>a.filter(x=>x).map(resName).join(", ")||(isClosed(mo,d,k)?"Chiusa":"—"), diff=!sameCell(pub,dr);
       return `<div class="stack" style="gap:2px;font-size:.88rem;padding:8px 10px;border-radius:8px;background:${diff?"var(--chg-soft)":"var(--surface-2,transparent)"};border:1px solid ${diff?"var(--chg)":"var(--line)"}"><span><span class="muted">Orario attivo:</span> <strong>${esc(nm(pub))}</strong></span><span><span class="muted">Bozza:</span> <strong>${esc(nm(dr))}</strong>${diff?' <span style="color:var(--chg);font-weight:600">· modificato</span>':""}</span></div>`; })():""}
+   ${!arr.some(x=>x)&&!isClosed(mo,d,k)?(()=>{ const cur=holeTag(UI.mk,d,k); return `<div class="row" style="gap:6px;flex-wrap:wrap;align-items:center"><span class="label">Scoperto di:</span>${LEVELS.map(l=>`<button class="btn sm" data-act="holey" data-v="${l}" style="${cur===l?`background:${ycol(l)};color:#fff;border-color:${ycol(l)}`:`border-color:${ycol(l)};color:${ycol(l)}`}">${ROMAN[l]} anno</button>`).join("")}${cur?`<button class="btn sm" data-act="holey" data-v="0">Togli</button>`:""}</div>`; })():""}
    ${EXT(mo)[d+"|"+k]?`<p class="muted" style="margin:0;font-size:.84rem">Altri anni: ${EXT(mo)[d+"|"+k].map(esc).join(", ")}</p>`:""}
    ${lowerOnly(mo,d,k)?`<p class="muted" style="margin:0;font-size:.84rem;font-style:italic">Anni successivi: ${lowerOnly(mo,d,k).map(esc).join(", ")}</p>`:""}
    ${[...arr,...(multiPost(post)&&arr.some(x=>x)?[undefined]:[])].map((cur,i)=>`<div class="stack" style="gap:6px"><span class="label">${cur===undefined?"Aggiungi un'altra persona":cur?`Ora: ${esc(resName(cur))}`:"Scoperto"}</span>
@@ -1537,6 +1552,8 @@ document.addEventListener("click",e=>{
     toast(el.dataset.v==="0"?"Sala riaperta per tutti gli anni (nella bozza)":"Sala chiusa per tutti gli anni: nessuno assegnato (nella bozza, da accettare)"); return; }
   if(a==="chseen"){ const {pid,list}=myChanges(); const last=list.reduce((m,c)=>c.at>m?c.at:m,""); try{ localStorage.setItem("turni.chseen."+pid,last); }catch(e){} render(); return; }
   if(a==="forcerot"){ UI.forceRot=layer.dataset.d+"|"+layer.dataset.k; cellSheet(layer.dataset.d,layer.dataset.k); return; }
+  if(a==="holey"){ setHoleTag(UI.mk,[layer.dataset.d+"|"+layer.dataset.k],+el.dataset.v); closeSheet(); render(); return; }
+  if(a==="holesel"){ const n=setHoleTag(UI.mk,[...UI.clsel],+el.dataset.v); UI.clsel=null; render(); toast(n?(+el.dataset.v?`${n} turni scoperti assegnati al ${ROMAN[+el.dataset.v]} anno`:`${n} turni scoperti senza anno`):"Nessuna modifica"); return; }
   if(a==="filt"){ UI.filt=el.dataset.v; render(); return; }
   if(a==="dview"){ UI.draftView=el.dataset.v==="1"; render(); return; }
   if(a==="accall"){ if(UI.confirm!=="accall"){UI.confirm="accall";render();return;} UI.confirm=null; const n=period(UI.mk).days.length/7, acc=(M(UI.mk).draft||{}).acc||{};
@@ -1640,6 +1657,7 @@ document.addEventListener("click",e=>{
 });
 document.addEventListener("change",e=>{
   const t=e.target;
+  if(t.dataset&&t.dataset.ycol&&ADMIN()){ YCOL={...YCOL,[t.dataset.ycol]:t.value}; if(db) saveYearsDoc().catch(()=>toast("Non riesco a salvare il colore")); render(); return; }
   if(t.id==="extfile"&&ADMIN()&&t.files&&t.files[0]){ if(typeof XLSX==="undefined"){toast("Libreria Excel non caricata, riprova tra poco");return;}
     const fr=new FileReader(); fr.onload=()=>{ try{ const wb=XLSX.read(fr.result,{type:"array"}); UI.extWb=wb;
         const want=monthName(UI.mk).toLowerCase(), name=wb.SheetNames.find(n=>n.trim().toLowerCase()===want)||wb.SheetNames.find(n=>n.toLowerCase().includes(want.split(" ")[0]))||wb.SheetNames[0];
@@ -1711,8 +1729,8 @@ render();
     const checkMulti=()=>{ const st2=yState(2); const on=!!(st2&&st2.multiYear); if(on===MULTI) return; MULTI=on; EXTC.key=null;
       if(MULTI){ ALLY().forEach(watchYear); ensureCohorts(); } else if(CURY!==2) switchYear(2); watchCov(); filterSW(); };
     let covSub=false;
-    const watchCov=()=>{ if(covSub) return; covSub=true; db.doc("config/years").onSnapshot(sn=>{ let c={}, cl={}; try{ const o=JSON.parse((sn.exists&&sn.data().state)||"{}"); c=o.coverage||{}; cl=o.closed||{}; }catch(e){}
-      COVY=c; CLOSEDG=cl; RAWV++; EXTC.key=null;
+    const watchCov=()=>{ if(covSub) return; covSub=true; db.doc("config/years").onSnapshot(sn=>{ let c={}, cl={}, yc={}, hy={}; try{ const o=JSON.parse((sn.exists&&sn.data().state)||"{}"); c=o.coverage||{}; cl=o.closed||{}; yc=o.colors||{}; hy=o.holes||{}; }catch(e){}
+      COVY=c; CLOSEDG=cl; YCOL=yc; HOLEY=hy; RAWV++; EXTC.key=null;
       /* sale nuove: di base solo al 1° anno (TC Columbus al 3°), finché tu o un gestore non le cambiate */
       const DEF=COV_DEF;
       const miss=Object.keys(DEF).filter(k=>!Array.isArray(COVY[k]));
