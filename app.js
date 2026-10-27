@@ -268,9 +268,10 @@ function slotsWith(d,day){ const base=slotsOfDay(d), have=new Set(base.map(x=>x.
 /* chi può coprire una postazione: primari, poi jolly */
 /* DEA (mattina e pomeriggio), notti e guardie: le può fare chiunque, senza guardare la rotazione */
 function covOf(post,s){ return (post.all||[]).includes(s)||post.cover==="DEA"||s==="N"||s==="D"?"ALL":post.cover; }
+function deaMP(post,s){ return post.cover==="DEA"&&(s==="M"||s==="P"); }
 function pools(mo,post,s){ const inG=S.residents.filter(r=>inGem(mo,r.id)), cov=covOf(post,s);
-  /* DEA mattina/pomeriggio: la può fare chiunque, ma prima chi è in rotazione DEA; gli altri solo se serve */
-  if(post.cover==="DEA"&&(s==="M"||s==="P")) return {pri:inG.filter(r=>rotCovers(mo.rot[r.id],"DEA")),jol:inG.filter(r=>!rotCovers(mo.rot[r.id],"DEA"))};
+  /* DEA mattina/pomeriggio: il generatore usa solo chi è in rotazione DEA; gli altri si mettono solo a mano */
+  if(deaMP(post,s)) return {pri:inG.filter(r=>rotCovers(mo.rot[r.id],"DEA")),jol:[]};
   if(cov==="ALL") return {pri:inG,jol:[]};
   /* i jolly (Angiografia, DEA) coprono solo TC e RM: le altre sale solo chi è nella loro rotazione */
   return {pri:inG.filter(r=>rotCovers(mo.rot[r.id],cov)), jol:(isJolly(cov)||!(cov==="TC"||cov==="RM"))?[]:inG.filter(r=>!rotCovers(mo.rot[r.id],cov)&&(isJolly(mo.rot[r.id])||incl(mo,r.id)))}; }
@@ -1648,11 +1649,11 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
    ${anyMgr()&&drxCell(d,k)?`<p style="margin:0;font-size:.84rem;color:var(--chg);font-weight:600">Un altro anno ha modificato questa casella nella sua bozza, non ancora pubblicata${DRX.u.names.size+DRX.l.names.size?" (nomi in arancione)":""}.</p>`:""}
    ${lowerOnly(mo,d,k)?`<p class="muted" style="margin:0;font-size:.84rem;font-style:italic">Anni successivi: ${xNames(d,k,lowerOnly(mo,d,k)).replace(/<br>/g,", ")}</p>`:""}
    ${[...arr,...(multiPost(post,s)&&arr.some(x=>x)&&arr.filter(x=>x).length+othersIn(mo,d,k)<capOf(post,s).max?[undefined]:[])].map((cur,i)=>`<div class="stack" style="gap:6px"><span class="label">${cur===undefined?"Aggiungi un'altra persona":cur?`Ora: ${esc(resName(cur))}`:"Scoperto"}</span>
-     ${cov!=="ALL"?`<span class="groupname">Rotazione ${esc(rotName(cov))}</span>`:`<span class="groupname">Tutti gli specializzandi</span>`}
+     ${cov!=="ALL"||deaMP(post,s)?`<span class="groupname">Rotazione ${esc(rotName(deaMP(post,s)?"DEA":cov))}</span>`:`<span class="groupname">Tutti gli specializzandi</span>`}
      ${pri.map(r=>btn(r,i,cur,cov==="ALL")).join("")||`<p class="muted" style="margin:0">Nessuno in questa rotazione.</p>`}
      ${jol.length?`<span class="groupname">Jolly</span>${jol.map(r=>btn(r,i,cur,true)).join("")}`:""}
      ${(()=>{const bg=S.residents.filter(r=>isBG(mo.rot[r.id])); return bg.length?`<span class="groupname">Bambin Gesù (solo a mano)</span>${bg.map(r=>btn(r,i,cur,true)).join("")}`:"";})()}
-     ${(()=>{ if(cov==="ALL") return ""; /* sempre visibili anche gli altri specializzandi (fuori rotazione), prima i disponibili */
+     ${(()=>{ if(cov==="ALL"&&!deaMP(post,s)) return ""; /* sempre visibili anche gli altri specializzandi (fuori rotazione), prima i disponibili */
         const inPools=new Set([...pri,...jol].map(r=>r.id)), others=S.residents.filter(r=>!inPools.has(r.id)&&!isBG(mo.rot[r.id]));
         if(!others.length) return "";
         return `<span class="groupname">Altri specializzandi (fuori rotazione)</span>${others.sort((a,b)=>!!why(a.id)-!!why(b.id)).map(r=>btn(r,i,cur,true)).join("")}`; })()}
