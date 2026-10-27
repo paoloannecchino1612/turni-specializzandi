@@ -104,6 +104,9 @@ table.grid tr.weekstart td{border-top:2px solid var(--muted)}
 table.grid td.cell{min-width:7.5em;cursor:pointer}
 table.grid td.cell:hover{background:var(--accent-soft)}
 table.grid td.cell.none{color:var(--line);cursor:default}
+table.grid td.cell.xchg{box-shadow:inset 0 0 0 2px var(--chg);background-image:repeating-linear-gradient(135deg,transparent 0 6px,var(--chg-soft) 6px 9px)}
+.xd{color:var(--chg);font-weight:700;font-style:normal}
+.xd::after{content:" ✎"}
 table.grid td.cell.chg{background:var(--chg-soft);box-shadow:inset 0 0 0 2px var(--chg)}
 table.grid td.cell.sel{outline:3px solid var(--accent);outline-offset:-3px;background:var(--accent-soft)}
 table.grid td.cell.none:hover{background:none}
@@ -201,7 +204,7 @@ body{margin:0;font-size:15px} img{max-width:100%} [hidden]{display:none!importan
 <div id="layer"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script type="module" src="fb.js?v=119"></script>
-<script type="module" src="app.js?v=119"></script>
+<script type="module" src="fb.js?v=120"></script>
+<script type="module" src="app.js?v=120"></script>
 <script>if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});</script>
 </body></html>

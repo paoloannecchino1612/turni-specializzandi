@@ -118,13 +118,24 @@ function filterSW(){ for(const k in SW) delete SW[k]; const ids=new Set(S?S.resi
 const EXTC={key:null,map:{}};
 /* bozza condivisa: i rappresentanti (di qualsiasi anno) vedono e usano le bozze degli altri anni al posto del loro pubblicato */
 function anyMgr(){ return !UI.userMode&&(OWNER||(typeof mgrCohort==="function"&&mgrCohort()!==null)); }
-function autoExt(mk,lower){ const out={}, am=anyMgr();
+/* modifiche in bozza (non pubblicate) degli altri anni: nomi aggiunti e caselle cambiate, per segnalarle */
+const DRX={u:{names:new Set(),cells:new Set()},l:{names:new Set(),cells:new Set()}};
+function drxSync(){ if(!MULTI||!S||!UI.mk) return; const mo=M(UI.mk); EXT(mo); LOWER(mo); DRX.u=EXTC.dx||DRX.u; DRX.l=LOWC.dx||DRX.l; }
+function drxName(d,k,v){ const kk=d+"|"+k+"|"+nameKey(v); return DRX.u.names.has(kk)||DRX.l.names.has(kk); }
+function drxCell(d,k){ const kk=d+"|"+k; return DRX.u.cells.has(kk)||DRX.l.cells.has(kk); }
+function xNames(d,k,arr){ return arr.map(v=>drxName(d,k,v)?`<span class="xd" title="In bozza, non ancora pubblicato">${esc(v)}</span>`:esc(v)).join("<br>"); }
+function autoExt(mk,lower){ const out={}, am=anyMgr(), dx=DRX[lower?"l":"u"]={names:new Set(),cells:new Set()};
   for(const y of YRS(mk)){ if(lower?y>=CURY:y<=CURY) continue; const st=yState(y); const m0=st&&st.months&&st.months[mk]; if(!m0) continue;
     const sc=am&&m0.draft&&m0.draft.sched?{...(m0.sched||{}),...m0.draft.sched}:m0.sched; if(!sc) continue; const m2={sched:sc};
     const mine={}; S.posts.forEach(p=>mine[normRoom(p.name)]=p); const pmap={}; (st.posts||[]).forEach(p=>pmap[p.id]=mine[normRoom(p.name)]);
     const nm={}; (st.residents||[]).forEach(r=>nm[r.id]=`(${yLab(r.year||st.groupYear||y)}) ${r.name}`);
+    const dr=am&&m0.draft&&m0.draft.sched||null, pub=m0.sched||{};
     for(const d in m2.sched) for(const k in m2.sched[d]){ const [pid,sh]=k.split("|"), my=pmap[pid]; if(!my||!((my.on||{})[dayType(d)]||[]).includes(sh)) continue;
-      (m2.sched[d][k]||[]).forEach(x=>{ if(!x||!nm[x]) return; const kk=d+"|"+my.id+"|"+sh; (out[kk]=out[kk]||[]).push(nm[x]); }); } }
+      const kk=d+"|"+my.id+"|"+sh, inDr=dr&&dr[d], pa=((pub[d]||{})[k]||[]);
+      if(inDr&&!sameCell(dr[d][k],pa)) dx.cells.add(kk);
+      (m2.sched[d][k]||[]).forEach(x=>{ if(!x||!nm[x]) return; (out[kk]=out[kk]||[]).push(nm[x]); if(inDr&&!pa.includes(x)) dx.names.add(kk+"|"+nameKey(nm[x])); }); }
+    /* tolti nella bozza: la casella resta segnalata anche se nella bozza è vuota */
+    if(dr) for(const d in dr){ const pd=pub[d]||{}; for(const k in pd){ const [pid,sh]=k.split("|"), my=pmap[pid]; if(!my) continue; if(!sameCell(dr[d][k],pd[k])) dx.cells.add(d+"|"+my.id+"|"+sh); } } }
   return out; }
 const SEXC={key:null,map:{}};
 function sheetExtCached(mk){ const sh=sheetLatest(mk); const key=mk+"|"+CURY+"|"+(sh?sh.at:"")+"|"+S.residents.length+"|"+S.posts.length+"|"+JSON.stringify((S.months[mk]||{}).extReset||{}).length; if(SEXC.key!==key){ SEXC.key=key; SEXC.map=sh?sheetExt(mk):{}; } return SEXC.map; }
@@ -132,7 +143,7 @@ function sheetExtCached(mk){ const sh=sheetLatest(mk); const key=mk+"|"+CURY+"|"
 const LOWC={key:null,map:{}};
 const PSIG={t:-1,v:""}; function postSig(){ if(PSIG.t!==TICK||!PSIG.v){ PSIG.t=TICK; PSIG.v=S.posts.map(p=>p.id+":"+p.name).join(","); } return PSIG.v; }
 function LOWER(mo){ if(!MULTI||!S) return {}; const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+anyMgr()+"|"+postSig();
-  if(LOWC.key!==key){ LOWC.key=key; LOWC.map=autoExt(mo.mk,true); } return LOWC.map; }
+  if(LOWC.key!==key){ LOWC.key=key; LOWC.map=autoExt(mo.mk,true); LOWC.dx=DRX.l; } return LOWC.map; }
 /* EXT è chiamato per ogni casella: il risultato si ricalcola solo quando cambia qualcosa (TICK sale a ogni render, generazione e salvataggio) */
 let TICK=0; const EXTMEMO={};
 function EXT(mo){ const own=mo.ext||{}, k=TICK+"|"+anyMgr()+"|"+mo.mk+"|"+CURY+"|"+RAWV+"|"+(S?S.posts.length+"|"+S.residents.length:"")+"|"+Object.keys(own).length;
@@ -148,7 +159,7 @@ function extOwn(mo){ const own=mo.ext||{}, sh=S&&mo.mk?sheetLatest(mo.mk):null; 
   return out; }
 function EXT0(mo){ let own=extOwn(mo); if(S&&mo.mk){ const se=sheetExtCached(mo.mk); if(Object.keys(se).length){ const m={...se}; for(const k in own) m[k]=dedupNames([...(m[k]||[]),...own[k]]); own=m; } } if(!MULTI||!S) return own;
   const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+anyMgr()+"|"+postSig();
-  if(EXTC.key!==key){ EXTC.key=key; EXTC.map=autoExt(mo.mk); }
+  if(EXTC.key!==key){ EXTC.key=key; EXTC.map=autoExt(mo.mk); EXTC.dx=DRX.u; }
   const auto=EXTC.map; if(!Object.keys(auto).length) return own;
   const out={...auto}; for(const k in own) out[k]=dedupNames([...(auto[k]||[]),...own[k]]); return out; }
 /* stesso nome da più fonti (foglio + orario pubblicato di un altro anno): si tiene una volta sola */
@@ -946,7 +957,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   const tabs=`<div class="pickers">${ADMIN()?vb("giorni","Per giorno")+vb("nome","Per nome"):vb("nome","Per nome")+vb("giorni","Per giorno")}<button data-act="view" data-v="persone" aria-pressed="${UI.view==="persone"}">Per specializzando</button><button data-act="view" data-v="conti" aria-pressed="${UI.view==="conti"}">Conteggi</button></div>`;
   let body="";
   const people=S.residents.filter(r=>inGem(mo,r.id)||(SC&&shiftsOf(SC,r.id).length));
-  CHG=UI.view==="giorni"?draftChanges(mo):null;
+  CHG=UI.view==="giorni"?draftChanges(mo):null; drxSync();
   if(UI.view==="giorni"){
     /* filtro per metodica: sale della rotazione (solo mattina/pomeriggio) oppure notti e guardie */
     const myY=ADMIN()?null:yLab((MULTI&&myAnyPid()&&yearOfPid(myAnyPid()))||CURY);
@@ -966,9 +977,9 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
      ${shownDays.map((d,i0)=>{const i=i0+offs, t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
        if(isClosed(mo,d,c.k)&&!(arr||[]).some(x=>x)) return `<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Sala chiusa"><span class="muted" style="font-size:.75rem;font-weight:600">Chiusa</span></td>`;
        if(!arr){ const due=postActive(c.post)&&((c.post.on||{})[dayType(d)]||[]).includes(c.s), ex0=EXT(mo)[d+"|"+c.k];
-         if(ex0) return `<td class="cell${selC(d,c.k)}" ${(due||UI.clsel)&&ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni"><span class="muted" style="font-size:.72rem;display:block">${ex0.map(esc).join("<br>")}</span></td>`;
+         if(ex0) return `<td class="cell${selC(d,c.k)}" ${(due||UI.clsel)&&ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni"><span class="muted" style="font-size:.72rem;display:block">${xNames(d,c.k,ex0)}</span></td>`;
          return due?`<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`}>${holeLabel(d,c.k)}</td>`:UI.clsel&&ADMIN()?`<td class="cell${selC(d,c.k)}" data-act="cell" data-d="${d}" data-k="${c.k}"><span class="muted">·</span></td>`:`<td class="cell none">·</td>`; }
-       const ex=EXT(mo)[d+"|"+c.k], lw=lowerOnly(mo,d,c.k), exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${lw.map(esc).join("<br>")}</span>`:"");
+       const ex=EXT(mo)[d+"|"+c.k], lw=lowerOnly(mo,d,c.k), exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${xNames(d,c.k,ex)}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${xNames(d,c.k,lw)}</span>`:"");
        if(!arr.length) return `<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
        return `<td class="cell${selC(d,c.k)} ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(arr.some(v=>v)||(needOf(mo,d,c.k)===0&&!unsatTags(mo,d,c.k,arr).length)?"":`${holeLabel(d,c.k)}`)).join("")}${partialLabel(mo,d,c.k,arr)}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
   } else if(UI.view==="nome"){
@@ -1001,7 +1012,8 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
         <div class="scroll"><table class="grid"><thead><tr><th class="sticky">Specializzando</th><th>Notti</th><th>Guardie</th><th>Weekend</th><th>Mesi</th></tr></thead><tbody>${rows.map(r=>{ const a=h[r.id], c=cur[r.id]; const f=(x,y)=>`${x+y} <span class="muted">(${x}+${y})</span>`;
           return `<tr><td class="sticky name-strong">${esc(rName(r))}</td><td class="num">${f(a.N,c.N)}</td><td class="num">${f(a.D,c.D)}</td><td class="num">${f(a.we,c.we)}</td><td class="num">${a.months}</td></tr>`; }).join("")}</tbody></table></div>`; } }
   const summ=ADMIN()&&draftView(mo)?`<div class="row" style="gap:8px;flex-wrap:wrap;font-size:.86rem;margin:4px 0 8px"><span class="name-strong">Bozza:</span><span class="chip" style="background:var(--chg-soft);color:var(--ink)">${(CHG||draftChanges(mo)||new Set()).size} ${mo.sched?"caselle cambiate":"caselle nuove"}</span><span class="chip" style="background:var(--bad-soft);color:var(--bad)">${holes.reduce((a,h)=>a+(h.n||1),0)} scoperti</span><span class="chip">${issues.length} da controllare</span></div>`:"";
-  return head+draft+alerts+summ+tabs+body+holesBox+pubBar;
+  const xn=UI.view==="giorni"&&anyMgr()&&(DRX.u.cells.size||DRX.l.cells.size)?`<p style="margin:2px 0 8px;font-size:.84rem"><span class="chip" style="background:var(--chg-soft);color:var(--chg);font-weight:700">✎ Bozze di altri anni</span> Le caselle tratteggiate in arancione hanno modifiche di un altro anno non ancora pubblicate; i nomi in arancione ✎ sono in bozza.</p>`:"";
+  return head+draft+alerts+summ+xn+tabs+body+holesBox+pubBar;
 }
 function code(mo,per,pid,d){ const p=per[pid]; if(p&&p.on[d]) return p.on[d]; if(p&&p.on[add(d,-1)]==="N") return "S"; const u=unavOf(mo,pid,d); return u==="G"?"X":u==="F"?"F":u==="C"?"C":""; }
 function label(c,postName){ if(c==="S")return "smonto"; if(c==="X")return "✕"; if(c==="F")return "ferie"; if(c==="C")return "congr."; if(c==="D")return "G"; if(c==="N")return "monto"; if(c)return esc(postName||"")+" "+c; return ""; }
@@ -1465,7 +1477,7 @@ function extPreview(name){ const wb=UI.extWb; if(!wb) return; const ws=wb.Sheets
 /* ---------- sheets ---------- */
 const layer=document.getElementById("layer");
 /* sale chiuse in blocco: si selezionano più caselle nella tabella "Per giorno" */
-function selC(d,k){ return (UI.clsel&&UI.clsel.has(d+"|"+k)?" sel":"")+(CHG&&CHG.has(d+"|"+k)?" chg":""); }
+function selC(d,k){ return (UI.clsel&&UI.clsel.has(d+"|"+k)?" sel":"")+(CHG&&CHG.has(d+"|"+k)?" chg":"")+(anyMgr()&&drxCell(d,k)?" xchg":""); }
 /* caselle della bozza diverse dall'orario pubblicato (evidenziate in arancione nella vista Bozza) */
 let CHG=null; const sameCell=(a,b)=>{ const x=(a||[]).filter(v=>v).sort().join(), y=(b||[]).filter(v=>v).sort().join(); return x===y; };
 /* rispetto all'orario pubblicato; se un giorno non è ancora pubblicato (prima bozza) ogni casella con persone conta come nuova */
@@ -1558,8 +1570,9 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
       return `<div class="stack" style="gap:6px"><span class="label">Persone mancanti di un anno${cur.length?` (${cur.length})`:""}:</span>
        ${cur.length?`<div class="row" style="gap:6px;flex-wrap:wrap">${cur.map((t,i)=>`<button class="btn sm" data-act="holedel" data-i="${i}" style="background:${ycol(t.l)};color:#fff;border-color:${ycol(t.l)}" title="Togli">${ROMAN[t.l]} anno ×</button>`).join("")}</div>`:""}
        ${cur.length<room?`<div class="row" style="gap:6px;flex-wrap:wrap;align-items:center"><span class="muted" style="font-size:.82rem">Aggiungi:</span>${LEVELS.map(l=>`<button class="btn sm" data-act="holeadd" data-v="${l}" style="border-color:${ycol(l)};color:${ycol(l)}">+ ${ROMAN[l]} anno</button>`).join("")}</div>`:""}</div>`; })():""}
-   ${EXT(mo)[d+"|"+k]?`<p class="muted" style="margin:0;font-size:.84rem">Altri anni: ${EXT(mo)[d+"|"+k].map(esc).join(", ")}</p>`:""}
-   ${lowerOnly(mo,d,k)?`<p class="muted" style="margin:0;font-size:.84rem;font-style:italic">Anni successivi: ${lowerOnly(mo,d,k).map(esc).join(", ")}</p>`:""}
+   ${EXT(mo)[d+"|"+k]?`<p class="muted" style="margin:0;font-size:.84rem">Altri anni: ${xNames(d,k,EXT(mo)[d+"|"+k]).replace(/<br>/g,", ")}</p>`:""}
+   ${anyMgr()&&drxCell(d,k)?`<p style="margin:0;font-size:.84rem;color:var(--chg);font-weight:600">Un altro anno ha modificato questa casella nella sua bozza, non ancora pubblicata${DRX.u.names.size+DRX.l.names.size?" (nomi in arancione)":""}.</p>`:""}
+   ${lowerOnly(mo,d,k)?`<p class="muted" style="margin:0;font-size:.84rem;font-style:italic">Anni successivi: ${xNames(d,k,lowerOnly(mo,d,k)).replace(/<br>/g,", ")}</p>`:""}
    ${[...arr,...(multiPost(post,s)&&arr.some(x=>x)&&arr.filter(x=>x).length+othersIn(mo,d,k)<capOf(post,s).max?[undefined]:[])].map((cur,i)=>`<div class="stack" style="gap:6px"><span class="label">${cur===undefined?"Aggiungi un'altra persona":cur?`Ora: ${esc(resName(cur))}`:"Scoperto"}</span>
      ${cov!=="ALL"?`<span class="groupname">Rotazione ${esc(rotName(cov))}</span>`:`<span class="groupname">Tutti gli specializzandi</span>`}
      ${pri.map(r=>btn(r,i,cur,cov==="ALL")).join("")||`<p class="muted" style="margin:0">Nessuno in questa rotazione.</p>`}
