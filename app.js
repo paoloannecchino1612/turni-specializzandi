@@ -85,8 +85,11 @@ function filterSW(){ for(const k in SW) delete SW[k]; const ids=new Set(S?S.resi
   for(const k in SWALL){ const x=SWALL[k]; if(!MULTI||ids.has(x.from)||ids.has(x.to)) SW[k]=x; } }
 /* cascata: i turni degli anni superiori (4 → 3 → 2 → 1) contano come "coperti da altri anni" per l'anno che si guarda */
 const EXTC={key:null,map:{}};
-function autoExt(mk,lower){ const out={};
-  for(const y of YRS(mk)){ if(lower?y>=CURY:y<=CURY) continue; const st=yState(y); const m2=st&&st.months&&st.months[mk]; if(!m2||!m2.sched) continue;
+/* bozza condivisa: i gestori (di qualsiasi anno) vedono e usano le bozze degli altri anni al posto del loro pubblicato */
+function anyMgr(){ return !UI.userMode&&(OWNER||(typeof mgrCohort==="function"&&mgrCohort()!==null)); }
+function autoExt(mk,lower){ const out={}, am=anyMgr();
+  for(const y of YRS(mk)){ if(lower?y>=CURY:y<=CURY) continue; const st=yState(y); const m0=st&&st.months&&st.months[mk]; if(!m0) continue;
+    const sc=am&&m0.draft&&m0.draft.sched?{...(m0.sched||{}),...m0.draft.sched}:m0.sched; if(!sc) continue; const m2={sched:sc};
     const mine={}; S.posts.forEach(p=>mine[normRoom(p.name)]=p); const pmap={}; (st.posts||[]).forEach(p=>pmap[p.id]=mine[normRoom(p.name)]);
     const nm={}; (st.residents||[]).forEach(r=>nm[r.id]=`(${yLab(r.year||st.groupYear||y)}) ${r.name}`);
     for(const d in m2.sched) for(const k in m2.sched[d]){ const [pid,sh]=k.split("|"), my=pmap[pid]; if(!my||!((my.on||{})[dayType(d)]||[]).includes(sh)) continue;
@@ -96,11 +99,11 @@ const SEXC={key:null,map:{}};
 function sheetExtCached(mk){ const sh=sheetLatest(mk); const key=mk+"|"+CURY+"|"+(sh?sh.at:"")+"|"+S.residents.length+"|"+S.posts.length+"|"+JSON.stringify((S.months[mk]||{}).extReset||{}).length; if(SEXC.key!==key){ SEXC.key=key; SEXC.map=sh?sheetExt(mk):{}; } return SEXC.map; }
 /* anni sotto (generati dopo nella cascata): solo da vedere, non cambiano la generazione */
 const LOWC={key:null,map:{}};
-function LOWER(mo){ if(!MULTI||!S) return {}; const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+S.posts.map(p=>p.id+":"+p.name).join(",");
+function LOWER(mo){ if(!MULTI||!S) return {}; const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+anyMgr()+"|"+S.posts.map(p=>p.id+":"+p.name).join(",");
   if(LOWC.key!==key){ LOWC.key=key; LOWC.map=autoExt(mo.mk,true); } return LOWC.map; }
 /* EXT è chiamato per ogni casella: il risultato si ricalcola solo quando cambia qualcosa (TICK sale a ogni render, generazione e salvataggio) */
 let TICK=0; const EXTMEMO={};
-function EXT(mo){ const own=mo.ext||{}, k=TICK+"|"+mo.mk+"|"+CURY+"|"+RAWV+"|"+(S?S.posts.length+"|"+S.residents.length:"")+"|"+Object.keys(own).length;
+function EXT(mo){ const own=mo.ext||{}, k=TICK+"|"+anyMgr()+"|"+mo.mk+"|"+CURY+"|"+RAWV+"|"+(S?S.posts.length+"|"+S.residents.length:"")+"|"+Object.keys(own).length;
   if(EXTMEMO.mo===mo&&EXTMEMO.own===own&&EXTMEMO.k===k) return EXTMEMO.v;
   const v=EXT0(mo); EXTMEMO.mo=mo; EXTMEMO.own=own; EXTMEMO.k=k; EXTMEMO.v=v; return v; }
 /* se un altro anno ha caricato un foglio più recente, le voci prese da un foglio più vecchio da quest'anno non valgono più
@@ -112,7 +115,7 @@ function extOwn(mo){ const own=mo.ext||{}, sh=S&&mo.mk?sheetLatest(mo.mk):null; 
     else if((sft==="N"&&!hasN)||(sft==="D"&&!hasD)) out[k]=v; }
   return out; }
 function EXT0(mo){ let own=extOwn(mo); if(S&&mo.mk){ const se=sheetExtCached(mo.mk); if(Object.keys(se).length){ const m={...se}; for(const k in own) m[k]=dedupNames([...(m[k]||[]),...own[k]]); own=m; } } if(!MULTI||!S) return own;
-  const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+S.posts.map(p=>p.id+":"+p.name).join(",");
+  const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+anyMgr()+"|"+S.posts.map(p=>p.id+":"+p.name).join(",");
   if(EXTC.key!==key){ EXTC.key=key; EXTC.map=autoExt(mo.mk); }
   const auto=EXTC.map; if(!Object.keys(auto).length) return own;
   const out={...auto}; for(const k in own) out[k]=dedupNames([...(auto[k]||[]),...own[k]]); return out; }
@@ -385,7 +388,7 @@ function applyNights(mk,list){ const mo=M(mk); mo.fixed=mo.fixed||{}; mo.ext=mo.
    per settimana) passa nell'orario pubblicato (mo.sched), che vedono tutti e che passa agli altri anni. Ogni bozza e ogni
    accettazione si salvano nello storico (hist/y<anno>_<mese>/v), leggibile solo dai gestori di quell'anno. */
 function hasDraft(mo){ return !!(mo.draft&&mo.draft.sched); }
-function draftView(mo){ return ADMIN()&&hasDraft(mo)&&UI.draftView!==false; }
+function draftView(mo){ return (ADMIN()||anyMgr())&&hasDraft(mo)&&UI.draftView!==false; }
 function workSched(mo){ return draftView(mo)?mo.draft.sched:mo.sched; }
 /* le modifiche a mano vanno sempre nella bozza (creata dal pubblicato se serve) e la settimana toccata torna da accettare */
 function ensureDraft(mo,d){ if(!hasDraft(mo)){ const n=period(mo.mk).days.length/7, acc={}; if(mo.sched) for(let w=0;w<n;w++) acc[w]=true; mo.draft={sched:clone(mo.sched||{}),at:new Date().toISOString(),acc}; }
@@ -714,8 +717,8 @@ async function enableYears(){ if(!OWNER||!db||CURY!==2) return; const base=JSON.
 function asResident(fn){ const u=UI.userMode, sel=UI.clsel; UI.userMode=true; UI.clsel=null; try{ return fn(); } finally{ UI.userMode=u; UI.clsel=sel; } }
 function render(){ TICK++;
   if(UI.userMode&&S&&MYUID&&Object.keys(CLAIMS).length&&!realAdmin()) setUserMode(false);
-  if(!ADMIN()&&(UI.tab==="mese"||UI.tab==="modturni"||(UI.tab==="imp"&&!UI.userMode))) UI.tab="turni";
-  document.querySelectorAll("#tabs button").forEach(b=>{b.setAttribute("aria-selected",b.dataset.tab===UI.tab); b.hidden=!ADMIN()&&(b.dataset.tab==="mese"||b.dataset.tab==="modturni"||(b.dataset.tab==="imp"&&!UI.userMode));});
+  if((!ADMIN()&&(UI.tab==="mese"||(UI.tab==="imp"&&!UI.userMode)))||(UI.tab==="modturni"&&!ADMIN()&&!anyMgr())) UI.tab="turni";
+  document.querySelectorAll("#tabs button").forEach(b=>{b.setAttribute("aria-selected",b.dataset.tab===UI.tab); b.hidden=(b.dataset.tab==="modturni")?!(ADMIN()||anyMgr()):!ADMIN()&&(b.dataset.tab==="mese"||(b.dataset.tab==="imp"&&!UI.userMode));});
   if(!S){app.innerHTML=`<div class="empty">Caricamento dati…</div>`;return;}
   { const cb=document.querySelector('#tabs [data-tab="cambi"]'); if(cb){ let n=0; try{ n=new Set(myChanges().list.map(c=>c.d)).size; }catch(e){} cb.textContent=n?`Cambi (${n})`:"Cambi"; } }
   const yLoaded=!MULTI||ALLY().every(y=>yState(y)||(RAW[y]&&RAW[y].cfg===null));
@@ -831,6 +834,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   const head=monthBar()+`<div class="panel"><div class="row" style="justify-content:space-between">
     <div class="stack" style="gap:2px"><h2>Turni del mese</h2><span class="muted" style="font-size:.82rem">${mo.generated?`Pubblicati il ${new Date(mo.generated).toLocaleString("it-IT",{dateStyle:"short",timeStyle:"short"})}`:"Non ancora pubblicati"}${ADMIN()&&hasDraft(mo)?" · bozza in corso":""}</span></div>
     </div>
+    ${!ADMIN()&&anyMgr()?`<p class="muted" style="margin:0;font-size:.84rem">Sola lettura: ${hasDraft(mo)?"vedi la bozza di quest'anno":"quest'anno non ha una bozza in corso"}; la modificano i suoi gestori${hasDraft(mo)&&mo.sched?` · <button class="btn" data-act="dview" data-v="${draftView(mo)?"0":"1"}" style="border:0;text-decoration:underline;background:none;padding:0">${draftView(mo)?"vedi l'orario pubblicato":"torna alla bozza"}</button>`:""}.</p>`:""}
     ${ADMIN()?(()=>{ const nw=p.days.length/7, cur=UI.genWk??"", fresh=!mo.sched&&!hasDraft(mo);
       const filled=w=>p.days.slice(w*7,w*7+7).some(d=>Object.values((workSched(mo)||{})[d]||{}).some(a=>a.some(x=>x)));
       return `<div class="row" style="gap:8px;align-items:center"><button class="btn primary" data-act="prep">${fresh?"Prepara la bozza del mese":"Prepara la bozza"}</button>
@@ -844,7 +848,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
          ${fresh?"":`<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><span class="label">Solo una rotazione</span><select id="refRot" data-refrot="1" aria-label="Rotazione"><option value="">Rotazione…</option>${S.rotations.map(r=>`<option value="${r.id}" ${UI.refRot===r.id?"selected":""}>${esc(r.name)}</option>`).join("")}</select><button class="btn ${UI.confirm==="refrot"?"confirm":""}" data-act="refrot" ${UI.refRot?"":"disabled"}>${UI.confirm==="refrot"?"Tocca di nuovo":"Prepara solo questa"}</button></div>
          <p class="muted" style="margin:0;font-size:.8rem">Come «Prepara la bozza», ma tocca solo chi è nella rotazione scelta: gli altri restano fermi.</p>`}</div>`:""}`; })():""}
     ${noRot.length?`<p class="muted" style="margin:0;font-size:.85rem">Senza rotazione questo mese: ${noRot.map(r=>esc(rName(r))).join(", ")}.</p>`:""}</div>`;
-  if(!mo.generated&&!ADMIN()) return head+`<div class="panel empty"><h2>Turni non ancora pubblicati</h2><p>Appena verranno generati li vedrai qui.</p></div>`;
+  if(!mo.generated&&!ADMIN()&&!draftView(mo)) return head+`<div class="panel empty"><h2>Turni non ancora pubblicati</h2><p>Appena verranno generati li vedrai qui.</p></div>`;
   const nW=p.days.length/7, acc=(mo.draft&&mo.draft.acc)||{};
   /* strumenti (chiusi di base) e barra "Pubblica" fissa in basso quando c'è una bozza */
   const tools=ADMIN()?`<div class="row" style="margin:6px 0"><button class="btn" data-act="toolsopen" aria-expanded="${!!UI.toolsOpen}">Strumenti ${UI.toolsOpen?"▴":"▾"}</button></div>
@@ -863,6 +867,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
       <button class="btn" data-act="pubwk" aria-expanded="${!!UI.pubWk}">Solo una settimana ${UI.pubWk?"▴":"▾"}</button>
       ${UI.pubWk?`<div class="row" style="gap:6px;flex-wrap:wrap;width:100%;justify-content:center">${Array.from({length:nW},(_,w)=>acc[w]?`<span class="chip tag-F">Sett. ${w+1} pubblicata</span>`:`<button class="btn sm ${UI.confirm==="accw-"+w?"confirm":""}" data-act="accw" data-w="${w}">${UI.confirm==="accw-"+w?"Tocca di nuovo":`Pubblica sett. ${w+1} (${fmt(p.days[w*7]).slice(4)})`}</button>`).join("")}</div>`:""}</div>`:"";
   const draft=tools;
+  if(!mo.sched&&!hasDraft(mo)&&!ADMIN()) return head+`<div class="panel empty"><h2>Nessun turno per questo mese</h2><p>Quest'anno non ha ancora né bozza né orario pubblicato.</p></div>`;
   if(!mo.sched&&!hasDraft(mo)) return head+draft+`<div class="panel empty"><h2>Pronto per generare</h2><p>Controlla rotazioni e indisponibilità, poi tocca «Prepara la bozza del mese». Potrai cambiare a mano ogni turno toccandolo e poi pubblicare.</p><p>Se alcuni turni sono già decisi, inseriscili prima a mano: la generazione non li tocca.</p><button class="btn" data-act="manualstart">Inserisci turni a mano</button></div>`;
   let alerts="";
   let holesBox="";
