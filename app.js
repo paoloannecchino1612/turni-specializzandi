@@ -37,8 +37,9 @@ const SW={}, SWALL={}, CLAIMS={}; let CLAIMDOCS=[]; let ALLOW=[], lastRoles="", 
 /* coorti: ogni documento yN è un gruppo di specializzandi (N = anno di corso nel 2026/27); in ogni mese si vedono le 4 coorti
    che in quel mese sono al 1°–4° anno (YRS). Es. ottobre 2026: y2…y5 (y5 = 4° anno uscente), novembre 2026: y1…y4. */
 const LEVELS=[1,2,3,4], RAW={};
-function YRS(mk){ const sh=yShift(mk||UI.mk); return LEVELS.map(l=>l-sh); }
-function ALLY(){ const set=new Set(); try{ const [y,m]=todayMk().split("-").map(Number); for(let k=-KEEP_MONTHS;k<=KEEP_MONTHS;k++) YRS(mkOf(y,m+k)).forEach(c=>set.add(c)); }catch(e){ LEVELS.forEach(c=>set.add(c)); } return [...set].sort((a,b)=>a-b); } let CURY=2, MULTI=false, RAWV=0, REBUILD=null, YAUTO=false;
+const YRSM={}; function YRS(mk){ const sh=yShift(mk||UI.mk), c=YRSM[sh]; if(c) return c; return YRSM[sh]=LEVELS.map(l=>l-sh); }
+const ALLYM={k:null,v:null}; function ALLY(){ const k=todayMk()+"|"+ayBase(); if(ALLYM.k===k) return ALLYM.v; ALLYM.k=k; return ALLYM.v=ALLY0(); }
+function ALLY0(){ const set=new Set(); try{ const [y,m]=todayMk().split("-").map(Number); for(let k=-KEEP_MONTHS;k<=KEEP_MONTHS;k++) YRS(mkOf(y,m+k)).forEach(c=>set.add(c)); }catch(e){ LEVELS.forEach(c=>set.add(c)); } return [...set].sort((a,b)=>a-b); } let CURY=2, MULTI=false, RAWV=0, REBUILD=null, YAUTO=false;
 function yDocs(y){ return y===2?{cfg:"config/main",mon:"planner/state"}:{cfg:"config/y"+y,mon:"planner/y"+y}; }
 /* ---------- mesi salvati uno per documento: planner/<anno>_<mese> (es. planner/state_2026-11, planner/y3_2026-11) ----------
    Il vecchio documento (planner/state, planner/yN) resta come copia; quando un rappresentante apre l'app i mesi vengono copiati
@@ -90,6 +91,8 @@ function unsatTags(mo,d,key,arr){ const tags=holeTags(mo.mk,d,key); if(!tags.len
   const cnt=yearCounts(mo,d,key,arr); return tags.filter(t=>(cnt[t.l]||0)<=t.b).map(t=>t.l); }
 function tagSatisfied(mo,d,key,arr,L){ return !unsatTags(mo,d,key,arr).includes(L); }
 const chipY=(l,txt)=>`<span class="hole" style="display:inline-block;margin:2px 2px 0 0;color:#fff;background:${ycol(l)}">${txt} · ${ROMAN[l]} anno</span>`;
+/* casella senza nessuno di quest'anno ma con altri anni: non "scoperto", ma quante persone mancano (o di che anno) */
+function othLack(mo,d,key,arr){ const un=unsatTags(mo,d,key,arr); if(un.length) return un.map(l=>chipY(l,"manca")).join(""); const n=needOf(mo,d,key); return n>0?`<span class="hole">manca ${n}</span>`:""; }
 function holeLabel(d,key){ const mo=M(UI.mk); if(!holeTags(UI.mk,d,key).length) return `<span class="hole">scoperto</span>`; const arr=(((workSched(mo)||{})[d]||{})[key])||[], tags=unsatTags(mo,d,key,arr); return tags.length?tags.map(l=>chipY(l,"scoperto")).join(""):`<span class="hole">scoperto</span>`; }
 /* etichetta per caselle con persone ma non complete: "manca 1" o "manca · II anno" (una per ogni persona mancante assegnata a un anno) */
 function partialLabel(mo,d,key,arr){ const oc=(arr||[]).filter(x=>x).length; if(!oc||isClosed(mo,d,key)) return ""; const n=needOf(mo,d,key)-oc, un=unsatTags(mo,d,key,arr);
@@ -106,9 +109,10 @@ function yearsFor(p){ const k=normRoom(p.name), v=COVY[k]; return Array.isArray(
 /* gli anni dell'elenco sono gli anni di corso effettivi del mese (es. in ottobre il vostro gruppo è 1° anno) */
 function postActive(p){ return yearsFor(p).includes(yLab(CURY)); }
 function yState(y){ if(y===CURY&&S) return S; const r=RAW[y]; if(!r||r.cfg===undefined||r.mon===undefined) return null;
-  const key=(r.cfg||"")+"\u0001"+(r.mon||""); if(PARSED[y]&&PARSED[y].key===key) return PARSED[y].st;
+  /* confronto per riferimento (prima si univano le due stringhe intere a ogni chiamata: molto lento) */
+  const P=PARSED[y]; if(P&&P.cfg===r.cfg&&P.mon===r.mon) return P.st; const key=null;
   let st=null; try{ const c=r.cfg?JSON.parse(r.cfg):null, m=r.mon?JSON.parse(r.mon):null; if(c) st={...c,months:(m&&m.months)||{}}; }catch(e){}
-  PARSED[y]={key,st}; return st; }
+  PARSED[y]={key,cfg:r.cfg,mon:r.mon,st}; return st; }
 function yearOfPid(pid){ for(const y of ALLY()){ const st=yState(y); if(st&&(st.residents||[]).some(r=>r.id===pid)) return y; } return null; }
 function myAnyPid(){ if(!MYUID) return null; for(const pid in CLAIMS) if(CLAIMS[pid]===MYUID&&(MULTI?yearOfPid(pid):S&&S.residents.some(r=>r.id===pid))) return pid; return null; }
 /* cambi: si mostrano solo quelli dell'anno che si sta guardando */
@@ -146,9 +150,10 @@ function LOWER(mo){ if(!MULTI||!S) return {}; const key=mo.mk+"|"+CURY+"|"+RAWV+
   if(LOWC.key!==key){ LOWC.key=key; LOWC.map=autoExt(mo.mk,true); LOWC.dx=DRX.l; } return LOWC.map; }
 /* EXT è chiamato per ogni casella: il risultato si ricalcola solo quando cambia qualcosa (TICK sale a ogni render, generazione e salvataggio) */
 let TICK=0; const EXTMEMO={};
-function EXT(mo){ const own=mo.ext||{}, k=TICK+"|"+anyMgr()+"|"+mo.mk+"|"+CURY+"|"+RAWV+"|"+(S?S.posts.length+"|"+S.residents.length:"")+"|"+Object.keys(own).length;
-  if(EXTMEMO.mo===mo&&EXTMEMO.own===own&&EXTMEMO.k===k) return EXTMEMO.v;
-  const v=EXT0(mo); EXTMEMO.mo=mo; EXTMEMO.own=own; EXTMEMO.k=k; EXTMEMO.v=v; return v; }
+/* memorizzato per mese e anno (prima un solo posto: alternando i mesi si ricalcolava sempre; e senza mo.ext non c'era mai riuso) */
+function EXT(mo){ const own=mo.ext, k=TICK+"|"+anyMgr()+"|"+RAWV+"|"+(S?S.posts.length+"|"+S.residents.length:"")+"|"+(own?Object.keys(own).length:-1), slot=mo.mk+"|"+CURY;
+  const e=EXTMEMO[slot]; if(e&&e.mo===mo&&e.own===own&&e.k===k) return e.v;
+  const v=EXT0(mo); EXTMEMO[slot]={mo,own,k,v}; return v; }
 /* se un altro anno ha caricato un foglio più recente, le voci prese da un foglio più vecchio da quest'anno non valgono più
    (restano quelle segnate a mano e, se il foglio nuovo non ha notti/guardie, le notti/guardie importate prima) */
 function extOwn(mo){ const own=mo.ext||{}, sh=S&&mo.mk?sheetLatest(mo.mk):null; if(!sh||(mo.sheet&&mo.sheet.at>=sh.at)) return own;
@@ -984,12 +989,13 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
      <tr>${cols.map(c=>`<th><span class="chip sh-${c.s}">${c.s} ${esc(S.hours[c.s])}</span></th>`).join("")}</tr></thead><tbody>
      ${shownDays.map((d,i0)=>{const i=i0+offs, t=dayType(d);return `<tr class="${t==="sab"?"we":""} ${t==="fes"?"fes":""} ${i%7===0&&i?"weekstart":""}"><td class="date sticky">${fmt(d)}</td>${cols.map(c=>{const arr=(SC[d]||{})[c.k];
        if(isClosed(mo,d,c.k)&&!(arr||[]).some(x=>x)) return `<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Sala chiusa"><span class="muted" style="font-size:.75rem;font-weight:600">Chiusa</span></td>`;
-       if(!arr){ const opn=((c.post.on||{})[dayType(d)]||[]).includes(c.s), due=opn, ex0=EXT(mo)[d+"|"+c.k];
-         if(ex0) return `<td class="cell${selC(d,c.k)}" ${(due||UI.clsel)&&ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni"><span class="muted" style="font-size:.72rem;display:block">${xNames(d,c.k,ex0)}</span></td>`;
+       if(!arr){ const opn=((c.post.on||{})[dayType(d)]||[]).includes(c.s), due=opn, ex0=EXT(mo)[d+"|"+c.k], lw0=lowerOnly(mo,d,c.k);
+         /* anche i nomi degli anni sotto (in corsivo): la casella non è scoperta se c'è qualcuno */
+         if(ex0||lw0) return `<td class="cell${selC(d,c.k)}" ${(due||UI.clsel)&&ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni">${ex0?`<span class="muted" style="font-size:.72rem;display:block">${xNames(d,c.k,ex0)}</span>`:""}${lw0?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${xNames(d,c.k,lw0)}</span>`:""}</td>`;
          return due?`<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`}>${holeLabel(d,c.k)}</td>`:UI.clsel&&ADMIN()?`<td class="cell${selC(d,c.k)}" data-act="cell" data-d="${d}" data-k="${c.k}"><span class="muted">·</span></td>`:`<td class="cell none">·</td>`; }
        const ex=EXT(mo)[d+"|"+c.k], lw=lowerOnly(mo,d,c.k), exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${xNames(d,c.k,ex)}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${xNames(d,c.k,lw)}</span>`:"");
        if(!arr.length) return `<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
-       return `<td class="cell${selC(d,c.k)} ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(arr.some(v=>v)||(needOf(mo,d,c.k)===0&&!unsatTags(mo,d,c.k,arr).length)?"":`${holeLabel(d,c.k)}`)).join("")}${partialLabel(mo,d,c.k,arr)}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
+       return `<td class="cell${selC(d,c.k)} ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(arr.some(v=>v)||(needOf(mo,d,c.k)===0&&!unsatTags(mo,d,c.k,arr).length)?"":othersIn(mo,d,c.k)>0?(ai>0?"":othLack(mo,d,c.k,arr)):`${holeLabel(d,c.k)}`)).join("")}${partialLabel(mo,d,c.k,arr)}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
   } else if(UI.view==="nome"){
     if(!UI.who) UI.who=myPid()||"";
     const pid=UI.who, rows=[];
@@ -1418,7 +1424,8 @@ let SALIGN=false;
 function runSheetAlign(){ if(SALIGN||!S||!ADMIN()) return; SALIGN=true; let n=0; const [y0,m0]=todayMk().split("-").map(Number);
   for(let k=-KEEP_MONTHS;k<=KEEP_MONTHS;k++){ const mk=mkOf(y0,m0+k); if(sheetLatest(mk)) n+=sheetAlign(mk); }
   if(n){ persist(); render(); toast(`${n} turni del tuo anno presi dal foglio caricato da un altro anno: sono nella bozza, da accettare`); } }
-function sheetLatest(mk){ let best=null; for(const y of (MULTI?ALLY():[CURY])){ const st=y===CURY?S:yState(y); const sh=st&&st.months&&st.months[mk]&&st.months[mk].sheet; if(sh&&(!best||sh.at>best.at)) best=sh; } return best; }
+const SLM={}; function sheetLatest(mk){ const k=TICK+"|"+RAWV+"|"+CURY, c=SLM[mk]; if(c&&c.k===k) return c.v; return (SLM[mk]={k,v:sheetLatest0(mk)}).v; }
+function sheetLatest0(mk){ let best=null; for(const y of (MULTI?ALLY():[CURY])){ const st=y===CURY?S:yState(y); const sh=st&&st.months&&st.months[mk]&&st.months[mk].sheet; if(sh&&(!best||sh.at>best.at)) best=sh; } return best; }
 /* voci del foglio per l'anno corrente: chiave con la sala dell'anno, esclusi i nostri */
 function sheetExt(mk){ const sh=sheetLatest(mk); if(!sh) return {}; const by={}; S.posts.forEach(p=>by[normRoom(p.name)]=p);
   const mine=new Set(S.residents.map(r=>r.name.trim().toLowerCase())), out={};
