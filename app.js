@@ -77,7 +77,15 @@ let TICK=0; const EXTMEMO={};
 function EXT(mo){ const own=mo.ext||{}, k=TICK+"|"+mo.mk+"|"+CURY+"|"+RAWV+"|"+(S?S.posts.length+"|"+S.residents.length:"")+"|"+Object.keys(own).length;
   if(EXTMEMO.mo===mo&&EXTMEMO.own===own&&EXTMEMO.k===k) return EXTMEMO.v;
   const v=EXT0(mo); EXTMEMO.mo=mo; EXTMEMO.own=own; EXTMEMO.k=k; EXTMEMO.v=v; return v; }
-function EXT0(mo){ let own=mo.ext||{}; if(S&&mo.mk){ const se=sheetExtCached(mo.mk); if(Object.keys(se).length){ const m={...se}; for(const k in own) m[k]=dedupNames([...(m[k]||[]),...own[k]]); own=m; } } if(!MULTI||!S) return own;
+/* se un altro anno ha caricato un foglio più recente, le voci prese da un foglio più vecchio da quest'anno non valgono più
+   (restano quelle segnate a mano e, se il foglio nuovo non ha notti/guardie, le notti/guardie importate prima) */
+function extOwn(mo){ const own=mo.ext||{}, sh=S&&mo.mk?sheetLatest(mo.mk):null; if(!sh||(mo.sheet&&mo.sheet.at>=sh.at)) return own;
+  const rooms=sh.rooms||[], hasN=rooms.includes("N"), hasD=rooms.some(x=>x.endsWith("|D")), out={};
+  for(const k in own){ const v=own[k]||[], sft=k.split("|")[2];
+    if(v.includes(EXT_MAN)) out[k]=[EXT_MAN];
+    else if((sft==="N"&&!hasN)||(sft==="D"&&!hasD)) out[k]=v; }
+  return out; }
+function EXT0(mo){ let own=extOwn(mo); if(S&&mo.mk){ const se=sheetExtCached(mo.mk); if(Object.keys(se).length){ const m={...se}; for(const k in own) m[k]=dedupNames([...(m[k]||[]),...own[k]]); own=m; } } if(!MULTI||!S) return own;
   const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+S.posts.map(p=>p.id+":"+p.name).join(",");
   if(EXTC.key!==key){ EXTC.key=key; EXTC.map=autoExt(mo.mk); }
   const auto=EXTC.map; if(!Object.keys(auto).length) return own;
