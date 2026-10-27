@@ -53,8 +53,9 @@ function tagSatisfied(mo,d,key,arr,L){ const [pid,s]=key.split("|"), p=postOf(pi
   if(names.some(n=>{ const m=/^\(\s*(\d)\s*\)/.exec(n); return m&&+m[1]===L; })) return true; return !!p&&(arr||[]).filter(x=>x).length+othersIn(mo,d,key)>=capOf(p,s).max; }
 /* etichetta per caselle con persone ma non complete: "manca 1" o "manca · II anno" */
 function partialLabel(mo,d,key,arr){ const oc=(arr||[]).filter(x=>x).length; if(!oc||isClosed(mo,d,key)) return ""; const L=holeTag(mo.mk,d,key);
-  if(L&&!tagSatisfied(mo,d,key,arr,L)) return `<span class="hole" style="display:block;margin-top:2px;color:#fff;background:${ycol(L)}">manca · ${ROMAN[L]} anno</span>`;
-  const n=needOf(mo,d,key)-oc; return n>0?`<span class="hole" style="display:block;margin-top:2px">manca ${n}</span>`:""; }
+  const n=needOf(mo,d,key)-oc;
+  if(L&&(n>0||!tagSatisfied(mo,d,key,arr,L))) return `<span class="hole" style="display:block;margin-top:2px;color:#fff;background:${ycol(L)}">manca${n>1?" "+n:""} · ${ROMAN[L]} anno</span>`;
+  return n>0?`<span class="hole" style="display:block;margin-top:2px">manca ${n}</span>`:""; }
 function setHoleTag(mk,keys,lev){ const m={...(HOLEY[mk]||{})}; let n=0; keys.forEach(dk=>{ const [d,pid,sh]=dk.split("|"), p=postOf(pid); if(!p) return; const k=d+"|"+normRoom(p.name)+"|"+sh; if(lev){ if(m[k]!==lev){ m[k]=lev; n++; } } else if(m[k]){ delete m[k]; n++; } });
   HOLEY={...HOLEY,[mk]:m}; if(n&&db) saveYearsDoc().catch(()=>toast("Non riesco a salvare: le regole del database vanno aggiornate")); return n; } /* sale chiuse condivise tra tutti gli anni: mk → {giorno|sala|turno: true} (in config/years) */
 const COV_DEF={diagsen:[1],radsen1:[1],radsen2:[1],ecocolumbus:[1],eco:[1],rxtorace:[1],rxscheletro:[1],tccolumbus:[3],tccemi0:[1],sala8:[1]};
@@ -827,7 +828,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
     holesBox=`<div class="alerts bad"><strong>${holes.length} turni scoperti</strong><span style="font-size:.84rem">Non c'è nessuno disponibile entro i limiti. Puoi alzare il massimo settimanale, togliere postazioni oppure coprirli a mano.</span><ul>${Object.entries(g).slice(0,10).map(([k,v])=>`<li>${k}: ${v.join(", ")}</li>`).join("")}${Object.keys(g).length>10?`<li>… e altri ${Object.keys(g).length-10} giorni</li>`:""}</ul></div>`; }
   if(ADMIN()){ const lev=yLab(CURY), tags=HOLEY[UI.mk]||{}, byRn={}; S.posts.forEach(x=>byRn[normRoom(x.name)]=x); const g={}; let n=0;
     Object.keys(tags).filter(k=>tags[k]===lev).sort().forEach(k=>{ const [d,rn,sh]=k.split("|"), post=byRn[rn];
-      if(post){ const key=post.id+"|"+sh, a=(((SC||{})[d]||{})[key]||[]); if(isClosed(mo,d,key)||tagSatisfied(mo,d,key,a,lev)) return; }
+      if(post){ const key=post.id+"|"+sh, a=(((SC||{})[d]||{})[key]||[]); if(isClosed(mo,d,key)||(needOf(mo,d,key)<=a.filter(x=>x).length&&tagSatisfied(mo,d,key,a,lev))) return; }
       n++; (g[fmt(d)]=g[fmt(d)]||[]).push(`${esc(post?post.name:rn)} ${SHN[sh]||sh}`); });
     if(n) alerts+=`<div class="alerts" style="border-left:4px solid ${ycol(lev)}"><strong style="color:${ycol(lev)}">Turni scoperti del ${ROMAN[lev]} anno (${n})</strong><ul>${Object.entries(g).map(([k,v])=>`<li>${k}: ${v.join(", ")}</li>`).join("")}</ul></div>`; }
   if(issues.length&&ADMIN()) alerts+=`<div class="alerts"><strong>Da controllare</strong><ul>${issues.slice(0,15).map(i=>`<li>${esc(i)}</li>`).join("")}</ul></div>`;
