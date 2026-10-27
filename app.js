@@ -48,6 +48,13 @@ const YCOL_DEF={1:"#0d9488",2:"#db2777",3:"#b45309",4:"#4f46e5"}, ROMAN={1:"I",2
 function ycol(l){ return YCOL[l]||YCOL_DEF[l]||"#666"; }
 function holeTag(mk,d,key){ const [pid,sh]=key.split("|"), p=postOf(pid); return p&&HOLEY[mk]?HOLEY[mk][d+"|"+normRoom(p.name)+"|"+sh]||null:null; }
 function holeLabel(d,key){ const l=holeTag(UI.mk,d,key); return l?`<span class="hole" style="color:#fff;background:${ycol(l)}">scoperto · ${ROMAN[l]} anno</span>`:`<span class="hole">scoperto</span>`; }
+/* turno assegnato a un anno (anche "buco parziale"): soddisfatto se nella casella c'è già qualcuno di quell'anno o la sala è piena */
+function tagSatisfied(mo,d,key,arr,L){ const [pid,s]=key.split("|"), p=postOf(pid); const names=[...(arr||[]).filter(x=>x).map(resName),...(EXT(mo)[d+"|"+key]||[]),...(lowerOnly(mo,d,key)||[])];
+  if(names.some(n=>{ const m=/^\(\s*(\d)\s*\)/.exec(n); return m&&+m[1]===L; })) return true; return !!p&&(arr||[]).filter(x=>x).length+othersIn(mo,d,key)>=capOf(p,s).max; }
+/* etichetta per caselle con persone ma non complete: "manca 1" o "manca · II anno" */
+function partialLabel(mo,d,key,arr){ const oc=(arr||[]).filter(x=>x).length; if(!oc||isClosed(mo,d,key)) return ""; const L=holeTag(mo.mk,d,key);
+  if(L&&!tagSatisfied(mo,d,key,arr,L)) return `<span class="hole" style="display:block;margin-top:2px;color:#fff;background:${ycol(L)}">manca · ${ROMAN[L]} anno</span>`;
+  const n=needOf(mo,d,key)-oc; return n>0?`<span class="hole" style="display:block;margin-top:2px">manca ${n}</span>`:""; }
 function setHoleTag(mk,keys,lev){ const m={...(HOLEY[mk]||{})}; let n=0; keys.forEach(dk=>{ const [d,pid,sh]=dk.split("|"), p=postOf(pid); if(!p) return; const k=d+"|"+normRoom(p.name)+"|"+sh; if(lev){ if(m[k]!==lev){ m[k]=lev; n++; } } else if(m[k]){ delete m[k]; n++; } });
   HOLEY={...HOLEY,[mk]:m}; if(n&&db) saveYearsDoc().catch(()=>toast("Non riesco a salvare: le regole del database vanno aggiornate")); return n; } /* sale chiuse condivise tra tutti gli anni: mk → {giorno|sala|turno: true} (in config/years) */
 const COV_DEF={diagsen:[1],radsen1:[1],radsen2:[1],ecocolumbus:[1],eco:[1],rxtorace:[1],rxscheletro:[1],tccolumbus:[3],tccemi0:[1],sala8:[1]};
@@ -304,7 +311,7 @@ function nightQuota(mk,sh){ if(!MULTI||!hasLowerYear()) return null; const days=
   for(const y of YRS(mk)){ const st=yState(y); if(!st) continue; const rot=(((st.months||{})[mk])||{}).rot||{}, ext=new Set((st.externals||[]).map(x=>x.id));
     const n=(st.residents||[]).filter(r=>rot[r.id]&&!ext.has(rot[r.id])&&canDoR(r,sh,st)).length; people+=n; if(y===CURY) mine=n;
     (st.posts||[]).forEach(p=>{ const k=normRoom(p.name); if(k&&yearsFor(p).includes(yLab(y))&&!union[k]) union[k]=p; }); }
-  for(const d of days){ const t=dayType(d); for(const k in union) if(((union[k].on||{})[t]||[]).includes(sh)) need++; }
+  for(const d of days){ const t=dayType(d); for(const k in union) if(((union[k].on||{})[t]||[]).includes(sh)) need+=capOf(union[k],sh).min; }
   /* per: massimo a persona; year: quota dell'anno, in proporzione agli abilitati */
   return people?{per:Math.max(1,Math.ceil(need/people)),year:Math.round(need*mine/people)}:null; }
 function ok(mo,p,pid,d,s,w,cap,forceG){
@@ -418,8 +425,12 @@ function generate(mk,wk,only2){ TICK++; /* only2: Set di pid a cui si possono da
           if(t!=="fer")p.we++; p.wk[w]=(p.wk[w]||0)+1; if(x.s==="N")p.wn[w]=(p.wn[w]||0)+1; }); });
       return; }
     sched[d]={};
-    slotsOfDay(d).forEach(x=>{ if(isClosed(mo,d,x.key)||extCovered(mo,d,x.key)||(multiPost(x.post)&&othersIn(mo,d,x.key)>=ROOM_MAX&&!(mo.fixed||{})[d+"|"+x.key+"|0"])){ sched[d][x.key]=[]; return; }
-      sched[d][x.key]=[null]; slots.push({d,i,w,t,post:x.post,s:x.s,key:x.key,ext:extHas(mo,d,x.key)}); }); });
+    slotsOfDay(d).forEach(x=>{ if(isClosed(mo,d,x.key)||extCovered(mo,d,x.key)){ sched[d][x.key]=[]; return; }
+      /* tanti posti quante persone servono a quest'anno; se gli altri anni arrivano già al minimo resta un posto facoltativo (fino al massimo) */
+      const need=needOf(mo,d,x.key); sched[d][x.key]=[null];
+      for(let k=0;k<need;k++) slots.push({d,i,w,t,post:x.post,s:x.s,key:x.key,k,ext:false});
+      /* sale "una per anno" (DEA, guardia): anche se il minimo è già raggiunto, quest'anno prova a mettere la sua persona (senza farne un buco) */
+      if(!need) slots.push({d,i,w,t,post:x.post,s:x.s,key:x.key,k:0,ext:!capOf(x.post,x.s).py}); }); });
   const pri=x=>x.s==="N"?0:x.s==="D"?1:(x.t!=="fer"?2:3);
   slots.forEach(x=>x.r=rand()); slots.sort((a,b)=>pri(a)-pri(b)||a.i-b.i||a.r-b.r);
   const covCnt=(p,cov)=>{ let n=0; for(const id in p.pc){ const q=postOf(id); if(q&&q.cover===cov) n+=p.pc[id]; } return n; };
@@ -434,7 +445,8 @@ function generate(mk,wk,only2){ TICK++; /* only2: Set di pid a cui si possono da
       if(forceG) key.unshift(p.g||0);
       if(!best||cmp(key,bk)<0){best=r;bk=key;} }
     return best; };
-  const put=(sl,r,more)=>{ const p=st[r.id]; if(more) sched[sl.d][sl.key].push(r.id); else sched[sl.d][sl.key][0]=r.id; p.on[sl.d]=sl.s; p.tot++; p[sl.s]++; p.pc[sl.post.id]=(p.pc[sl.post.id]||0)+1; p.last[sl.d]=sl.post.id;
+  const filled=sl=>(sched[sl.d][sl.key]||[]).filter(x=>x).length>(sl.k||0);
+  const put=(sl,r)=>{ const p=st[r.id], a=sched[sl.d][sl.key]=sched[sl.d][sl.key]||[], z=a.indexOf(null); if(z>=0) a[z]=r.id; else a.push(r.id); p.on[sl.d]=sl.s; p.tot++; p[sl.s]++; p.pc[sl.post.id]=(p.pc[sl.post.id]||0)+1; p.last[sl.d]=sl.post.id;
     if(sl.t!=="fer")p.we++; p.wk[sl.w]=(p.wk[sl.w]||0)+1; if(sl.s==="N")p.wn[sl.w]=(p.wn[sl.w]||0)+1; if(sl.s==="N"||sl.s==="D") nDone[sl.s]++; };
   /* prima si resta entro i turni ideali (es. 5, con un riposo in settimana), poi si arriva al massimo solo dove serve */
   /* ogni giorno si riempiono per prime le sale/turni finora meno coperti: i buchi si distribuiscono in modo omogeneo */
@@ -446,8 +458,9 @@ function generate(mk,wk,only2){ TICK++; /* only2: Set di pid a cui si possono da
       if(slots.some(sl=>sl.d===d&&sl.key===key)||(sched[d]&&sched[d][key]&&slotsOfDay(d).some(x=>x.key===key))) return; const post=postOf(pid); if(!post) return;
       sched[d][key]=sched[d][key]||[]; if(sched[d][key].includes(fx[z])) return;
       put({d,i,w:Math.floor(i/7),t:dayType(d),post,s:sh,key},{id:fx[z]},sched[d][key].length>0); }); }
-  slots.forEach(sl=>{ const pre=sl.d+"|"+sl.key+"|", ids=Object.keys(fx).filter(k=>k.startsWith(pre)).sort((a,b)=>+a.split("|").pop()-+b.split("|").pop()).map(k=>fx[k]).filter(pid=>st[pid]);
-    ids.forEach((pid,n)=>put(sl,{id:pid},n>0)); });
+  { const seenK=new Set(); slots.forEach(sl=>{ const pre=sl.d+"|"+sl.key+"|"; if(seenK.has(pre)) return; seenK.add(pre);
+    const ids=Object.keys(fx).filter(k=>k.startsWith(pre)).sort((a,b)=>+a.split("|").pop()-+b.split("|").pop()).map(k=>fx[k]).filter(pid=>st[pid]);
+    ids.forEach(pid=>{ if(!sched[sl.d][sl.key].includes(pid)) put(sl,{id:pid}); }); }); }
   /* quota mensile per persona uguale per tutti gli anni: gli anni con anni sotto si fermano lì; le persone in più in TC/RM non la superano mai */
   const capN=nightQuota(mk,"N"), capD=nightQuota(mk,"D");
   const fair=fairMonth(mk), mMain=fair&&hasLowerYear()?fair:null, maxCap=S.maxWeek, soft=S.targetWeek||S.maxWeek, fill={}, byDay=days.map(()=>[]);
@@ -457,12 +470,12 @@ function generate(mk,wk,only2){ TICK++; /* only2: Set di pid a cui si possono da
     const order=S.residents.filter(r=>PRF[r.id]&&canPref(r.id)&&inGem(mo,r.id)&&(!only2||only2.has(r.id))).sort((a,b)=>st[a.id].jit-st[b.id].jit);
     for(const r of order) for(const d of Object.keys(PRF[r.id]).sort()){ const code=PRF[r.id][d]; if(!code) continue;
       const [pid0,sh]=code.includes("|")?code.split("|"):[null,code];
-      const cands=slots.filter(sl=>sl.d===d&&sl.s===sh&&(!pid0||sl.post.id===pid0)&&!sched[d][sl.key][0]).filter(sl=>{ const pl=pools(mo,sl.post,sl.s); return pl.pri.some(x=>x.id===r.id)||pl.jol.some(x=>x.id===r.id); });
+      const cands=slots.filter(sl=>sl.d===d&&sl.s===sh&&(!pid0||sl.post.id===pid0)&&!filled(sl)).filter(sl=>{ const pl=pools(mo,sl.post,sl.s); return pl.pri.some(x=>x.id===r.id)||pl.jol.some(x=>x.id===r.id); });
       cands.sort((a,b)=>(a.ext-b.ext)||((fill[a.key]||0)-(fill[b.key]||0)));
       for(const sl of cands){ if(pick(sl,[r],maxCap,false,sl.ext?fair:undefined)){ put(sl,r); fill[sl.key]=(fill[sl.key]||0)+1; break; } } } }
   for(const [grp,cap] of [["pri",soft],["jol",soft],["pri",maxCap],["jol",maxCap]])
     for(const pr of [0,1,2,3]) for(const list of ((pr<2&&(capN||capD))?byDay.map(l=>({l,o:rand()})).sort((a,b)=>a.o-b.o).map(x=>x.l):byDay)){
-      const todo=list.filter(sl=>pri(sl)===pr&&!sl.ext&&!sched[sl.d][sl.key][0]);
+      const todo=list.filter(sl=>pri(sl)===pr&&!sl.ext&&!filled(sl));
       todo.forEach(sl=>sl.r=rand());
       todo.sort((a,b)=>(a.post.cover==="ECO")-(b.post.cover==="ECO")||(fill[a.key]||0)-(fill[b.key]||0)||a.r-b.r); /* RX prima di Eco (RX/Eco) */
       for(const sl of todo){ const r=pick(sl,pools(mo,sl.post,sl.s)[grp],cap); if(r){ put(sl,r); fill[sl.key]=(fill[sl.key]||0)+1; } } }
@@ -470,22 +483,22 @@ function generate(mk,wk,only2){ TICK++; /* only2: Set di pid a cui si possono da
      (ferie, congressi e indisponibilità di singoli turni restano vincolanti); si distribuisce tra chi è stato forzato meno */
   /* TC/RM dove c'è già un altro anno: si coprono dopo, con chi resta entro i turni ideali */
   for(const grp of ["pri","jol"]) for(const list of byDay){
-    const todo=list.filter(sl=>sl.ext&&!sched[sl.d][sl.key][0]); todo.forEach(sl=>sl.r=rand()); todo.sort((a,b)=>(fill[a.key]||0)-(fill[b.key]||0)||a.r-b.r);
+    const todo=list.filter(sl=>sl.ext&&!filled(sl)); todo.forEach(sl=>sl.r=rand()); todo.sort((a,b)=>(fill[a.key]||0)-(fill[b.key]||0)||a.r-b.r);
     for(const sl of todo){ const r=pick(sl,pools(mo,sl.post,sl.s)[grp],soft,false,fair); if(r){ put(sl,r); fill[sl.key]=(fill[sl.key]||0)+1; } } }
-  for(const grp of ["pri","jol"]) for(const sl of slots){ if(sl.ext||sched[sl.d][sl.key][0]) continue;
+  for(const grp of ["pri","jol"]) for(const sl of slots){ if(sl.ext||filled(sl)) continue;
     const r=pick(sl,pools(mo,sl.post,sl.s)[grp],maxCap,true); if(r){ put(sl,r); st[r.id].g=(st[r.id].g||0)+1; } }
   /* chi è in rotazione TC/RM ed è libero (entro i turni ideali) va comunque in TC/RM come persona in più, nella sala meno affollata */
   const ours=(d,k)=>(sched[d][k]||[]).filter(x=>x).length, cnt=(d,k)=>ours(d,k)+othersIn(mo,d,k), Y=curYear();
   byDay.forEach(list=>{ if(!list.length) return; const {d,i,w,t}=list[0]; if(t==="fes") return;
     const people=S.residents.filter(r=>inGem(mo,r.id)&&(!only2||only2.has(r.id))).map(r=>({r,o:rand()})).sort((a,b)=>a.o-b.o).map(x=>x.r);
     for(const r of people){ const rot=mo.rot[r.id], p=st[r.id]; if(fair&&p.tot>=fair) continue;
-      const posts=S.posts.filter(x=>multiPost(x)&&x.cover===rot&&postActive(x)); if(!posts.length) continue;
+      const posts=(rot==="TC"||rot==="RM")?S.posts.filter(x=>x.cover===rot&&postActive(x)):[]; if(!posts.length) continue;
       /* prima le sale vuote, poi le meno affollate; a parità si bilancia mattina/pomeriggio e la sala */
       const opts=[]; for(const sh of ["M","P"]){ if(!ok(mo,p,r.id,d,sh,w,soft)) continue;
-        posts.forEach(x=>{ const k=x.id+"|"+sh; if(!(x.on[t]||[]).includes(sh)||!sched[d][k]||isClosed(mo,d,k)) return; const c=cnt(d,k), o=ours(d,k);
-          if(c>=ROOM_MAX||(o>0&&!sameYearOk(Y))) return; opts.push({post:x,sh,c,o,mp:p[sh]-p[sh==="M"?"P":"M"],pc:p.pc[x.id]||0}); }); }
+        posts.forEach(x=>{ const k=x.id+"|"+sh; if(!multiPost(x,sh)||!(x.on[t]||[]).includes(sh)||!sched[d][k]||isClosed(mo,d,k)) return; const c=cnt(d,k), o=ours(d,k);
+          if(c>=capOf(x,sh).max||(o>0&&!sameYearOk(Y))) return; opts.push({post:x,sh,c,o,mp:p[sh]-p[sh==="M"?"P":"M"],pc:p.pc[x.id]||0}); }); }
       if(!opts.length) continue; opts.sort((a,b)=>(a.o>0)-(b.o>0)||a.c-b.c||a.mp-b.mp||a.pc-b.pc);
-      const {post,sh}=opts[0], key=post.id+"|"+sh; put({d,i,w,t,post,s:sh,key},r,!!sched[d][key][0]); } });
+      const {post,sh}=opts[0], key=post.id+"|"+sh; put({d,i,w,t,post,s:sh,key},r); } });
   const at=new Date().toISOString(); mo.draft={sched,at,acc:{}}; UI.draftView=true; if(only){ mo.weeksGen=mo.weeksGen||{}; mo.weeksGen[wk]=at; }
 }
 /* ridistribuzione nelle sale della stessa metodica (TC, RM): per ogni giorno e turno, finché una sala ha almeno 2 persone
@@ -497,7 +510,7 @@ function rebalanceRooms(mk,onlyPids,onlyCover){ const days=period(mk).days, sch=
     sch[y]=y===CURY?src:JSON.parse(JSON.stringify(src)); fixedOf[y]=m.fixed||{}; mon[y]=st; posts[y]={};
     (st.posts||[]).forEach(p=>{ posts[y][normRoom(p.name)]=p; }); }
   const canMove=y=>y===CURY||(MULTI&&canMgr(y)), yearOf=y=>(y===CURY?curYear():yLab(y));
-  const groups={}; S.posts.filter(p=>multiPost(p)&&(!onlyCover||p.cover===onlyCover||isJolly(onlyCover))).forEach(p=>{ (groups[p.cover]=groups[p.cover]||[]).push(normRoom(p.name)); });
+  const groups={}; S.posts.filter(p=>(p.cover==="TC"||p.cover==="RM")&&multiPost(p)&&(!onlyCover||p.cover===onlyCover||isJolly(onlyCover))).forEach(p=>{ (groups[p.cover]=groups[p.cover]||[]).push(normRoom(p.name)); });
   const sheetExt=MULTI?{}:(M(mk).ext||{});
   let moved=0; const changed=new Set();
   for(const d of days){ const t=dayType(d); if(t==="fes") continue;
@@ -511,7 +524,7 @@ function rebalanceRooms(mk,onlyPids,onlyCover){ const days=period(mk).days, sch=
         const order=[...rooms].sort((a,b)=>tot[b]-tot[a]), A=order[0];
         const targets=[...rooms].sort((a,b)=>tot[a]-tot[b]);
         let done=false;
-        for(const B of targets){ if(tot[A]-tot[B]<2) break;
+        for(const B of targets){ if(tot[A]-tot[B]<2) break; if(tot[B]>=capOf(posts[CURY][B],sh).max) continue;
           const cand=occ[A].filter(o=>{ if(onlyPids&&!(o.y===CURY&&onlyPids.has(o.pid))) return false; if(!canMove(o.y)||fixedOf[o.y][d+"|"+o.key+"|"+o.i]===o.pid) return false;
               const pb=posts[o.y][B]; if(!pb||!((pb.on||{})[t]||[]).includes(sh)||!(yearsFor(pb).includes(yearOf(o.y))||!MULTI)) return false;
               if(occ[B].some(x=>x.y===o.y)&&!sameYearOk(yearOf(o.y))) return false; return true; })
@@ -552,9 +565,10 @@ function derive(mk,override){
     slotsWith(d,SC[d]).forEach(({post,s,key,extra})=>{ const arr=(SC[d]||{})[key]||[null];
       if(!extra){
       if(arr.some(x=>x)&&isClosed(mo,d,key)) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: sala chiusa ma con ${arr.filter(x=>x).map(resName).join(", ")}`);
-      if(!arr.some(x=>x)&&!roomCovered(mo,d,key)&&!isClosed(mo,d,key)) holes.push({d,post:post.name,s});
-      if(multiPost(post)){ const o=arr.filter(x=>x); if(o.length>1) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: ${o.length} dello stesso anno (${o.map(resName).join(", ")})${sameYearOk(curYear())?"":" — non previsto per questo anno"}`);
-        if(o.length+othersIn(mo,d,key)>ROOM_MAX) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: ${o.length+othersIn(mo,d,key)} persone (massimo ${ROOM_MAX})`); } }
+      { const nd=needOf(mo,d,key), oc=arr.filter(x=>x).length; if(oc<nd&&!isClosed(mo,d,key)) holes.push({d,post:post.name,s,n:nd-oc}); }
+      { const c=capOf(post,s), oc=arr.filter(x=>x).length, oth=othersIn(mo,d,key); if(oc&&oc+oth>c.max) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: ${oc+oth} persone (massimo ${c.max})`); }
+      if((post.cover==="TC"||post.cover==="RM")&&multiPost(post,s)){ const o=arr.filter(x=>x); if(o.length>1) issues.push(`${post.name} ${SHN[s].toLowerCase()} il ${fmt(d)}: ${o.length} dello stesso anno (${o.map(resName).join(", ")})${sameYearOk(curYear())?"":" — non previsto per questo anno"}`);
+      } }
       arr.forEach(pid=>{ if(!pid) return; const p=per[pid]; if(!p)return;
         if(p.on[d]) issues.push(`${resName(pid)}: ${p.on[d]==="N"||s==="N"?"lavora di giorno il "+fmt(d)+", giorno di monto":"due turni il "+fmt(d)}`);
         p.on[d]=s; where[pid+"|"+d]=post.name; p.pc[post.name]=(p.pc[post.name]||0)+1; p.tot++; p[s]++; if(t!=="fer")p.we++; if(t==="sab")p.sab=(p.sab||0)+1; if(t==="fes")p.fes=(p.fes||0)+1; p.wk[w]=(p.wk[w]||0)+1; if(s==="N")p.wn[w]=(p.wn[w]||0)+1;
@@ -783,7 +797,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   const noRot=S.residents.filter(r=>!mo.rot[r.id]);
   const head=monthBar()+`<div class="panel"><div class="row" style="justify-content:space-between">
     <div class="stack" style="gap:2px"><h2>Turni del mese</h2><span class="muted" style="font-size:.82rem">${mo.generated?`Pubblicati il ${new Date(mo.generated).toLocaleString("it-IT",{dateStyle:"short",timeStyle:"short"})}`:"Non ancora pubblicati"}${ADMIN()&&hasDraft(mo)?" · bozza in corso":""}</span></div>
-    <div class="row">${!ADMIN()?(mo.generated?`<button class="btn primary" data-act="xlsx">Scarica Excel</button>`:""):(mo.sched||hasDraft(mo))?`<button class="btn primary" data-act="xlsx">Scarica Excel</button><button class="btn" data-act="xbozza">Excel formato BOZZA ORARI</button>${clrBtn("clrsched","Elimina tutti i turni")}`:""}</div></div>
+    <div class="row">${!ADMIN()?"":(mo.sched||hasDraft(mo))?`<button class="btn primary" data-act="xlsx">Scarica Excel</button><button class="btn" data-act="xbozza">Excel formato BOZZA ORARI</button>${clrBtn("clrsched","Elimina tutti i turni")}`:""}</div></div>
     ${ADMIN()?(()=>{ const nw=p.days.length/7, cur=UI.genWk??"";
       const filled=w=>p.days.slice(w*7,w*7+7).some(d=>Object.values((workSched(mo)||{})[d]||{}).some(a=>a.some(x=>x)));
       return `<div class="row" style="gap:8px"><label class="row" style="gap:6px"><span class="label">Genera</span><select id="genWk" data-genwk="1"><option value="" ${cur===""?"selected":""}>Tutto il mese</option>${Array.from({length:nw},(_,w)=>`<option value="${w}" ${String(cur)===String(w)?"selected":""}>Settimana ${w+1}: ${fmt(p.days[w*7])} – ${fmt(p.days[w*7+6])}${filled(w)?" ✓":""}</option>`).join("")}</select></label>
@@ -809,11 +823,11 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   if(!mo.sched&&!hasDraft(mo)) return head+draft+`<div class="panel empty"><h2>Pronto per generare</h2><p>Controlla rotazioni e indisponibilità, poi scegli sopra se generare tutto il mese o una settimana. Potrai cambiare a mano ogni turno toccandolo.</p><p>Se alcuni turni sono già decisi, inseriscili prima a mano: la generazione non li tocca.</p><button class="btn" data-act="manualstart">Inserisci turni a mano</button></div>`;
   let alerts="";
   let holesBox="";
-  if(holes.length&&ADMIN()&&(mo.generated||draftView(mo))){ const g={}; holes.forEach(h=>{const k=fmt(h.d);(g[k]=g[k]||[]).push(`${h.post} ${h.s}`);});
+  if(holes.length&&ADMIN()&&(mo.generated||draftView(mo))){ const g={}; holes.forEach(h=>{const k=fmt(h.d);(g[k]=g[k]||[]).push(`${h.post} ${h.s}${h.n>1?" ×"+h.n:""}`);});
     holesBox=`<div class="alerts bad"><strong>${holes.length} turni scoperti</strong><span style="font-size:.84rem">Non c'è nessuno disponibile entro i limiti. Puoi alzare il massimo settimanale, togliere postazioni oppure coprirli a mano.</span><ul>${Object.entries(g).slice(0,10).map(([k,v])=>`<li>${k}: ${v.join(", ")}</li>`).join("")}${Object.keys(g).length>10?`<li>… e altri ${Object.keys(g).length-10} giorni</li>`:""}</ul></div>`; }
   if(ADMIN()){ const lev=yLab(CURY), tags=HOLEY[UI.mk]||{}, byRn={}; S.posts.forEach(x=>byRn[normRoom(x.name)]=x); const g={}; let n=0;
     Object.keys(tags).filter(k=>tags[k]===lev).sort().forEach(k=>{ const [d,rn,sh]=k.split("|"), post=byRn[rn];
-      if(post){ const key=post.id+"|"+sh; if((((SC||{})[d]||{})[key]||[]).some(x=>x)||roomCovered(mo,d,key)||isClosed(mo,d,key)) return; }
+      if(post){ const key=post.id+"|"+sh, a=(((SC||{})[d]||{})[key]||[]); if(isClosed(mo,d,key)||tagSatisfied(mo,d,key,a,lev)) return; }
       n++; (g[fmt(d)]=g[fmt(d)]||[]).push(`${esc(post?post.name:rn)} ${SHN[sh]||sh}`); });
     if(n) alerts+=`<div class="alerts" style="border-left:4px solid ${ycol(lev)}"><strong style="color:${ycol(lev)}">Turni scoperti del ${ROMAN[lev]} anno (${n})</strong><ul>${Object.entries(g).map(([k,v])=>`<li>${k}: ${v.join(", ")}</li>`).join("")}</ul></div>`; }
   if(issues.length&&ADMIN()) alerts+=`<div class="alerts"><strong>Da controllare</strong><ul>${issues.slice(0,15).map(i=>`<li>${esc(i)}</li>`).join("")}</ul></div>`;
@@ -844,7 +858,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
          return due?`<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`}>${holeLabel(d,c.k)}</td>`:UI.clsel&&ADMIN()?`<td class="cell${selC(d,c.k)}" data-act="cell" data-d="${d}" data-k="${c.k}"><span class="muted">·</span></td>`:`<td class="cell none">·</td>`; }
        const ex=EXT(mo)[d+"|"+c.k], lw=lowerOnly(mo,d,c.k), exh=(ex?`<span class="muted" style="font-size:.72rem;display:block">${ex.map(esc).join("<br>")}</span>`:"")+(lw?`<span class="muted" style="font-size:.72rem;display:block;font-style:italic">${lw.map(esc).join("<br>")}</span>`:"");
        if(!arr.length) return `<td class="cell${selC(d,c.k)}" ${ADMIN()?`data-act="cell" data-d="${d}" data-k="${c.k}"`:`style="cursor:default"`} title="Coperto da altri anni">${exh||`<span class="muted">—</span>`}</td>`;
-       return `<td class="cell${selC(d,c.k)} ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(ex||lw&&multiPost(c.post)||arr.some(v=>v)?"":`${holeLabel(d,c.k)}`)).join("")}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
+       return `<td class="cell${selC(d,c.k)} ${SWMARK[UI.mk]&&SWMARK[UI.mk].has(d+"|"+c.k)?"swapped":""}" ${ADMIN()?`data-act="cell"`:`style="cursor:default"`} data-d="${d}" data-k="${c.k}">${arr.map((pid,ai)=>pid?`<span class="who">${esc(resName(pid))}</span>${ADMIN()&&(mo.fixed||{})[d+"|"+c.k+"|"+ai]===pid?`<span class="muted" style="font-size:.7rem;display:block">fisso</span>`:""}`:(arr.some(v=>v)||(needOf(mo,d,c.k)===0&&!(holeTag(mo.mk,d,c.k)&&!tagSatisfied(mo,d,c.k,arr,holeTag(mo.mk,d,c.k))))?"":`${holeLabel(d,c.k)}`)).join("")}${partialLabel(mo,d,c.k,arr)}${exh}</td>`;}).join("")}</tr>`;}).join("")}</tbody></table></div>`;
   } else if(UI.view==="nome"){
     if(!UI.who) UI.who=myPid()||"";
     const pid=UI.who, rows=[];
@@ -911,7 +925,12 @@ function vImp2(){
    <p class="muted" style="margin:0;font-size:.85rem">${HIDESWAPS?"Gli specializzandi vedono solo i cambi in cui sono coinvolti. Tu e i gestori vedete tutto.":"Tutti vedono lo storico dei cambi di tutti (con il filtro «Solo i miei»). Attivandolo ognuno vede solo i cambi in cui è coinvolto."}</p></div>`:"";
   const colPanel=ADMIN()&&db?`<div class="panel"><h2>Colori degli anni</h2><p class="muted" style="margin:0;font-size:.85rem">Usati per i turni scoperti assegnati a un anno ("scoperto · II anno"). Li modificate tu e i gestori di qualsiasi anno.</p>
    <div class="row" style="gap:16px;flex-wrap:wrap">${LEVELS.map(l=>`<label style="display:flex;gap:8px;align-items:center"><input type="color" data-ycol="${l}" value="${ycol(l)}" style="width:42px;height:32px;border:0;background:none;padding:0"> ${ROMAN[l]} anno</label>`).join("")}</div></div>`:"";
-  return reqPanel+yearsPanel+privPanel+covPanel+colPanel+mgPanel+allowPanel+linkedPanel()+importPanel+`
+  const capPanel=ADMIN()&&db?(()=>{ const rows=[], seen=new Set();
+    (MULTI?YRS(UI.mk):[CURY]).forEach(y=>((y===CURY?S:yState(y)||{}).posts||[]).forEach(p=>{ const k=normRoom(p.name); if(!k||seen.has(k)) return; seen.add(k); rows.push({k,name:p.name,p}); }));
+    return `<div class="panel"><h2>Persone per sala e turno</h2><p class="muted" style="margin:0;font-size:.85rem">Minimo e massimo per turno, contando tutti gli anni insieme. Sotto il minimo il turno è scoperto (o "manca 1"); il generatore non supera il massimo. DEA (mattina/pomeriggio) e guardia: tendenzialmente una persona per anno. Li modificate tu e i gestori di qualsiasi anno.</p>
+     <div class="list">${rows.map(r=>{ const shs=SH.filter(x=>Object.values(r.p.on||{}).some(a=>(a||[]).includes(x))); if(!shs.length) return "";
+       return `<div class="item" style="flex-wrap:wrap;gap:8px"><span class="name-strong" style="min-width:110px">${esc(r.name)}</span><span class="row" style="gap:10px;flex-wrap:wrap">${shs.map(x=>{ const c=capOf(r.p,x); return `<span style="display:flex;gap:4px;align-items:center;font-size:.82rem"><span class="chip sh-${x}">${x}</span>min <input type="number" min="0" max="9" data-cap="${esc(r.k)}|${x}|0" value="${c.min}" style="width:46px"> max <input type="number" min="1" max="9" data-cap="${esc(r.k)}|${x}|1" value="${c.max}" style="width:46px"></span>`; }).join("")}</span></div>`; }).join("")}</div></div>`; })():"";
+  return reqPanel+yearsPanel+privPanel+covPanel+capPanel+colPanel+mgPanel+allowPanel+linkedPanel()+importPanel+`
   <div class="panel"><h2>Specializzandi</h2>
    <form class="row" id="addform"><input id="newname" placeholder="Cognome Nome" style="flex:1 1 12em" autocomplete="off"><select id="newyear" aria-label="Anno">${[1,2,3,4].map(y=>`<option ${y===2?"selected":""}>${y}° anno</option>`).join("")}</select><button class="btn primary" type="submit">Aggiungi</button></form>
    <div class="list">${S.residents.map(r=>`<div class="item"><input id="rname-${r.id}" data-rname="${r.id}" value="${esc(r.name)}" aria-label="Nome" style="font-weight:600;width:100%"><span class="pickers sm" style="flex:none"><button data-act="rflag" data-id="${r.id}" data-f="nights" aria-pressed="${canDo(r.id,"N")}">Notti</button><button data-act="rflag" data-id="${r.id}" data-f="guards" aria-pressed="${canDo(r.id,"D")}">Guardie</button></span><button class="btn danger ${UI.confirm==="del-"+r.id?"confirm":""}" data-act="del" data-id="${r.id}">${UI.confirm==="del-"+r.id?"Conferma":"Rimuovi"}</button></div>`).join("")||`<p class="muted" style="margin:0">Ancora nessuno.</p>`}</div></div>
@@ -1189,11 +1208,22 @@ function fgOf(p){ const k=normRoom(p.name); if(/^(diagsen|radsen)/.test(k)) retu
 /* sala chiusa (gestori, per giorno e turno): nessuno viene assegnato e non è un buco; vale per tutti gli anni (chiave con il nome normalizzato della sala) */
 function saveYearsDoc(){ const om=oldestMk(); const cl={}; for(const mk in CLOSEDG) if(mk>=om&&Object.keys(CLOSEDG[mk]).length) cl[mk]=CLOSEDG[mk]; CLOSEDG=cl;
   const hy={}; for(const mk in HOLEY) if(mk>=om&&Object.keys(HOLEY[mk]).length) hy[mk]=HOLEY[mk]; HOLEY=hy;
-  return db.doc("config/years").set({state:JSON.stringify({coverage:COVY,closed:cl,colors:YCOL,holes:hy}),updated:new Date().toISOString()}); }
+  return db.doc("config/years").set({state:JSON.stringify({coverage:COVY,closed:cl,colors:YCOL,holes:hy,caps:CAPS}),updated:new Date().toISOString()}); }
 function closedN(mk,d,rn,sh){ const k=d+"|"+rn+"|"+sh; if(CLOSEDG[mk]&&CLOSEDG[mk][k]) return true; for(const y of (MULTI?YRS(mk):[CURY])){ const st=y===CURY?S:yState(y), m=st&&st.months&&st.months[mk]; if(m&&m.closed&&m.closed[k]) return true; } return false; }
 function isClosed(mo,d,key){ const [pid,sh]=key.split("|"), p=postOf(pid); return !!p&&closedN(mo.mk,d,normRoom(p.name),sh); }
-function multiPost(p){ return !!p&&(p.cover==="TC"||p.cover==="RM"); }
-function extCovered(mo,d,key){ return !!EXT(mo)[d+"|"+key] && !multiPost(postOf(key.split("|")[0])) && !(mo.fixed||{})[d+"|"+key+"|0"]; }
+/* persone per sala e turno, contando tutti gli anni (min e max, modificabili in Impostazioni: config/years caps);
+   py = "tendenzialmente una per anno" (DEA mattina/pomeriggio e guardia) */
+const CAP_DEF={rxtorace:{M:[2,2],P:[1,1]},eco:{M:[1,2],P:[1,2]},radsen1:{M:[1,2],P:[1,2]},radsen2:{M:[1,2],P:[1,2]},dea:{M:[2,3],P:[2,3],N:[1,1],D:[3,3]}};
+const PY_DEF={dea:["M","P","D"]};
+let CAPS={};
+function capRaw(rn,s){ let v=(CAPS[rn]||{})[s]||(CAP_DEF[rn]||{})[s]; if(!v&&/^(tc[1-4]|rm[1-5])$/.test(rn)&&(s==="M"||s==="P")) v=[1,3]; return v||[1,1]; }
+function capOf(p,s){ const rn=normRoom(p.name), v=capRaw(rn,s), mn=Math.max(0,+v[0]||0), mx=Math.max(mn,1,+v[1]||1); return {min:mn,max:mx,py:(PY_DEF[rn]||[]).includes(s)}; }
+function multiPost(p,s){ if(!p) return false; return s?capOf(p,s).max>1:["M","P"].some(x=>capOf(p,x).max>1); }
+/* anni sotto (nella cascata) che coprono questa sala: per le sale "una per anno" ognuno ne mette una e lascia il resto a loro */
+function lowerCovers(post,mk){ return MULTI&&YRS(mk).some(y=>y<CURY&&(((yState(y)||{}).residents)||[]).length&&yearsFor(post).includes(yLab(y))); }
+/* quante persone di quest'anno servono ancora (min meno gli altri anni; "una per anno" se ci sono anni sotto) */
+function needOf(mo,d,key){ const [pid,s]=key.split("|"), p=postOf(pid); if(!p) return 0; const c=capOf(p,s), oth=othersIn(mo,d,key); let n=Math.max(0,c.min-oth); if(c.py&&lowerCovers(p,mo.mk)) n=Math.min(n,1); return n; }
+function extCovered(mo,d,key){ const [pid,s]=key.split("|"), p=postOf(pid); return !!p&&othersIn(mo,d,key)>=capOf(p,s).max && !(mo.fixed||{})[d+"|"+key+"|0"]; }
 const EXT_MAN="Altri anni (inserito a mano)";
 function extHas(mo,d,key){ return !!EXT(mo)[d+"|"+key]; }
 /* sale TC/RM: al massimo 3 persone in tutto (anni diversi); stesso anno insieme solo per 2° e 3° anno, segnalato */
@@ -1201,7 +1231,7 @@ const ROOM_MAX=3;
 function curYear(){ return yLab(S.groupYear||2); }
 function sameYearOk(y){ return y===2||y===3; }
 function othersIn(mo,d,key){ return (EXT(mo)[d+"|"+key]||[]).length+(lowerOnly(mo,d,key)||[]).length; }
-function roomCovered(mo,d,key){ return extHas(mo,d,key)||(multiPost(postOf(key.split("|")[0]))&&!!LOWER(mo)[d+"|"+key]); }
+function roomCovered(mo,d,key){ return needOf(mo,d,key)===0; }
 /* allinea l'orario già presente: i turni coperti da altri anni restano vuoti (non buchi), gli altri tornano da coprire */
 function syncExt(mo){ TICK++; for(const sc of [mo.sched,hasDraft(mo)?mo.draft.sched:null]){ if(!sc) continue;
   for(const d in sc) for(const k in sc[d]){ const a=sc[d][k];
@@ -1276,7 +1306,7 @@ function alignOwn(mo,res){ let moved=0; TICK++;
       for(const d of res.colDays){ for(const k in (base[d]||{})){ const [pid,sh]=k.split("|"); const sk=sh==="N"?"N":pid+"|"+sh; if(!res.seen.has(sk)) continue;
           const cur=(base[d][k]||[]).filter(x=>x), want=res.ownMap[d+"|"+k]||[];
           if(cur.length===want.length&&cur.every(x=>want.includes(x))) continue;
-          const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=want.length?[...want]:(EXT(mo)[d+"|"+k]&&!multiPost(postOf(pid))?[]:[null]);
+          const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=want.length?[...want]:(extCovered(mo,d,k)?[]:[null]);
           const fx=mo.fixed||{}; Object.keys(fx).filter(z=>z.startsWith(d+"|"+k+"|")).forEach(z=>delete fx[z]); want.forEach((x,i)=>fx[d+"|"+k+"|"+i]=x); mo.fixed=fx; moved++; }
         for(const kk in res.ownMap){ const [d2,pid,sh]=kk.split("|"); if(d2!==d) continue; const k=pid+"|"+sh; if((base[d]||{})[k]) continue;
           const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=[...res.ownMap[kk]]; res.ownMap[kk].forEach((x,i)=>{ mo.fixed=mo.fixed||{}; mo.fixed[d+"|"+k+"|"+i]=x; }); moved++; } } }
@@ -1364,10 +1394,10 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
   sheet(`<div class="row" style="justify-content:space-between"><div><h2>${esc(post.name)} · ${SHN[s]}</h2><span class="muted">${fmt(d,true)} · ${esc(S.hours[s])}</span></div><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
    ${hasDraft(mo)?(()=>{ const pub=((effSched(UI.mk)||mo.sched||{})[d]||{})[k]||[], dr=((mo.draft.sched||{})[d]||{})[k]||[], nm=a=>a.filter(x=>x).map(resName).join(", ")||(isClosed(mo,d,k)?"Chiusa":"—"), diff=!sameCell(pub,dr);
       return `<div class="stack" style="gap:2px;font-size:.88rem;padding:8px 10px;border-radius:8px;background:${diff?"var(--chg-soft)":"var(--surface-2,transparent)"};border:1px solid ${diff?"var(--chg)":"var(--line)"}"><span><span class="muted">Orario attivo:</span> <strong>${esc(nm(pub))}</strong></span><span><span class="muted">Bozza:</span> <strong>${esc(nm(dr))}</strong>${diff?' <span style="color:var(--chg);font-weight:600">· modificato</span>':""}</span></div>`; })():""}
-   ${!arr.some(x=>x)&&!isClosed(mo,d,k)?(()=>{ const cur=holeTag(UI.mk,d,k); return `<div class="row" style="gap:6px;flex-wrap:wrap;align-items:center"><span class="label">Scoperto di:</span>${LEVELS.map(l=>`<button class="btn sm" data-act="holey" data-v="${l}" style="${cur===l?`background:${ycol(l)};color:#fff;border-color:${ycol(l)}`:`border-color:${ycol(l)};color:${ycol(l)}`}">${ROMAN[l]} anno</button>`).join("")}${cur?`<button class="btn sm" data-act="holey" data-v="0">Togli</button>`:""}</div>`; })():""}
+   ${!isClosed(mo,d,k)&&arr.filter(x=>x).length+othersIn(mo,d,k)<capOf(post,s).max?(()=>{ const cur=holeTag(UI.mk,d,k); return `<div class="row" style="gap:6px;flex-wrap:wrap;align-items:center"><span class="label">${arr.some(x=>x)?"Manca uno di:":"Scoperto di:"}</span>${LEVELS.map(l=>`<button class="btn sm" data-act="holey" data-v="${l}" style="${cur===l?`background:${ycol(l)};color:#fff;border-color:${ycol(l)}`:`border-color:${ycol(l)};color:${ycol(l)}`}">${ROMAN[l]} anno</button>`).join("")}${cur?`<button class="btn sm" data-act="holey" data-v="0">Togli</button>`:""}</div>`; })():""}
    ${EXT(mo)[d+"|"+k]?`<p class="muted" style="margin:0;font-size:.84rem">Altri anni: ${EXT(mo)[d+"|"+k].map(esc).join(", ")}</p>`:""}
    ${lowerOnly(mo,d,k)?`<p class="muted" style="margin:0;font-size:.84rem;font-style:italic">Anni successivi: ${lowerOnly(mo,d,k).map(esc).join(", ")}</p>`:""}
-   ${[...arr,...(multiPost(post)&&arr.some(x=>x)?[undefined]:[])].map((cur,i)=>`<div class="stack" style="gap:6px"><span class="label">${cur===undefined?"Aggiungi un'altra persona":cur?`Ora: ${esc(resName(cur))}`:"Scoperto"}</span>
+   ${[...arr,...(multiPost(post,s)&&arr.some(x=>x)&&arr.filter(x=>x).length+othersIn(mo,d,k)<capOf(post,s).max?[undefined]:[])].map((cur,i)=>`<div class="stack" style="gap:6px"><span class="label">${cur===undefined?"Aggiungi un'altra persona":cur?`Ora: ${esc(resName(cur))}`:"Scoperto"}</span>
      ${cov!=="ALL"?`<span class="groupname">Rotazione ${esc(rotName(cov))}</span>`:`<span class="groupname">Tutti gli specializzandi</span>`}
      ${pri.map(r=>btn(r,i,cur,cov==="ALL")).join("")||`<p class="muted" style="margin:0">Nessuno in questa rotazione.</p>`}
      ${jol.length?`<span class="groupname">Jolly</span>${jol.map(r=>btn(r,i,cur,true)).join("")}`:""}
@@ -1550,9 +1580,9 @@ document.addEventListener("click",e=>{
   if(a==="years"){ if(UI.confirm!=="years"){UI.confirm="years";render();return;} UI.confirm=null;
     if(S.multiYear){ S.multiYear=false; persist(); toast("Più anni disattivato: dati degli altri anni conservati"); render(); return; }
     el.disabled=true; el.textContent="Creazione degli anni…"; enableYears().then(()=>{ toast("Più anni attivo: scegli l'anno in alto"); render(); }).catch(e=>{ toast("Errore: "+(e.message||e)); render(); }); return; }
-  if(a==="extmark"){ const mo=M(UI.mk), d=layer.dataset.d, k=layer.dataset.k, kk=d+"|"+k; mo.ext={...(mo.ext||{})};
+  if(a==="extmark"){ TICK++; const mo=M(UI.mk), d=layer.dataset.d, k=layer.dataset.k, kk=d+"|"+k; mo.ext={...(mo.ext||{})};
     if(el.dataset.v==="1"){ mo.ext[kk]=[...(mo.ext[kk]||[]).filter(x=>x!==EXT_MAN),EXT_MAN];
-      if(!multiPost(postOf(k.split("|")[0]))){ const fx=mo.fixed=mo.fixed||{}; Object.keys(fx).filter(z=>z.startsWith(kk+"|")).forEach(z=>delete fx[z]); const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=[]; } }
+      if(extCovered(mo,d,k)){ const fx=mo.fixed=mo.fixed||{}; Object.keys(fx).filter(z=>z.startsWith(kk+"|")).forEach(z=>delete fx[z]); const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=[]; } }
     else { const l=(mo.ext[kk]||[]).filter(x=>x!==EXT_MAN); if(l.length) mo.ext[kk]=l; else delete mo.ext[kk]; }
     syncExt(mo); persist(); closeSheet(); render(); return; }
   if(a==="closeroom"){ const d=layer.dataset.d, k=layer.dataset.k, [pid,sh]=k.split("|"), post=postOf(pid);
@@ -1635,7 +1665,7 @@ document.addEventListener("click",e=>{
     generate(UI.mk, wk===null?undefined:wk); histAdd(UI.mk,wk===null?"Bozza generata (tutto il mese)":`Bozza generata: settimana ${wk+1}`,mo.draft.sched); persist(); render(); toast("Bozza pronta: controllala e accettala per pubblicarla"); return; }
   if(a==="gen"){ const mo=M(UI.mk); if(mo.sched&&UI.confirm!=="gen"){UI.confirm="gen";render();return;}
     UI.confirm=null; generate(UI.mk); persist(); render(); toast("Turni generati"); return; }
-  if(a==="xlsx"){exportXlsx();return;}
+  if(a==="xlsx"){ if(ADMIN()) exportXlsx(); return;}
   if(a==="xunav"){exportUnav();return;}
   if(a==="backup"){exportBackup();return;}
   if(a==="xbozza"){exportBozza();return;}
@@ -1666,6 +1696,8 @@ document.addEventListener("click",e=>{
 });
 document.addEventListener("change",e=>{
   const t=e.target;
+  if(t.dataset&&t.dataset.cap&&ADMIN()){ const [rn,sh,ix]=t.dataset.cap.split("|"), cur=[...capRaw(rn,sh)]; cur[+ix]=Math.max(+ix?1:0,Math.min(9,parseInt(t.value,10)||0)); if(cur[1]<cur[0]) cur[+ix?0:1]=cur[+ix];
+    CAPS={...CAPS,[rn]:{...(CAPS[rn]||{}),[sh]:cur}}; TICK++; if(db) saveYearsDoc().catch(()=>toast("Non riesco a salvare")); render(); return; }
   if(t.dataset&&t.dataset.ycol&&ADMIN()){ YCOL={...YCOL,[t.dataset.ycol]:t.value}; if(db) saveYearsDoc().catch(()=>toast("Non riesco a salvare il colore")); render(); return; }
   if(t.id==="extfile"&&ADMIN()&&t.files&&t.files[0]){ if(typeof XLSX==="undefined"){toast("Libreria Excel non caricata, riprova tra poco");return;}
     const fr=new FileReader(); fr.onload=()=>{ try{ const wb=XLSX.read(fr.result,{type:"array"}); UI.extWb=wb;
@@ -1738,8 +1770,8 @@ render();
     const checkMulti=()=>{ const st2=yState(2); const on=!!(st2&&st2.multiYear); if(on===MULTI) return; MULTI=on; EXTC.key=null;
       if(MULTI){ ALLY().forEach(watchYear); ensureCohorts(); } else if(CURY!==2) switchYear(2); watchCov(); filterSW(); };
     let covSub=false;
-    const watchCov=()=>{ if(covSub) return; covSub=true; db.doc("config/years").onSnapshot(sn=>{ let c={}, cl={}, yc={}, hy={}; try{ const o=JSON.parse((sn.exists&&sn.data().state)||"{}"); c=o.coverage||{}; cl=o.closed||{}; yc=o.colors||{}; hy=o.holes||{}; }catch(e){}
-      COVY=c; CLOSEDG=cl; YCOL=yc; HOLEY=hy; RAWV++; EXTC.key=null;
+    const watchCov=()=>{ if(covSub) return; covSub=true; db.doc("config/years").onSnapshot(sn=>{ let c={}, cl={}, yc={}, hy={}; try{ const o=JSON.parse((sn.exists&&sn.data().state)||"{}"); c=o.coverage||{}; cl=o.closed||{}; yc=o.colors||{}; hy=o.holes||{}; CAPS=o.caps||{}; }catch(e){}
+      COVY=c; CLOSEDG=cl; YCOL=yc; HOLEY=hy; TICK++; RAWV++; EXTC.key=null;
       /* sale nuove: di base solo al 1° anno (TC Columbus al 3°), finché tu o un gestore non le cambiate */
       const DEF=COV_DEF;
       const miss=Object.keys(DEF).filter(k=>!Array.isArray(COVY[k]));
