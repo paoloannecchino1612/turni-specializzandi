@@ -1,7 +1,7 @@
 /* Collegamento a Firebase: accesso con email e password + database Firestore.
    Espone window.claude.use("db" | "user" | "downloads") con la stessa forma usata dall'app,
    così il codice dei turni resta identico a quello del tool originale. */
-import { FIREBASE_CONFIG } from "./config.js?v=127";
+import { FIREBASE_CONFIG } from "./config.js?v=128";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
   sendEmailVerification, sendPasswordResetEmail, signOut, reload } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";

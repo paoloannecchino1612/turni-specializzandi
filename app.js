@@ -1645,6 +1645,30 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
     if(p.on[add(d,-1)]==="N") return "giorno di smonto"; if(s==="N"&&p.on[add(d,1)]) return "lavora nel giorno di smonto";
     if(!arr.includes(pid)&&(p.wk[w]||0)>=S.maxWeek) return `già ${p.wk[w]} turni in settimana`; return ""; };
   const btn=(r,i,cur,tag)=>{const y=why(r.id), isCur=cur===r.id;return `<button class="cand ${isCur?"cur":""}" data-act="assign" data-i="${i}" data-id="${r.id}"><span><span class="name-strong">${esc(rName(r))}</span>${tag?` <span class="muted" style="font-size:.78rem">· ${esc(rotName(mo.rot[r.id]))}</span>`:""}${y&&!isCur?`<br><span class="why">${y}</span>`:""}</span><span class="chip">${per[r.id].tot} turni · ${per[r.id].N} N</span></button>`;};
+  /* sala non del tuo anno: prima gli specializzandi degli anni che la coprono (nella loro rotazione), poi i tuoi */
+  const actv=postActive(post)||!MULTI||!ADMIN();
+  const ownH=[...arr,...(multiPost(post,s)&&arr.some(x=>x)&&arr.filter(x=>x).length+othersIn(mo,d,k)<capOf(post,s).max?[undefined]:[])].map((cur,i)=>`<div class="stack" style="gap:6px"><span class="label">${cur===undefined?"Aggiungi un'altra persona":cur?`Ora: ${esc(resName(cur))}`:"Scoperto"}</span>
+     ${cov!=="ALL"||deaMP(post,s)?`<span class="groupname">Rotazione ${esc(rotName(deaMP(post,s)?"DEA":cov))}</span>`:`<span class="groupname">Tutti gli specializzandi</span>`}
+     ${pri.map(r=>btn(r,i,cur,cov==="ALL")).join("")||`<p class="muted" style="margin:0">Nessuno in questa rotazione.</p>`}
+     ${jol.length?`<span class="groupname">Jolly</span>${jol.map(r=>btn(r,i,cur,true)).join("")}`:""}
+     ${(()=>{const bg=S.residents.filter(r=>isBG(mo.rot[r.id])); return bg.length?`<span class="groupname">Bambin Gesù (solo a mano)</span>${bg.map(r=>btn(r,i,cur,true)).join("")}`:"";})()}
+     ${(()=>{ if(cov==="ALL"&&!deaMP(post,s)) return ""; /* sempre visibili anche gli altri specializzandi (fuori rotazione), prima i disponibili */
+        const inPools=new Set([...pri,...jol].map(r=>r.id)), others=S.residents.filter(r=>!inPools.has(r.id)&&!isBG(mo.rot[r.id]));
+        if(!others.length) return "";
+        return `<span class="groupname">Altri specializzandi (fuori rotazione)</span>${others.sort((a,b)=>!!why(a.id)-!!why(b.id)).map(r=>btn(r,i,cur,true)).join("")}`; })()}
+     ${cur?`<button class="btn danger" data-act="assign" data-i="${i}" data-id="">${arr.filter(x=>x).length>1?"Togli":"Lascia scoperto"}</button>`:""}</div>`).join("");
+  const othH=MULTI&&ADMIN()?(()=>{ const inC=othCell(UI.mk,d,k), inSet=new Set(inC.map(x=>x.y+"|"+x.pid));
+      /* prima gli anni che coprono questa sala e, dentro ogni anno, chi è nella rotazione della sala */
+      const covY=y=>yearsFor(post).includes(yLab(y)), inR=(y,r)=>{ const st=yState(y), m=st&&st.months&&st.months[UI.mk]; return !!(m&&m.rot&&rotCovers(m.rot[r.id],deaMP(post,s)?"DEA":cov)); };
+      const groups=YRS(UI.mk).filter(y=>y!==CURY).map(y=>{ const st=yState(y); return {y,res:((st&&st.residents)||[]).filter(r=>!inSet.has(y+"|"+r.id)).sort((a,b)=>inR(y,b)-inR(y,a))}; }).filter(g=>g.res.length).sort((a,b)=>covY(b.y)-covY(a.y)||yLab(b.y)-yLab(a.y));
+      return `<details class="stack" style="gap:6px" ${actv?"":"open"}><summary class="groupname" style="cursor:pointer">Specializzandi di altri anni${inC.length?` (${inC.length} qui)`:""}</summary>
+        ${inC.length?`<div class="stack" style="gap:4px">${inC.map(x=>`<div class="row" style="justify-content:space-between"><span class="name-strong">${esc(x.name)}</span><button class="btn sm danger" data-act="othdel" data-y="${x.y}" data-id="${x.pid}">Togli</button></div>`).join("")}</div>`:""}
+        <p class="muted" style="margin:0;font-size:.8rem">Va nella bozza del suo anno (turno fisso): la pubblicano i rappresentanti di quell'anno.</p>
+        ${groups.map(g=>`<span class="groupname">${ROMAN[yLab(g.y)]} anno${covY(g.y)?" · copre questa sala":""}</span>${g.res.map((r,ri)=>{ const sep=ri>0&&inR(g.y,g.res[ri-1])&&!inR(g.y,r)?`<span class="muted" style="font-size:.8rem;margin-top:4px">Altre rotazioni del ${ROMAN[yLab(g.y)]} anno</span>`:""; const b=othBusy(UI.mk,g.y,r.id,d), sl=b&&b.startsWith("già")?othSlot(UI.mk,g.y,r.id,d):null;
+          /* già in turno quel giorno: si può scambiare con chi è in questa casella (prende il suo posto e viceversa) */
+          const here=[...arr.filter(x=>x).map(x=>({cy:CURY,cid:x,nm:resName(x)})),...inC.map(x=>({cy:x.y,cid:x.pid,nm:x.name}))];
+          const sw=sl&&here.length?`<div class="row" style="gap:6px;flex-wrap:wrap;margin:-2px 0 4px 8px"><span class="muted" style="font-size:.8rem">È in ${esc(sl.room)} ${SHN[sl.sh].toLowerCase()}:</span>${here.map(h=>`<button class="btn sm" data-act="othswap" data-y="${g.y}" data-id="${r.id}" data-cy="${h.cy}" data-cid="${h.cid}">⇄ Scambia con ${esc(h.nm)}</button>`).join("")}</div>`:"";
+          return sep+`<button class="cand" data-act="othadd" data-y="${g.y}" data-id="${r.id}"><span><span class="name-strong">(${yLab(r.year||(yState(g.y)||{}).groupYear||g.y)}) ${esc(r.name)}</span>${inR(g.y,r)?` <span class="muted" style="font-size:.78rem">· ${esc(rotName(deaMP(post,s)?"DEA":cov))}</span>`:""}${b?`<br><span class="why">${b}</span>`:""}</span></button>${sw}`; }).join("")}`).join("")}</details>`; })():"";
   sheet(`<div class="row" style="justify-content:space-between"><div><h2>${esc(post.name)} · ${SHN[s]}</h2><span class="muted">${fmt(d,true)} · ${esc(S.hours[s])}</span></div><button class="btn icon" data-act="close" aria-label="Chiudi">×</button></div>
    ${hasDraft(mo)?(()=>{ const pub=((effSched(UI.mk)||mo.sched||{})[d]||{})[k]||[], dr=((mo.draft.sched||{})[d]||{})[k]||[], nm=a=>a.filter(x=>x).map(resName).join(", ")||(isClosed(mo,d,k)?"Chiusa":"—"), diff=!sameCell(pub,dr);
       return `<div class="stack" style="gap:2px;font-size:.88rem;padding:8px 10px;border-radius:8px;background:${diff?"var(--chg-soft)":"var(--surface-2,transparent)"};border:1px solid ${diff?"var(--chg)":"var(--line)"}"><span><span class="muted">Orario attivo:</span> <strong>${esc(nm(pub))}</strong></span><span><span class="muted">Bozza:</span> <strong>${esc(nm(dr))}</strong>${diff?' <span style="color:var(--chg);font-weight:600">· modificato</span>':""}</span></div>`; })():""}
@@ -1655,26 +1679,7 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
    ${EXT(mo)[d+"|"+k]?`<p class="muted" style="margin:0;font-size:.84rem">Altri anni: ${xNames(d,k,EXT(mo)[d+"|"+k]).replace(/<br>/g,", ")}</p>`:""}
    ${anyMgr()&&drxCell(d,k)?`<p style="margin:0;font-size:.84rem;color:var(--chg);font-weight:600">Un altro anno ha modificato questa casella nella sua bozza, non ancora pubblicata${DRX.u.names.size+DRX.l.names.size?" (nomi in arancione)":""}.</p>`:""}
    ${lowerOnly(mo,d,k)?`<p class="muted" style="margin:0;font-size:.84rem;font-style:italic">Anni successivi: ${xNames(d,k,lowerOnly(mo,d,k)).replace(/<br>/g,", ")}</p>`:""}
-   ${[...arr,...(multiPost(post,s)&&arr.some(x=>x)&&arr.filter(x=>x).length+othersIn(mo,d,k)<capOf(post,s).max?[undefined]:[])].map((cur,i)=>`<div class="stack" style="gap:6px"><span class="label">${cur===undefined?"Aggiungi un'altra persona":cur?`Ora: ${esc(resName(cur))}`:"Scoperto"}</span>
-     ${cov!=="ALL"||deaMP(post,s)?`<span class="groupname">Rotazione ${esc(rotName(deaMP(post,s)?"DEA":cov))}</span>`:`<span class="groupname">Tutti gli specializzandi</span>`}
-     ${pri.map(r=>btn(r,i,cur,cov==="ALL")).join("")||`<p class="muted" style="margin:0">Nessuno in questa rotazione.</p>`}
-     ${jol.length?`<span class="groupname">Jolly</span>${jol.map(r=>btn(r,i,cur,true)).join("")}`:""}
-     ${(()=>{const bg=S.residents.filter(r=>isBG(mo.rot[r.id])); return bg.length?`<span class="groupname">Bambin Gesù (solo a mano)</span>${bg.map(r=>btn(r,i,cur,true)).join("")}`:"";})()}
-     ${(()=>{ if(cov==="ALL"&&!deaMP(post,s)) return ""; /* sempre visibili anche gli altri specializzandi (fuori rotazione), prima i disponibili */
-        const inPools=new Set([...pri,...jol].map(r=>r.id)), others=S.residents.filter(r=>!inPools.has(r.id)&&!isBG(mo.rot[r.id]));
-        if(!others.length) return "";
-        return `<span class="groupname">Altri specializzandi (fuori rotazione)</span>${others.sort((a,b)=>!!why(a.id)-!!why(b.id)).map(r=>btn(r,i,cur,true)).join("")}`; })()}
-     ${cur?`<button class="btn danger" data-act="assign" data-i="${i}" data-id="">${arr.filter(x=>x).length>1?"Togli":"Lascia scoperto"}</button>`:""}</div>`).join("")}
-   ${MULTI&&ADMIN()?(()=>{ const inC=othCell(UI.mk,d,k), inSet=new Set(inC.map(x=>x.y+"|"+x.pid));
-      const groups=YRS(UI.mk).filter(y=>y!==CURY).map(y=>{ const st=yState(y); return {y,res:((st&&st.residents)||[]).filter(r=>!inSet.has(y+"|"+r.id))}; }).filter(g=>g.res.length).sort((a,b)=>yLab(b.y)-yLab(a.y));
-      return `<details class="stack" style="gap:6px"><summary class="groupname" style="cursor:pointer">Specializzandi di altri anni${inC.length?` (${inC.length} qui)`:""}</summary>
-        ${inC.length?`<div class="stack" style="gap:4px">${inC.map(x=>`<div class="row" style="justify-content:space-between"><span class="name-strong">${esc(x.name)}</span><button class="btn sm danger" data-act="othdel" data-y="${x.y}" data-id="${x.pid}">Togli</button></div>`).join("")}</div>`:""}
-        <p class="muted" style="margin:0;font-size:.8rem">Va nella bozza del suo anno (turno fisso): la pubblicano i rappresentanti di quell'anno.</p>
-        ${groups.map(g=>`<span class="groupname">${ROMAN[yLab(g.y)]} anno</span>${g.res.map(r=>{ const b=othBusy(UI.mk,g.y,r.id,d), sl=b&&b.startsWith("già")?othSlot(UI.mk,g.y,r.id,d):null;
-          /* già in turno quel giorno: si può scambiare con chi è in questa casella (prende il suo posto e viceversa) */
-          const here=[...arr.filter(x=>x).map(x=>({cy:CURY,cid:x,nm:resName(x)})),...inC.map(x=>({cy:x.y,cid:x.pid,nm:x.name}))];
-          const sw=sl&&here.length?`<div class="row" style="gap:6px;flex-wrap:wrap;margin:-2px 0 4px 8px"><span class="muted" style="font-size:.8rem">È in ${esc(sl.room)} ${SHN[sl.sh].toLowerCase()}:</span>${here.map(h=>`<button class="btn sm" data-act="othswap" data-y="${g.y}" data-id="${r.id}" data-cy="${h.cy}" data-cid="${h.cid}">⇄ Scambia con ${esc(h.nm)}</button>`).join("")}</div>`:"";
-          return `<button class="cand" data-act="othadd" data-y="${g.y}" data-id="${r.id}"><span><span class="name-strong">(${yLab(r.year||(yState(g.y)||{}).groupYear||g.y)}) ${esc(r.name)}</span>${b?`<br><span class="why">${b}</span>`:""}</span></button>${sw}`; }).join("")}`).join("")}</details>`; })():""}
+   ${actv?ownH+othH:othH+`<details class="stack" style="gap:6px"><summary class="groupname" style="cursor:pointer">Specializzandi del ${ROMAN[curYear()]} anno (sala non del tuo anno)</summary>${ownH}</details>`}
    <div class="row">${(mo.ext||{})[d+"|"+k]&&(mo.ext[d+"|"+k]||[]).includes(EXT_MAN)?`<button class="btn" data-act="extmark" data-v="0">Togli «coperto da altri anni»</button>`:`<button class="btn" data-act="extmark" data-v="1">Coperto da altri anni</button>`}
      ${isClosed(mo,d,k)?`<button class="btn" data-act="closeroom" data-v="0">Riapri la sala</button>`:`<button class="btn" data-act="closeroom" data-v="1">Sala chiusa (questo turno)</button><button class="btn" data-act="closeroom" data-v="2">Sala chiusa tutto il giorno</button>`}</div>`);
   layer.dataset.d=d; layer.dataset.k=k; }
