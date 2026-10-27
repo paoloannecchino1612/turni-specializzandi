@@ -59,7 +59,7 @@ function unsatTags(mo,d,key,arr){ const tags=holeTags(mo.mk,d,key); if(!tags.len
   const cnt=yearCounts(mo,d,key,arr); return tags.filter(t=>(cnt[t.l]||0)<=t.b).map(t=>t.l); }
 function tagSatisfied(mo,d,key,arr,L){ return !unsatTags(mo,d,key,arr).includes(L); }
 const chipY=(l,txt)=>`<span class="hole" style="display:inline-block;margin:2px 2px 0 0;color:#fff;background:${ycol(l)}">${txt} · ${ROMAN[l]} anno</span>`;
-function holeLabel(d,key){ const mo=M(UI.mk), arr=(((viewSched(UI.mk)||{})[d]||{})[key])||[], tags=unsatTags(mo,d,key,arr); return tags.length?tags.map(l=>chipY(l,"scoperto")).join(""):`<span class="hole">scoperto</span>`; }
+function holeLabel(d,key){ const mo=M(UI.mk); if(!holeTags(UI.mk,d,key).length) return `<span class="hole">scoperto</span>`; const arr=(((workSched(mo)||{})[d]||{})[key])||[], tags=unsatTags(mo,d,key,arr); return tags.length?tags.map(l=>chipY(l,"scoperto")).join(""):`<span class="hole">scoperto</span>`; }
 /* etichetta per caselle con persone ma non complete: "manca 1" o "manca · II anno" (una per ogni persona mancante assegnata a un anno) */
 function partialLabel(mo,d,key,arr){ const oc=(arr||[]).filter(x=>x).length; if(!oc||isClosed(mo,d,key)) return ""; const n=needOf(mo,d,key)-oc, un=unsatTags(mo,d,key,arr);
   const rest=n-un.length; return `<span style="display:block">${un.map(l=>chipY(l,"manca")).join("")}${rest>0?`<span class="hole" style="display:inline-block;margin-top:2px">manca ${rest}</span>`:""}</span>`.replace('<span style="display:block"></span>',""); }
@@ -99,7 +99,8 @@ const SEXC={key:null,map:{}};
 function sheetExtCached(mk){ const sh=sheetLatest(mk); const key=mk+"|"+CURY+"|"+(sh?sh.at:"")+"|"+S.residents.length+"|"+S.posts.length+"|"+JSON.stringify((S.months[mk]||{}).extReset||{}).length; if(SEXC.key!==key){ SEXC.key=key; SEXC.map=sh?sheetExt(mk):{}; } return SEXC.map; }
 /* anni sotto (generati dopo nella cascata): solo da vedere, non cambiano la generazione */
 const LOWC={key:null,map:{}};
-function LOWER(mo){ if(!MULTI||!S) return {}; const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+anyMgr()+"|"+S.posts.map(p=>p.id+":"+p.name).join(",");
+const PSIG={t:-1,v:""}; function postSig(){ if(PSIG.t!==TICK||!PSIG.v){ PSIG.t=TICK; PSIG.v=S.posts.map(p=>p.id+":"+p.name).join(","); } return PSIG.v; }
+function LOWER(mo){ if(!MULTI||!S) return {}; const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+anyMgr()+"|"+postSig();
   if(LOWC.key!==key){ LOWC.key=key; LOWC.map=autoExt(mo.mk,true); } return LOWC.map; }
 /* EXT è chiamato per ogni casella: il risultato si ricalcola solo quando cambia qualcosa (TICK sale a ogni render, generazione e salvataggio) */
 let TICK=0; const EXTMEMO={};
@@ -115,7 +116,7 @@ function extOwn(mo){ const own=mo.ext||{}, sh=S&&mo.mk?sheetLatest(mo.mk):null; 
     else if((sft==="N"&&!hasN)||(sft==="D"&&!hasD)) out[k]=v; }
   return out; }
 function EXT0(mo){ let own=extOwn(mo); if(S&&mo.mk){ const se=sheetExtCached(mo.mk); if(Object.keys(se).length){ const m={...se}; for(const k in own) m[k]=dedupNames([...(m[k]||[]),...own[k]]); own=m; } } if(!MULTI||!S) return own;
-  const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+anyMgr()+"|"+S.posts.map(p=>p.id+":"+p.name).join(",");
+  const key=mo.mk+"|"+CURY+"|"+RAWV+"|"+anyMgr()+"|"+postSig();
   if(EXTC.key!==key){ EXTC.key=key; EXTC.map=autoExt(mo.mk); }
   const auto=EXTC.map; if(!Object.keys(auto).length) return own;
   const out={...auto}; for(const k in own) out[k]=dedupNames([...(auto[k]||[]),...own[k]]); return out; }
@@ -152,7 +153,10 @@ function festivi(y){ if(festCache[y]) return festCache[y];
   const f=["01-01","01-06","04-25","05-01","06-02","06-29","08-15","11-01","12-08","12-25","12-26"].map(x=>y+"-"+x);
   f.push(add(easter(y),1)); return festCache[y]=new Set(f); }
 function dayType(s){ if(festivi(+s.slice(0,4)).has(s)||isoDow(s)===6) return "fes"; if(isoDow(s)===5) return "sab"; return "fer"; }
-function period(mk){ const [y,m]=mk.split("-").map(Number);
+/* calcoli ripetuti migliaia di volte per disegnare la tabella: si memorizzano */
+const PERC=new Map();
+function period(mk){ let v=PERC.get(mk); if(!v){ v=period0(mk); PERC.set(mk,v); } return v; }
+function period0(mk){ const [y,m]=mk.split("-").map(Number);
   let first=y+"-"+String(m).padStart(2,"0")+"-01"; while(isoDow(first)!==0) first=add(first,1);
   let last=ymd(new Date(Date.UTC(y,m,0))); while(isoDow(last)!==6) last=add(last,1);
   const days=[]; for(let d=first; d<=last; d=add(d,1)) days.push(d); return {first,last,days}; }
@@ -1283,7 +1287,8 @@ function syncExt(mo){ TICK++; for(const sc of [mo.sched,hasDraft(mo)?mo.draft.sc
   for(const d in sc) for(const k in sc[d]){ const a=sc[d][k];
     if(extCovered(mo,d,k)){ if(!a.some(x=>x)) sc[d][k]=[]; }
     else if(!a.length) sc[d][k]=[null]; } } }
-function normRoom(x){ let k=String(x||"").toLowerCase().replace(/\(.*?\)/g,"").replace(/angiografia/g,"angio").replace(/ecografia/g,"eco").replace(/[^a-z0-9]/g,"");
+const NRC=new Map(); function normRoom(x){ const sx=String(x||""); let v=NRC.get(sx); if(v===undefined){ v=normRoom0(sx); NRC.set(sx,v); } return v; }
+function normRoom0(x){ let k=String(x||"").toLowerCase().replace(/\(.*?\)/g,"").replace(/angiografia/g,"angio").replace(/ecografia/g,"eco").replace(/[^a-z0-9]/g,"");
   /* nomi del foglio "BOZZA ORARI" → sale dell'app */
   if(/^diagn?sen/.test(k)) k="diagsen";
   else if(/cemi/.test(k)) k="tccemi0";                 // "TC - CEMI 0" = TC 0 CEMI
