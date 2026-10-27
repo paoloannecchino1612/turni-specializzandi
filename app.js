@@ -1599,6 +1599,26 @@ function othCell(mk,d,k){ const out=[]; if(!MULTI) return out; const [pid0,s]=k.
 function othBusy(mk,y,pid,d){ const st=yState(y), m=st&&st.months&&st.months[mk]; if(!m) return ""; const sc=(m.draft&&m.draft.sched)||m.sched||{};
   for(const k in (sc[d]||{})) if((sc[d][k]||[]).includes(pid)){ const sh=k.split("|")[1]; return "già di "+SHN[sh].toLowerCase(); }
   for(const k in (sc[add(d,-1)]||{})) if(k.endsWith("|N")&&(sc[add(d,-1)][k]||[]).includes(pid)) return "giorno di smonto"; return ""; }
+/* dove lavora quel giorno uno specializzando di un altro anno (sala e turno), per lo scambio */
+function othSlot(mk,y,pid,d){ const st=yState(y), m=st&&st.months&&st.months[mk]; if(!m) return null; const sc=(m.draft&&m.draft.sched)||m.sched||{};
+  for(const k in (sc[d]||{})) if((sc[d][k]||[]).includes(pid)){ const [id,sh]=k.split("|"), p=(st.posts||[]).find(x=>x.id===id); if(p) return {room:p.name,sh}; } return null; }
+/* sposta più persone (anche di anni diversi) nella bozza del loro anno: ops = [{y,pid,d,from:{room,sh},to:{room,sh}}], tutto o niente */
+function moveOps(mk,ops){ const byY={}; ops.forEach(o=>(byY[o.y]=byY[o.y]||[]).push(o)); const plan=[];
+  for(const y in byY){ const yy=+y, st=yy===CURY?S:yState(yy); if(!st) return "manca l'anno "+yLab(yy);
+    const fp=r=>(st.posts||[]).find(p=>normRoom(p.name)===normRoom(r));
+    for(const o of byY[y]){ if(!fp(o.from.room)||!fp(o.to.room)) return `il ${yLab(yy)}° anno non ha la sala ${o.to.room}`; } plan.push([yy,st,fp]); }
+  const who=whoAmI(), at=new Date().toISOString();
+  const apply=(m,W,fp,list)=>{ const fx=m.fixed=m.fixed||{};
+    const edit=(d,key,fn)=>{ W[d]=W[d]||{}; let arr=(W[d][key]||[]).filter(x=>x); const pre=d+"|"+key+"|", fset=new Set(Object.keys(fx).filter(z=>z.startsWith(pre)).map(z=>fx[z]));
+      arr=fn(arr,fset); Object.keys(fx).filter(z=>z.startsWith(pre)).forEach(z=>delete fx[z]); arr.forEach((x,i)=>{ if(fset.has(x)) fx[pre+i]=x; }); W[d][key]=arr.length?arr:[null]; m.draft.who={...(m.draft.who||{}),[d+"|"+key]:who}; };
+    list.forEach(o=>{ const kf=fp(o.from.room).id+"|"+o.from.sh, kt=fp(o.to.room).id+"|"+o.to.sh;
+      edit(o.d,kf,(a,f)=>{ f.delete(o.pid); return a.filter(x=>x!==o.pid); }); edit(o.d,kt,(a,f)=>{ f.add(o.pid); return a.includes(o.pid)?a:[...a,o.pid]; }); }); m.draft.at=at; };
+  for(const [y,st,fp] of plan){ const list=byY[y];
+    if(y===CURY){ const mo=M(mk); list.forEach(o=>ensureDraft(mo,o.d)); apply(mo,mo.draft.sched,fp,list); }
+    else { const months=JSON.parse(JSON.stringify(st.months||{})), m=months[mk]=months[mk]||{rot:{}}, W=draftOf(m); apply(m,W,fp,list);
+      list.forEach(o=>{ const w=Math.floor(period(mk).days.indexOf(o.d)/7); if(m.draft.acc) delete m.draft.acc[w]; });
+      saveYearMonths(y,months,[mk]).catch(()=>toast("Non riesco a salvare il "+yLab(y)+"° anno")); } }
+  if(byY[CURY]){ UI.draftView=true; persist(); } return ""; }
 function othEdit(mk,y,d,k,pid,addIt){ const st=yState(y); if(!st||!db) return; const [pid0,s]=k.split("|"), post=postOf(pid0), py=(st.posts||[]).find(p=>normRoom(p.name)===normRoom(post.name));
   if(!py){ toast("Il "+yLab(y)+"° anno non ha questa sala"); return; }
   const months=JSON.parse(JSON.stringify(st.months||{})), m=months[mk]=months[mk]||{rot:{}}, key=py.id+"|"+s, W=draftOf(m); W[d]=W[d]||{};
@@ -1640,7 +1660,11 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
       return `<details class="stack" style="gap:6px"><summary class="groupname" style="cursor:pointer">Specializzandi di altri anni${inC.length?` (${inC.length} qui)`:""}</summary>
         ${inC.length?`<div class="stack" style="gap:4px">${inC.map(x=>`<div class="row" style="justify-content:space-between"><span class="name-strong">${esc(x.name)}</span><button class="btn sm danger" data-act="othdel" data-y="${x.y}" data-id="${x.pid}">Togli</button></div>`).join("")}</div>`:""}
         <p class="muted" style="margin:0;font-size:.8rem">Va nella bozza del suo anno (turno fisso): la pubblicano i rappresentanti di quell'anno.</p>
-        ${groups.map(g=>`<span class="groupname">${ROMAN[yLab(g.y)]} anno</span>${g.res.map(r=>{ const b=othBusy(UI.mk,g.y,r.id,d); return `<button class="cand" data-act="othadd" data-y="${g.y}" data-id="${r.id}"><span><span class="name-strong">(${yLab(r.year||(yState(g.y)||{}).groupYear||g.y)}) ${esc(r.name)}</span>${b?`<br><span class="why">${b}</span>`:""}</span></button>`; }).join("")}`).join("")}</details>`; })():""}
+        ${groups.map(g=>`<span class="groupname">${ROMAN[yLab(g.y)]} anno</span>${g.res.map(r=>{ const b=othBusy(UI.mk,g.y,r.id,d), sl=b&&b.startsWith("già")?othSlot(UI.mk,g.y,r.id,d):null;
+          /* già in turno quel giorno: si può scambiare con chi è in questa casella (prende il suo posto e viceversa) */
+          const here=[...arr.filter(x=>x).map(x=>({cy:CURY,cid:x,nm:resName(x)})),...inC.map(x=>({cy:x.y,cid:x.pid,nm:x.name}))];
+          const sw=sl&&here.length?`<div class="row" style="gap:6px;flex-wrap:wrap;margin:-2px 0 4px 8px"><span class="muted" style="font-size:.8rem">È in ${esc(sl.room)} ${SHN[sl.sh].toLowerCase()}:</span>${here.map(h=>`<button class="btn sm" data-act="othswap" data-y="${g.y}" data-id="${r.id}" data-cy="${h.cy}" data-cid="${h.cid}">⇄ Scambia con ${esc(h.nm)}</button>`).join("")}</div>`:"";
+          return `<button class="cand" data-act="othadd" data-y="${g.y}" data-id="${r.id}"><span><span class="name-strong">(${yLab(r.year||(yState(g.y)||{}).groupYear||g.y)}) ${esc(r.name)}</span>${b?`<br><span class="why">${b}</span>`:""}</span></button>${sw}`; }).join("")}`).join("")}</details>`; })():""}
    <div class="row">${(mo.ext||{})[d+"|"+k]&&(mo.ext[d+"|"+k]||[]).includes(EXT_MAN)?`<button class="btn" data-act="extmark" data-v="0">Togli «coperto da altri anni»</button>`:`<button class="btn" data-act="extmark" data-v="1">Coperto da altri anni</button>`}
      ${isClosed(mo,d,k)?`<button class="btn" data-act="closeroom" data-v="0">Riapri la sala</button>`:`<button class="btn" data-act="closeroom" data-v="1">Sala chiusa (questo turno)</button><button class="btn" data-act="closeroom" data-v="2">Sala chiusa tutto il giorno</button>`}</div>`);
   layer.dataset.d=d; layer.dataset.k=k; }
@@ -1920,6 +1944,10 @@ document.addEventListener("click",e=>{
   if(a==="clapply"){ const n=applyClosed(UI.mk,[...UI.clsel],el.dataset.v==="1"); UI.clsel=null; persist(); render();
     toast(n?(el.dataset.v==="1"?`${n} turni chiusi (nella bozza, da accettare)`:`${n} turni riaperti (nella bozza)`):"Nessuna modifica"); return; }
   if(a==="cell"){ if(hasDraft(M(UI.mk))) UI.draftView=true;cellSheet(el.dataset.d,el.dataset.k);return;}
+  if(a==="othswap"){ const d=layer.dataset.d, k=layer.dataset.k, [pid0,sh]=k.split("|"), room=postOf(pid0).name, y=+el.dataset.y, sl=othSlot(UI.mk,y,el.dataset.id,d);
+    if(!sl){ toast("Non trovo il suo turno"); return; }
+    const err=moveOps(UI.mk,[{y,pid:el.dataset.id,d,from:sl,to:{room,sh}},{y:+el.dataset.cy,pid:el.dataset.cid,d,from:{room,sh},to:sl}]);
+    if(err){ toast("Scambio non possibile: "+err); return; } toast("Scambio fatto nelle bozze: va pubblicato"); closeSheet(); render(); return; }
   if(a==="othadd"||a==="othdel"){ othEdit(UI.mk,+el.dataset.y,layer.dataset.d,layer.dataset.k,el.dataset.id,a==="othadd"); closeSheet(); render(); return; }
   if(a==="restpub"){ if(UI.confirm!=="restpub"){UI.confirm="restpub";render();return;} UI.confirm=null; restorePublished(UI.mk,UI.rstWk===""||UI.rstWk===undefined||UI.rstWk===null?null:+UI.rstWk); return; }
   if(a==="assign"){ const mo=M(UI.mk), d=layer.dataset.d, k=layer.dataset.k, i=+el.dataset.i, id=el.dataset.id||null;
