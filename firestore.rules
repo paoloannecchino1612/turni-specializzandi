@@ -42,14 +42,15 @@ service cloud.firestore {
 
     // impostazioni del tool e turni dei mesi: tutti leggono, proprietario e gestori scrivono
     // ogni anno: config/main + planner/state (2° anno), config/yN + planner/yN (altri anni); scrive il proprietario o i gestori di quell'anno
-    match /config/{doc} { allow read: if allowed(); allow write: if isOwner() || (allowed() && cohortMgr(doc, "main")); }
+    // i rappresentanti (di qualsiasi anno) modificano impostazioni, turni e bozze di tutti gli anni
+    match /config/{doc} { allow read: if allowed(); allow write: if isOwner() || (allowed() && isManager()); }
     // anni che coprono ogni sala: elenco unico, lo modificano il proprietario e i gestori di qualsiasi anno
     match /config/years { allow read: if allowed(); allow write: if isOwner() || (allowed() && isManager()); }
     // storico delle bozze: hist/y<anno>_<mese>/v/<id>, solo proprietario e gestori di quell'anno
     function histMgr(key) { let yk = key.split('_')[0]; return yk.matches('^y-?[0-9]+$') && mgrFrom(int(yk.replace('y', ''))); }
-    match /hist/{key}/v/{id} { allow read, write: if isOwner() || (allowed() && histMgr(key)); }
+    match /hist/{key}/v/{id} { allow read, write: if isOwner() || (allowed() && isManager()); }
     // mesi: il vecchio documento (planner/state, planner/yN) e un documento per mese (planner/state_AAAA-MM, planner/yN_AAAA-MM)
-    match /planner/{doc} { allow read: if allowed(); allow write: if isOwner() || (allowed() && cohortMgr(doc.split('_')[0], "state")); }
+    match /planner/{doc} { allow read: if allowed(); allow write: if isOwner() || (allowed() && isManager()); }
 
     // indisponibilità: ognuno scrive solo le proprie; il proprietario anche quelle degli altri e lo spazio "staff"
     // si accettano modifiche fino a 2 giorni prima del primo lunedì del mese (doc = "AAAA-MM_pid"); dopo solo proprietario e gestori, che possono modificare anche quelle degli altri

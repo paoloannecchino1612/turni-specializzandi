@@ -21,14 +21,14 @@ const DEFAULT={
   months:{}
 };
 let S=null, db=null, docRef=null, downloads=null, OWNER=false;
-/* gestori: specializzandi scelti dal proprietario che possono usare tutte le funzioni di gestione */
-/* modalità specializzando: un gestore (o il proprietario) può vedere l'app come uno specializzando; resta solo Impostazioni per tornare */
+/* rappresentanti: specializzandi scelti dal proprietario che possono usare tutte le funzioni di gestione */
+/* modalità specializzando: un rappresentante (o il proprietario) può vedere l'app come uno specializzando; resta solo Impostazioni per tornare */
 let REALOWNER=false;
-/* i gestori di un anno gestiscono anche gli anni sotto: 4° → tutti, 3° → 1°–3°, … (coorte con numero ≥ di quella che si guarda) */
+/* ogni anno ha i suoi rappresentanti; ogni rappresentante può modificare turni e bozze di tutti gli anni */
 function mgrCohort(){ const pid=myAnyPid(); if(!pid) return null; const y=MULTI?yearOfPid(pid):CURY; const st=y===CURY?S:yState(y); return st&&(st.managers||[]).includes(pid)?y:null; }
-function canMgr(y){ if(OWNER) return true; const A=mgrCohort(); return A!==null&&(A===y||(MULTI&&A>y)); }
-function realAdmin(){ return REALOWNER||(!!S&&(S.managers||[]).includes(myPid()))||(!!S&&MULTI&&(()=>{ const A=mgrCohort(); return A!==null&&A>CURY; })()); }
-function ADMIN(){ if(UI.userMode) return false; return OWNER||(!!S&&(S.managers||[]).includes(myPid()))||(!!S&&MULTI&&(()=>{ const A=mgrCohort(); return A!==null&&A>CURY; })()); }
+function canMgr(y){ if(OWNER) return true; return mgrCohort()!==null; }
+function realAdmin(){ return REALOWNER||(!!S&&(S.managers||[]).includes(myPid()))||(!!S&&MULTI&&mgrCohort()!==null); }
+function ADMIN(){ if(UI.userMode) return false; return OWNER||(!!S&&(S.managers||[]).includes(myPid()))||(!!S&&MULTI&&mgrCohort()!==null); }
 function setUserMode(on){ UI.userMode=!!on; OWNER=on?false:REALOWNER; try{ localStorage.setItem("turni.usermode",on?"1":""); }catch(e){} recomputeUnav(); }
 const SW={}, SWALL={}, CLAIMS={}; let CLAIMDOCS=[]; let ALLOW=[], lastRoles="", REQS=[];
 /* ---------- più anni (opzionale e reversibile) ----------
@@ -41,7 +41,7 @@ function YRS(mk){ const sh=yShift(mk||UI.mk); return LEVELS.map(l=>l-sh); }
 function ALLY(){ const set=new Set(); try{ const [y,m]=todayMk().split("-").map(Number); for(let k=-KEEP_MONTHS;k<=KEEP_MONTHS;k++) YRS(mkOf(y,m+k)).forEach(c=>set.add(c)); }catch(e){ LEVELS.forEach(c=>set.add(c)); } return [...set].sort((a,b)=>a-b); } let CURY=2, MULTI=false, RAWV=0, REBUILD=null, YAUTO=false;
 function yDocs(y){ return y===2?{cfg:"config/main",mon:"planner/state"}:{cfg:"config/y"+y,mon:"planner/y"+y}; }
 /* ---------- mesi salvati uno per documento: planner/<anno>_<mese> (es. planner/state_2026-11, planner/y3_2026-11) ----------
-   Il vecchio documento (planner/state, planner/yN) resta come copia; quando un gestore apre l'app i mesi vengono copiati
+   Il vecchio documento (planner/state, planner/yN) resta come copia; quando un rappresentante apre l'app i mesi vengono copiati
    nei documenti per mese e il vecchio documento viene segnato con split:true. Da lì si leggono e si scrivono solo i mesi.
    Se le regole del database non lo permettono ancora, si continua con il vecchio documento (niente si perde). */
 function monPath(y,mk){ return "planner/"+(y===2?"state":"y"+y)+"_"+mk; }
@@ -63,7 +63,7 @@ function assembleMon(y){ const st=MS[y]; if(!st||st.legacy===undefined) return u
 function saveYearMonths(y,months,mks){ if(!db) return Promise.resolve(); const at=new Date().toISOString();
   if(MSPLIT[y]) return Promise.all((mks||Object.keys(months)).filter(mk=>months[mk]).map(mk=>db.doc(monPath(y,mk)).set({state:JSON.stringify(months[mk]),updated:at})));
   return db.doc(yDocs(y).mon).set({state:JSON.stringify({months}),updated:at}); }
-/* copia dei mesi dal vecchio documento ai documenti per mese (una volta, da un gestore di quell'anno) */
+/* copia dei mesi dal vecchio documento ai documenti per mese (una volta, da un rappresentante di quell'anno) */
 /* attivo per tutti (le regole del database sono aggiornate) */
 function splitEnabled(){ return true; }
 async function splitMonths(y){ const st=MS[y]; if(MIGR[y]||!db||!st||!st.legacy||st.legacy.split||!canMgr(y)||!splitEnabled()) return; MIGR[y]=true;
@@ -72,7 +72,7 @@ async function splitMonths(y){ const st=MS[y]; if(MIGR[y]||!db||!st||!st.legacy|
     const now=MS[y].legacy; await db.doc(yDocs(y).mon).set({state:(now&&now.raw)||st.legacy.raw,updated:at,split:true}); }
   catch(e){ MIGR[y]="ko"; if(y===CURY&&OWNER) toast("Per salvare i mesi separatamente (più veloce) aggiorna le regole del database: per ora si continua come prima"); } }
 const PARSED={};
-/* anni che coprono ogni sala: elenco unico per tutti (config/years), lo modificano proprietario e gestori di qualsiasi anno.
+/* anni che coprono ogni sala: elenco unico per tutti (config/years), lo modificano proprietario e rappresentanti di qualsiasi anno.
    chiave = nome sala normalizzato; senza indicazione la sala è di tutti gli anni */
 let COVY={}, CLOSEDG={}, YCOL={}, HOLEY={}; /* colori degli anni (livello 1–4 → colore) e turni scoperti assegnati a un anno: mk → {giorno|sala|turno: livello} (config/years) */
 const YCOL_DEF={1:"#0d9488",2:"#db2777",3:"#b45309",4:"#4f46e5"}, ROMAN={1:"I",2:"II",3:"III",4:"IV"};
@@ -116,7 +116,7 @@ function filterSW(){ for(const k in SW) delete SW[k]; const ids=new Set(S?S.resi
   for(const k in SWALL){ const x=SWALL[k]; if(!MULTI||ids.has(x.from)||ids.has(x.to)) SW[k]=x; } }
 /* cascata: i turni degli anni superiori (4 → 3 → 2 → 1) contano come "coperti da altri anni" per l'anno che si guarda */
 const EXTC={key:null,map:{}};
-/* bozza condivisa: i gestori (di qualsiasi anno) vedono e usano le bozze degli altri anni al posto del loro pubblicato */
+/* bozza condivisa: i rappresentanti (di qualsiasi anno) vedono e usano le bozze degli altri anni al posto del loro pubblicato */
 function anyMgr(){ return !UI.userMode&&(OWNER||(typeof mgrCohort==="function"&&mgrCohort()!==null)); }
 function autoExt(mk,lower){ const out={}, am=anyMgr();
   for(const y of YRS(mk)){ if(lower?y>=CURY:y<=CURY) continue; const st=yState(y); const m0=st&&st.months&&st.months[mk]; if(!m0) continue;
@@ -223,9 +223,9 @@ function yLab(n){ return (+n)+yShift(); }
 function rName(r){ const y=yLab(r.year||S.groupYear||2); return `(${y}) ${r.name}`; }
 function postOf(id){return S.posts.find(p=>p.id===id);}
 function isExt(rot){return !rot||S.externals.some(x=>x.id===rot);}
-/* chi è fuori sede (es. Bambin Gesù) può essere inserito nei turni dal gestore: conta come jolly */
+/* chi è fuori sede (es. Bambin Gesù) può essere inserito nei turni dal rappresentante: conta come jolly */
 function incl(mo,pid){ return false; }
-/* chi è al Bambin Gesù non entra mai nei turni generati, ma un gestore può assegnarlo a mano */
+/* chi è al Bambin Gesù non entra mai nei turni generati, ma un rappresentante può assegnarlo a mano */
 function isBG(rot){ return rot==="BG"; }
 function inGem(mo,pid){ return !isExt(mo.rot[pid])||incl(mo,pid); }
 function roomRot(name){ const k=normRoom(name); if(/^tc/.test(k)) return "TC"; if(/^rm/.test(k)) return "RM"; if(/^(diagsen|radsen)/.test(k)) return "SENO";
@@ -264,7 +264,7 @@ function pools(mo,post,s){ const inG=S.residents.filter(r=>inGem(mo,r.id)), cov=
 let saveT=null, saving=false, pending=false, lastJSON="";
 function setSync(t){document.getElementById("sync").textContent=t;}
 const uT={}, uBusy={};
-/* ognuno scrive solo nel proprio spazio unav/<suo account>; il gestore scrive anche in unav/staff per chi non ha ancora collegato il nome */
+/* ognuno scrive solo nel proprio spazio unav/<suo account>; il rappresentante scrive anche in unav/staff per chi non ha ancora collegato il nome */
 function unavRef(mk,pid){ const u=CLAIMS[pid]; return db.collection(u?`unav/${u}/m`:"unav/staff/m").doc(mk+"_"+pid); }
 /* scadenza: indisponibilità, ferie e congressi di un mese si modificano fino a 2 giorni prima del suo primo lunedì; dopo solo il proprietario */
 function unavDeadline(mk){ return add(period(mk).first,-2); }
@@ -309,7 +309,7 @@ function saveUnav(mk,pid){ const k=mk+"_"+pid; if(db&&!canEditUnav(pid,mk)){ toa
     catch(e){ setSync(e&&e.code==="invalid_argument"?"Non hai i permessi per salvare: chiedi a chi gestisce i turni di invitarti":"Salvataggio non riuscito, riprova"); }
     uBusy[k]=false; },400); }
 function persist(){ TICK++; if(!ADMIN()) return; clearTimeout(saveT); setSync("Modifiche in corso…"); saveT=setTimeout(()=>{saveT=null;flush();},500); }
-/* impostazioni del tool (config/main: solo il proprietario) separate dai mesi (planner/state: proprietario e gestori) */
+/* impostazioni del tool (config/main: solo il proprietario) separate dai mesi (planner/state: proprietario e rappresentanti) */
 let cfgRef=null, lastCfg="", lastMon="";
 function splitS(){ const {months,...cfg}=S; return {cfg:JSON.stringify(cfg), mon:JSON.stringify({months})}; }
 async function flush(){
@@ -422,9 +422,9 @@ function applyNights(mk,list){ const mo=M(mk); mo.fixed=mo.fixed||{}; mo.ext=mo.
     else { const k=x.d+"|"+x.key; mo.ext[k]=mo.ext[k]||[]; if(!mo.ext[k].includes(x.name)){ mo.ext[k].push(x.name); cov++; } } }
   syncExt(mo); UI.draftView=true; return {pins,cov}; }
 /* ---------- bozza e pubblicazione ----------
-   "Genera" e "Aggiorna" scrivono una bozza (mo.draft) che vedono solo i gestori dell'anno; con "Accetta" (tutta o settimana
+   "Genera" e "Aggiorna" scrivono una bozza (mo.draft) che vedono solo i rappresentanti dell'anno; con "Accetta" (tutta o settimana
    per settimana) passa nell'orario pubblicato (mo.sched), che vedono tutti e che passa agli altri anni. Ogni bozza e ogni
-   accettazione si salvano nello storico (hist/y<anno>_<mese>/v), leggibile solo dai gestori di quell'anno. */
+   accettazione si salvano nello storico (hist/y<anno>_<mese>/v), leggibile solo dai rappresentanti di quell'anno. */
 function hasDraft(mo){ return !!(mo.draft&&mo.draft.sched); }
 function draftView(mo){ return (ADMIN()||anyMgr())&&hasDraft(mo)&&UI.draftView!==false; }
 function workSched(mo){ return draftView(mo)?mo.draft.sched:mo.sched; }
@@ -435,13 +435,16 @@ function editSched(mo){ return hasDraft(mo)?mo.draft.sched:mo.sched; }
 function viewSched(mk){ const mo=M(mk); return draftView(mo)?clone(mo.draft.sched):effSched(mk); }
 function histAdd(mk,kind,sched){ if(!db||!sched) return; const by=myPid()?resName(myPid()):(OWNER?"proprietario":"");
   db.collection(`hist/y${CURY}_${mk}/v`).doc().set({mk,kind,by,at:new Date().toISOString(),state:JSON.stringify(sched)}).catch(()=>{}); }
+/* chi sta modificando: nome del rappresentante (o "proprietario") */
+function whoAmI(){ const pid=myAnyPid(); if(pid){ const y=MULTI?yearOfPid(pid):CURY, st=y===CURY?S:yState(y), r=st&&(st.residents||[]).find(x=>x.id===pid); if(r) return `(${yLab(r.year||st.groupYear||y)}) ${r.name}`; } return OWNER?"proprietario":"rappresentante"; }
 function acceptDraft(mk,weeks){ const mo=M(mk); if(!hasDraft(mo)) return 0; const p=period(mk), n=p.days.length/7; mo.sched=mo.sched||{};
   const at0=new Date().toISOString(), chg=[];
   for(const w of weeks) p.days.slice(w*7,w*7+7).forEach(d=>{ if(!mo.draft.sched[d]) return;
     /* modifiche all'orario già pubblicato: si segnalano alle persone coinvolte (Cambi → "Modifiche al tuo orario") */
     if(mo.generated&&mo.sched[d]){ const keysOf=(sc,pid)=>Object.keys(sc||{}).filter(k=>(sc[k]||[]).includes(pid)).sort(), ids=new Set();
       [mo.sched[d],mo.draft.sched[d]].forEach(sc=>{ for(const k in sc) (sc[k]||[]).forEach(x=>x&&ids.add(x)); });
-      ids.forEach(pid=>{ const a=keysOf(mo.sched[d],pid), b=keysOf(mo.draft.sched[d],pid); if(a.join()!==b.join()) chg.push({at:at0,pid,d,from:a,to:b}); }); }
+      const W=(mo.draft.who||{}), me=whoAmI();
+      ids.forEach(pid=>{ const a=keysOf(mo.sched[d],pid), b=keysOf(mo.draft.sched[d],pid); if(a.join()!==b.join()){ const by=[...b,...a].map(k=>W[d+"|"+k]).find(x=>x)||me; chg.push({at:at0,pid,d,from:a,to:b,by}); } }); }
     mo.sched[d]=clone(mo.draft.sched[d]); });
   if(chg.length) mo.changes=[...(mo.changes||[]),...chg].slice(-300);
   mo.draft.acc={...(mo.draft.acc||{})}; weeks.forEach(w=>mo.draft.acc[w]=true); mo.generated=new Date().toISOString();
@@ -597,7 +600,7 @@ function rebalanceRooms(mk,onlyPids,onlyCover,from){ const days=period(mk).days,
           moved++; changed.add(o.y); done=true; break; }
         if(!done) break; } } }
   /* altri anni (solo proprietario): si salva il loro orario */
-  /* per gli altri anni le modifiche diventano una loro bozza: le accettano i loro gestori */
+  /* per gli altri anni le modifiche diventano una loro bozza: le accettano i loro rappresentanti */
   for(const y of changed){ if(y===CURY||!db) continue; const st=mon[y], months={...(st.months||{})}; months[mk]={...months[mk],draft:{...((months[mk]||{}).draft||{}),sched:sch[y],at:new Date().toISOString(),acc:{}}};
     saveYearMonths(y,months,[mk]).catch(()=>toast("Non riesco a salvare l'orario del "+y+"° anno")); }
   return moved; }
@@ -660,7 +663,7 @@ function columns(SC,p){ const cols=[]; S.posts.forEach(post=>SH.forEach(s=>{ con
   if(p.days.some(d=>(SC[d]||{})[k])||(postActive(post)&&p.days.some(d=>((post.on||{})[dayType(d)]||[]).includes(s)))||p.days.some(d=>ex[d+"|"+k])) cols.push({post,s,k}); })); return cols; }
 
 /* ---------- cambi turno ---------- */
-/* orario effettivo = turni generati + cambi accettati non ancora consolidati dal gestore */
+/* orario effettivo = turni generati + cambi accettati non ancora consolidati dal rappresentante */
 const SWMARK={};
 function swapsOf(mk){ return Object.values(SW).filter(x=>x.mk===mk).sort((a,b)=>(a.decided||a.created||"").localeCompare(b.decided||b.created||"")); }
 function applySwap(sc,x){ const A=(sc[x.a.d]||{})[x.a.k]; if(!A) return false; const ia=A.indexOf(x.from); if(ia<0) return false;
@@ -751,7 +754,7 @@ async function createCohort(y,base){ const snap=await db.doc(yDocs(y).cfg).get()
 async function enableYears(){ if(!OWNER||!db||CURY!==2) return; const base=JSON.parse(splitS().cfg);
   for(const y of ALLY()){ if(y===2) continue; await createCohort(y,base); }
   S.multiYear=true; persist(); }
-/* "Turni" è uguale per tutti (come lo vede uno specializzando: orario pubblicato, sola lettura); i gestori modificano in "Modifica turni" */
+/* "Turni" è uguale per tutti (come lo vede uno specializzando: orario pubblicato, sola lettura); i rappresentanti modificano in "Modifica turni" */
 function asResident(fn){ const u=UI.userMode, sel=UI.clsel; UI.userMode=true; UI.clsel=null; try{ return fn(); } finally{ UI.userMode=u; UI.clsel=sel; } }
 /* aggiornamento della pagina "a pezzi": si cambia solo ciò che è diverso dal disegno precedente (più veloce, niente salti) */
 function morph(target,html){ const tpl=document.createElement("template"); tpl.innerHTML=html; morphKids(target,tpl.content); }
@@ -853,7 +856,7 @@ function vIndisp(){ if(!S.residents.length) return monthBar()+noRes();
   const cnt=id=>mode==="R"?Object.entries(PR(UI.mk)[id]||{}).filter(([d,v])=>v&&d>=p.first&&d<=p.last).length:Object.entries(mo.unav[id]||{}).filter(([d,u])=>d>=p.first&&d<=p.last&&(mode==="T"?!(u==="F"||u==="C"):u===mode)).length;
   const MODES=[["T","Indisponibilità turni"],["F","Ferie"],["C","Ferie congresso"],...(S.residents.some(r=>canPref(r.id))?[["R","Preferenze di turno"]]:[])];
   if(mode==="R"&&!canPref(UI.sel)){ const f=S.residents.find(r=>canPref(r.id)&&(r.id===me||ADMIN())); if(f&&!UI.selTouched) UI.sel=f.id; }
-  const hint={T:"Tocca un giorno: compaiono i turni previsti quel giorno da segnare come non disponibili.",F:"Tocca i giorni di ferie: si segna l'intera giornata. Tocca di nuovo per togliere.",C:"Tocca i giorni di congresso: si segna l'intera giornata. Tocca di nuovo per togliere.",R:canPref(UI.sel)?"Tocca un giorno e scegli il turno che preferisci (e se vuoi la sala). Il 4° anno viene sistemato per primo, poi il 3°: le preferenze si rispettano se le regole lo permettono; quelle non rispettate vengono segnalate ai gestori.":"Le preferenze di turno sono solo per 3° e 4° anno."}[mode];
+  const hint={T:"Tocca un giorno: compaiono i turni previsti quel giorno da segnare come non disponibili.",F:"Tocca i giorni di ferie: si segna l'intera giornata. Tocca di nuovo per togliere.",C:"Tocca i giorni di congresso: si segna l'intera giornata. Tocca di nuovo per togliere.",R:canPref(UI.sel)?"Tocca un giorno e scegli il turno che preferisci (e se vuoi la sala). Il 4° anno viene sistemato per primo, poi il 3°: le preferenze si rispettano se le regole lo permettono; quelle non rispettate vengono segnalate ai rappresentanti.":"Le preferenze di turno sono solo per 3° e 4° anno."}[mode];
   const pr=presence(UI.mk), myRot=mo.rot[UI.sel], lowDays=new Set(pr.filter(x=>x.rot.id===myRot).map(x=>x.d));
   const tot=(id,v)=>Object.entries(mo.unav[id]||{}).filter(([d,u])=>d>=p.first&&d<=p.last&&u===v).length;
   return monthBar()+(otherYear?claimPanel(""):"")+(OWNER||otherYear?"":`<div class="panel" style="gap:4px"><h2>Compila le tue indisponibilità</h2><p class="muted" style="margin:0;font-size:.88rem">Scegli il tuo nome, poi segna i turni in cui non ci sei, le ferie e i congressi. Si salva da solo e tutti vedono le stesse informazioni.</p></div>`)+`
@@ -890,7 +893,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   const head=monthBar()+`<div class="panel"><div class="row" style="justify-content:space-between">
     <div class="stack" style="gap:2px"><h2>Turni del mese</h2><span class="muted" style="font-size:.82rem">${mo.generated?`Pubblicati il ${new Date(mo.generated).toLocaleString("it-IT",{dateStyle:"short",timeStyle:"short"})}`:"Non ancora pubblicati"}${ADMIN()&&hasDraft(mo)?" · bozza in corso":""}</span></div>
     </div>
-    ${!ADMIN()&&anyMgr()?`<p class="muted" style="margin:0;font-size:.84rem">Sola lettura: ${hasDraft(mo)?"vedi la bozza di quest'anno":"quest'anno non ha una bozza in corso"}; la modificano i suoi gestori${hasDraft(mo)&&mo.sched?` · <button class="btn" data-act="dview" data-v="${draftView(mo)?"0":"1"}" style="border:0;text-decoration:underline;background:none;padding:0">${draftView(mo)?"vedi l'orario pubblicato":"torna alla bozza"}</button>`:""}.</p>`:""}
+    ${!ADMIN()&&anyMgr()?`<p class="muted" style="margin:0;font-size:.84rem">Sola lettura: ${hasDraft(mo)?"vedi la bozza di quest'anno":"quest'anno non ha una bozza in corso"}; la modificano i suoi rappresentanti${hasDraft(mo)&&mo.sched?` · <button class="btn" data-act="dview" data-v="${draftView(mo)?"0":"1"}" style="border:0;text-decoration:underline;background:none;padding:0">${draftView(mo)?"vedi l'orario pubblicato":"torna alla bozza"}</button>`:""}.</p>`:""}
     ${ADMIN()?(()=>{ const nw=p.days.length/7, cur=UI.genWk??"", fresh=!mo.sched&&!hasDraft(mo);
       const filled=w=>p.days.slice(w*7,w*7+7).some(d=>Object.values((workSched(mo)||{})[d]||{}).some(a=>a.some(x=>x)));
       return `<div class="row" style="gap:8px;align-items:center"><button class="btn primary" data-act="prep">${fresh?"Prepara la bozza del mese":"Prepara la bozza"}</button>
@@ -938,7 +941,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
   const pr=presence(UI.mk); alerts+=presenceBox(pr);
   if(ADMIN()&&(mo.generated||draftView(mo))&&!holes.length&&!issues.length&&!pr.length) alerts=`<div class="okline">Tutte le postazioni coperte, nessun conflitto.</div>`;
   const vb=(v,l)=>`<button data-act="view" data-v="${v}" aria-pressed="${UI.view===v}">${l}</button>`;
-  /* in Modifica turni (gestori) prima "Per giorno", poi "Per nome" */
+  /* in Modifica turni (rappresentanti) prima "Per giorno", poi "Per nome" */
   const tabs=`<div class="pickers">${ADMIN()?vb("giorni","Per giorno")+vb("nome","Per nome"):vb("nome","Per nome")+vb("giorni","Per giorno")}<button data-act="view" data-v="persone" aria-pressed="${UI.view==="persone"}">Per specializzando</button><button data-act="view" data-v="conti" aria-pressed="${UI.view==="conti"}">Conteggi</button></div>`;
   let body="";
   const people=S.residents.filter(r=>inGem(mo,r.id)||(SC&&shiftsOf(SC,r.id).length));
@@ -1003,15 +1006,15 @@ function code(mo,per,pid,d){ const p=per[pid]; if(p&&p.on[d]) return p.on[d]; if
 function label(c,postName){ if(c==="S")return "smonto"; if(c==="X")return "✕"; if(c==="F")return "ferie"; if(c==="C")return "congr."; if(c==="D")return "G"; if(c==="N")return "monto"; if(c)return esc(postName||"")+" "+c; return ""; }
 
 function vImp(){
-  if(UI.userMode) return `<div class="panel" style="border:2px solid var(--accent)"><h2>Modalità specializzando</h2><p class="muted" style="margin:0;font-size:.88rem">Stai vedendo l'app come uno specializzando: niente funzioni di gestione, solo i turni, le tue indisponibilità e i tuoi cambi.</p><div class="row"><button class="btn primary" data-act="umodeoff">Torna in modalità gestore</button></div></div>`;
+  if(UI.userMode) return `<div class="panel" style="border:2px solid var(--accent)"><h2>Modalità specializzando</h2><p class="muted" style="margin:0;font-size:.88rem">Stai vedendo l'app come uno specializzando: niente funzioni di gestione, solo i turni, le tue indisponibilità e i tuoi cambi.</p><div class="row"><button class="btn primary" data-act="umodeoff">Torna in modalità rappresentante</button></div></div>`;
   return modePanel()+vImp2(); }
-function modePanel(){ return `<div class="panel"><div class="row" style="justify-content:space-between"><h2>Modalità gestore</h2><button class="btn" data-act="umodeon">Passa a modalità specializzando</button></div><p class="muted" style="margin:0;font-size:.85rem">Per vedere l'app in modo essenziale, come la vedono gli specializzandi. Puoi tornare indietro da qui.</p></div>`; }
+function modePanel(){ return `<div class="panel"><div class="row" style="justify-content:space-between"><h2>Modalità rappresentante</h2><button class="btn" data-act="umodeon">Passa a modalità specializzando</button></div><p class="muted" style="margin:0;font-size:.85rem">Per vedere l'app in modo essenziale, come la vedono gli specializzandi. Puoi tornare indietro da qui.</p></div>`; }
 function vImp2(){
   const covOpts=[...S.rotations.map(r=>[r.id,r.name]),["ALL","Tutti"]];
   const groups=[]; S.posts.forEach(p=>{ const g=p.cover; if(!groups.includes(g)) groups.push(g); });
   const mg=S.managers||[];
-  const mgPanel=`<div class="panel"><h2>Gestori</h2>
-   <p class="muted" style="margin:0;font-size:.85rem">${OWNER?"I gestori possono usare tutte le funzioni come te: rotazioni, impostazioni, generazione e modifica dei turni, cambi manuali e cambi da inserire. Non possono modificare le indisponibilità degli altri, scegliere i gestori o scollegare gli account. Si possono scegliere solo specializzandi che hanno già collegato il nome.":"Questo elenco lo modifica solo il proprietario del tool."}</p>
+  const mgPanel=`<div class="panel"><h2>Rappresentanti</h2>
+   <p class="muted" style="margin:0;font-size:.85rem">${OWNER?"I rappresentanti possono usare tutte le funzioni come te: rotazioni, impostazioni, generazione e modifica dei turni, cambi manuali e cambi da inserire. Non possono modificare le indisponibilità degli altri, scegliere i rappresentanti o scollegare gli account. Si possono scegliere solo specializzandi che hanno già collegato il nome.":"Questo elenco lo modifica solo il proprietario del tool."}</p>
    <div class="pickers">${S.residents.filter(r=>CLAIMS[r.id]||mg.includes(r.id)).map(r=>`<button ${OWNER?`data-act="mgr" data-id="${r.id}"`:"disabled"} aria-pressed="${mg.includes(r.id)}">${esc(rName(r))}</button>`).join("")||`<span class="muted">Nessuno ha ancora collegato il nome.</span>`}</div></div>`;
   const reqPanel=OWNER&&REQS.length?`<div class="panel" style="border:2px solid var(--accent)"><h2>Richieste di accesso <span class="chip">${REQS.length}</span></h2>
    <div class="list">${REQS.map(r=>`<div class="item"><span class="stack" style="gap:2px"><span class="name-strong">${esc(r.email)}</span><span class="muted" style="font-size:.78rem">${new Date(r.at).toLocaleString("it-IT",{dateStyle:"short",timeStyle:"short"})}</span></span><span class="row" style="gap:6px"><button class="btn primary" data-act="reqok" data-id="${esc(r.id)}">Approva</button><button class="btn danger" data-act="reqno" data-id="${esc(r.id)}">Rifiuta</button></span></div>`).join("")}</div></div>`:"";
@@ -1020,26 +1023,26 @@ function vImp2(){
    <div class="row"><button class="btn primary" data-act="allowsave">Salva elenco</button><span class="muted" style="font-size:.85rem">${ALLOW.length} email autorizzate</span></div></div>`:"";
   const importPanel=OWNER?`<div class="panel"><h2>Importa dati</h2><p class="muted" style="margin:0;font-size:.85rem">Carica una copia di sicurezza (.json) per ripristinare tutto, oppure il file di esportazione del vecchio tool (sostituisce impostazioni e turni e aggiunge indisponibilità e cambi).</p>
    <input type="file" id="impfile" accept=".json,application/json"></div>
-   <div class="panel"><h2>Copia di sicurezza</h2><p class="muted" style="margin:0;font-size:.85rem">Scarica in un file tutti i dati: impostazioni e turni di tutti gli anni, indisponibilità, ferie, congressi e preferenze, cambi, associazioni nome-account, email autorizzate e gestori. Per ripristinarli carica il file qui sopra in «Importa dati» (sovrascrive i dati attuali con quelli della copia). Lo storico delle bozze non è incluso.</p>
+   <div class="panel"><h2>Copia di sicurezza</h2><p class="muted" style="margin:0;font-size:.85rem">Scarica in un file tutti i dati: impostazioni e turni di tutti gli anni, indisponibilità, ferie, congressi e preferenze, cambi, associazioni nome-account, email autorizzate e rappresentanti. Per ripristinarli carica il file qui sopra in «Importa dati» (sovrascrive i dati attuali con quelli della copia). Lo storico delle bozze non è incluso.</p>
    <div class="row"><button class="btn primary" data-act="backup">Scarica copia di sicurezza</button></div></div>`:"";
-  const yearsPanel=OWNER&&db&&CURY===2?`<div class="panel"><h2>Più anni</h2><p class="muted" style="margin:0;font-size:.85rem">${S.multiYear?"Attivo: in alto scegli l'anno. Ogni anno ha nomi, sale, rotazioni e gestori propri (si impostano qui, scegliendo l'anno). Si genera a cascata: prima il 4°, poi il 3° vede i turni del 4° come già coperti, e così via. Disattivando, l'app torna com'era: i dati degli altri anni restano salvati e ricompaiono se lo riattivi.":"Aggiunge 1°, 3° e 4° anno, ognuno con i propri dati. I vostri dati (2° anno) non vengono toccati e disattivando si torna esattamente a come è ora. Nomi presi da «Elenco Spec»: (2)→3° anno, (3)→4° anno; il 1° anno è vuoto."}</p>
+  const yearsPanel=OWNER&&db&&CURY===2?`<div class="panel"><h2>Più anni</h2><p class="muted" style="margin:0;font-size:.85rem">${S.multiYear?"Attivo: in alto scegli l'anno. Ogni anno ha nomi, sale, rotazioni e rappresentanti propri (si impostano qui, scegliendo l'anno). Si genera a cascata: prima il 4°, poi il 3° vede i turni del 4° come già coperti, e così via. Disattivando, l'app torna com'era: i dati degli altri anni restano salvati e ricompaiono se lo riattivi.":"Aggiunge 1°, 3° e 4° anno, ognuno con i propri dati. I vostri dati (2° anno) non vengono toccati e disattivando si torna esattamente a come è ora. Nomi presi da «Elenco Spec»: (2)→3° anno, (3)→4° anno; il 1° anno è vuoto."}</p>
    <div class="row"><button class="btn ${UI.confirm==="years"?"confirm":S.multiYear?"danger":"primary"}" data-act="years">${UI.confirm==="years"?"Tocca di nuovo per confermare":S.multiYear?"Disattiva più anni":"Attiva più anni"}</button></div></div>`:"";
   const covPanel=ADMIN()&&db?(()=>{ const rows=[], seen=new Set();
     (MULTI?YRS(UI.mk):[CURY]).forEach(y=>((y===CURY?S:yState(y)||{}).posts||[]).forEach(p=>{ const k=normRoom(p.name); if(!k||seen.has(k)) return; seen.add(k); rows.push({k,name:p.name,p}); }));
-    return `<div class="panel"><h2>Anni che coprono ogni sala</h2><p class="muted" style="margin:0;font-size:.85rem">Elenco unico per tutti gli anni: lo modificate tu e i gestori di qualsiasi anno. Un anno genera turni solo nelle sale dove è segnato (anche con «Più anni» spento). Gli specializzandi vedono nella tabella dei turni solo le sale del proprio anno. Gli anni sono quelli di corso del mese (l'anno cambia a novembre).</p>
+    return `<div class="panel"><h2>Anni che coprono ogni sala</h2><p class="muted" style="margin:0;font-size:.85rem">Elenco unico per tutti gli anni: lo modificate tu e i rappresentanti di qualsiasi anno. Un anno genera turni solo nelle sale dove è segnato (anche con «Più anni» spento). Gli specializzandi vedono nella tabella dei turni solo le sale del proprio anno. Gli anni sono quelli di corso del mese (l'anno cambia a novembre).</p>
      <div class="list">${rows.map(r=>{ const ys=yearsFor(r.p); return `<div class="item"><span class="name-strong">${esc(r.name)}</span><span class="pickers sm">${LEVELS.map(y=>`<button data-act="covy" data-k="${esc(r.k)}" data-y="${y}" aria-pressed="${ys.includes(y)}">${y}°</button>`).join("")}</span></div>`; }).join("")}</div></div>`; })():"";
   const privPanel=ADMIN()&&db?`<div class="panel"><div class="row" style="justify-content:space-between"><h2>Privacy indisponibilità</h2><button class="btn ${HIDEUNAV?"primary":""}" data-act="privtog" role="switch" aria-checked="${HIDEUNAV}">${HIDEUNAV?"Attivo":"Spento"}</button></div>
-   <p class="muted" style="margin:0;font-size:.85rem">${HIDEUNAV?"Gli specializzandi vedono solo le proprie indisponibilità, ferie, congressi e preferenze. Tu e i gestori vedete tutto.":"Tutti vedono le indisponibilità, ferie e congressi di tutti. Attivandolo ognuno vede solo le proprie (tu e i gestori vedete sempre tutto)."}</p>
+   <p class="muted" style="margin:0;font-size:.85rem">${HIDEUNAV?"Gli specializzandi vedono solo le proprie indisponibilità, ferie, congressi e preferenze. Tu e i rappresentanti vedete tutto.":"Tutti vedono le indisponibilità, ferie e congressi di tutti. Attivandolo ognuno vede solo le proprie (tu e i rappresentanti vedete sempre tutto)."}</p>
    <div class="row" style="justify-content:space-between"><h2>Privacy cambi</h2><button class="btn ${HIDESWAPS?"primary":""}" data-act="privsw" role="switch" aria-checked="${HIDESWAPS}">${HIDESWAPS?"Attivo":"Spento"}</button></div>
-   <p class="muted" style="margin:0;font-size:.85rem">${HIDESWAPS?"Gli specializzandi vedono solo i cambi in cui sono coinvolti. Tu e i gestori vedete tutto.":"Tutti vedono lo storico dei cambi di tutti (con il filtro «Solo i miei»). Attivandolo ognuno vede solo i cambi in cui è coinvolto."}</p></div>`:"";
-  const colPanel=ADMIN()&&db?`<div class="panel"><h2>Colori degli anni</h2><p class="muted" style="margin:0;font-size:.85rem">Usati per i turni scoperti assegnati a un anno ("scoperto · II anno"). Li modificate tu e i gestori di qualsiasi anno.</p>
+   <p class="muted" style="margin:0;font-size:.85rem">${HIDESWAPS?"Gli specializzandi vedono solo i cambi in cui sono coinvolti. Tu e i rappresentanti vedete tutto.":"Tutti vedono lo storico dei cambi di tutti (con il filtro «Solo i miei»). Attivandolo ognuno vede solo i cambi in cui è coinvolto."}</p></div>`:"";
+  const colPanel=ADMIN()&&db?`<div class="panel"><h2>Colori degli anni</h2><p class="muted" style="margin:0;font-size:.85rem">Usati per i turni scoperti assegnati a un anno ("scoperto · II anno"). Li modificate tu e i rappresentanti di qualsiasi anno.</p>
    <div class="row" style="gap:16px;flex-wrap:wrap">${LEVELS.map(l=>`<label style="display:flex;gap:8px;align-items:center"><input type="color" data-ycol="${l}" value="${ycol(l)}" style="width:42px;height:32px;border:0;background:none;padding:0"> ${ROMAN[l]} anno</label>`).join("")}</div></div>`:"";
   return reqPanel+yearsPanel+privPanel+covPanel+colPanel+mgPanel+allowPanel+linkedPanel()+importPanel+`
   <div class="panel"><h2>Specializzandi</h2>
    <form class="row" id="addform"><input id="newname" placeholder="Cognome Nome" style="flex:1 1 12em" autocomplete="off"><select id="newyear" aria-label="Anno">${[1,2,3,4].map(y=>`<option ${y===2?"selected":""}>${y}° anno</option>`).join("")}</select><button class="btn primary" type="submit">Aggiungi</button></form>
    <div class="list">${S.residents.map(r=>`<div class="item"><input id="rname-${r.id}" data-rname="${r.id}" value="${esc(r.name)}" aria-label="Nome" style="font-weight:600;width:100%"><span class="pickers sm" style="flex:none"><button data-act="rflag" data-id="${r.id}" data-f="nights" aria-pressed="${canDo(r.id,"N")}">Notti</button><button data-act="rflag" data-id="${r.id}" data-f="guards" aria-pressed="${canDo(r.id,"D")}">Guardie</button></span><button class="btn danger ${UI.confirm==="del-"+r.id?"confirm":""}" data-act="del" data-id="${r.id}">${UI.confirm==="del-"+r.id?"Conferma":"Rimuovi"}</button></div>`).join("")||`<p class="muted" style="margin:0">Ancora nessuno.</p>`}</div></div>
   <div class="panel"><div class="row" style="justify-content:space-between"><h2>Postazioni da coprire</h2><button class="btn" data-act="addpost">Aggiungi postazione</button></div>
-   <p class="muted" style="margin:0;font-size:.85rem">"Dom/festivi" comprende anche i festivi infrasettimanali. "Persone per turno": minimo e massimo contando tutti gli anni insieme (valgono per tutti gli anni; li modificate tu e i gestori di qualsiasi anno). Sotto il minimo il turno è scoperto o "manca 1"; il generatore non supera il massimo. DEA (mattina/pomeriggio) e guardia: tendenzialmente una persona per anno.</p>
+   <p class="muted" style="margin:0;font-size:.85rem">"Dom/festivi" comprende anche i festivi infrasettimanali. "Persone per turno": minimo e massimo contando tutti gli anni insieme (valgono per tutti gli anni; li modificate tu e i rappresentanti di qualsiasi anno). Sotto il minimo il turno è scoperto o "manca 1"; il generatore non supera il massimo. DEA (mattina/pomeriggio) e guardia: tendenzialmente una persona per anno.</p>
    ${S.posts.map(p=>`<div class="post">
      <div class="top"><input id="pname-${p.id}" data-pname="${p.id}" value="${esc(p.name)}" aria-label="Nome postazione">
       <select id="pcov-${p.id}" data-pcov="${p.id}" aria-label="Chi la copre">${covOpts.map(([v,l])=>`<option value="${v}" ${p.cover===v?"selected":""}>${v==="ALL"?"Tutti":"Rotazione "+esc(l)}</option>`).join("")}</select>
@@ -1060,7 +1063,7 @@ function vImp2(){
 }
 
 
-/* modifiche al proprio orario fatte dai gestori (accettando una bozza): finché non si tocca "Ho visto" */
+/* modifiche al proprio orario fatte dai rappresentanti (accettando una bozza): finché non si tocca "Ho visto" */
 function myChanges(){ const pid=myAnyPid(); if(!pid) return {pid,list:[]}; const st=S.residents.some(r=>r.id===pid)?S:yState(yearOfPid(pid)); if(!st) return {pid,list:[]};
   let seen=""; try{ seen=localStorage.getItem("turni.chseen."+pid)||""; }catch(e){}
   const list=[]; for(const mk in (st.months||{})) ((st.months[mk]||{}).changes||[]).forEach(c=>{ if(c.pid===pid&&c.at>seen) list.push(c); });
@@ -1069,11 +1072,11 @@ function changesPanel(){ const {list,st}=myChanges(); if(!list.length) return ""
   const nm=k=>{ const [pid,sh]=k.split("|"), post=(st.posts||[]).find(x=>x.id===pid); return sh==="N"?"Notte":sh==="D"?"Guardia":`${esc(post?post.name:pid)} ${SHN[sh]}`; };
   const desc=ks=>ks.length?ks.map(nm).join(" + "):"Libero";
   /* per ogni giorno l'ultima modifica, confrontata con lo stato di partenza */
-  const by={}; list.forEach(c=>{ if(!by[c.d]) by[c.d]={from:c.from,to:c.to}; else by[c.d].to=c.to; });
+  const by={}; list.forEach(c=>{ if(!by[c.d]) by[c.d]={from:c.from,to:c.to,who:c.by}; else { by[c.d].to=c.to; if(c.by) by[c.d].who=c.by; } });
   const rows=Object.keys(by).sort().filter(d=>by[d].from.join()!==by[d].to.join());
   if(!rows.length) return "";
-  return `<div class="panel" style="border:2px solid var(--accent)"><h2>Modifiche al tuo orario</h2><p class="muted" style="margin:0;font-size:.85rem">I gestori hanno aggiornato l'orario pubblicato:</p>
-    <ul style="margin:0;padding-left:18px">${rows.map(d=>`<li><strong>${fmt(d,true)}</strong>: ${desc(by[d].from)} → <strong>${desc(by[d].to)}</strong></li>`).join("")}</ul>
+  return `<div class="panel" style="border:2px solid var(--accent)"><h2>Modifiche al tuo orario</h2><p class="muted" style="margin:0;font-size:.85rem">L'orario pubblicato è stato aggiornato:</p>
+    <ul style="margin:0;padding-left:18px">${rows.map(d=>`<li><strong>${fmt(d,true)}</strong>: ${desc(by[d].from)} → <strong>${desc(by[d].to)}</strong>${by[d].who?` <span class="muted" style="font-size:.82rem">· modificato da ${esc(by[d].who)}</span>`:""}</li>`).join("")}</ul>
     <div class="row"><button class="btn" data-act="chseen">Ho visto</button></div></div>`; }
 function vCambi(){ if(!S.residents.length) return monthBar()+noRes();
   const mk=UI.mk, mo=M(mk), SC=effSched(mk), me=myPid(), all=swapsOf(mk);
@@ -1133,7 +1136,7 @@ function linkedPanel(){ let h=""; if(OWNER){ const bad=CLAIMDOCS.filter(x=>CLAIM
       <div class="list">${bad.map(x=>`<div class="item"><span class="stack" style="gap:2px"><span class="name-strong">${esc(x.email||("account "+x.u.slice(0,6)+"…"))}</span><span class="muted" style="font-size:.8rem">scelto: ${esc(rNameAny(x.pid))}${CLAIMS[x.pid]&&CLAIMS[x.pid]!==x.u?" · già preso da un altro account":" · nome inesistente"}</span></span><button class="btn danger ${UI.confirm==="unlu-"+x.u?"confirm":""}" data-act="unlinku" data-u="${x.u}">${UI.confirm==="unlu-"+x.u?"Conferma":"Scollega"}</button></div>`).join("")}</div></div>`; const linked=S.residents.filter(r=>CLAIMS[r.id]);
     h+=`<div class="panel"><h2>Account collegati</h2><p class="muted" style="margin:0;font-size:.85rem">${linked.length} su ${S.residents.length}. Se qualcuno ha toccato il nome sbagliato, scollegalo.</p>${linked.length?`<div class="list">${linked.map(r=>`<div class="item"><span class="name-strong">${esc(rName(r))}</span><button class="btn danger ${UI.confirm==="unl-"+r.id?"confirm":""}" data-act="unlink" data-id="${r.id}">${UI.confirm==="unl-"+r.id?"Conferma":"Scollega"}</button></div>`).join("")}</div>`:""}</div>`; } return h; }
 function warnBox(w,me,other){ return `<div class="alerts"><strong>Il cambio forza queste regole</strong><ul>${w.from.map(t=>`<li><strong>per te</strong>: ${t}</li>`).join("")}${w.to.map(t=>`<li><strong>per ${esc(resName(other))}</strong>: ${t}</li>`).join("")}</ul><span style="font-size:.85rem">${esc(resName(other))} vedrà questo avviso e dovrà confermarlo.</span></div>`; }
-/* cambio inserito direttamente da un gestore: niente richiesta, si applica subito e finisce nello storico e nei cambi da inserire */
+/* cambio inserito direttamente da un rappresentante: niente richiesta, si applica subito e finisce nello storico e nei cambi da inserire */
 function manualPanel(mk,SC,mo){ const F=UI.msw=UI.msw||{}; const inG=S.residents.filter(r=>inGem(mo,r.id));
   const shA=F.from?shiftsOf(SC,F.from).filter(x=>x.d>=swapMinDay()):[]; const inG2=S.residents.filter(r=>inGem(mo,r.id)||(isBG(mo.rot[r.id])&&shiftsOf(SC,r.id).length)); if(F.a&&!shA.some(x=>x.d+"#"+x.k===F.a)) F.a="";
   const shB=F.to?shiftsOf(SC,F.to).filter(x=>x.d>=swapMinDay()):[];
@@ -1147,7 +1150,7 @@ function manualPanel(mk,SC,mo){ const F=UI.msw=UI.msw||{}; const inG=S.residents
       :((w.from.length||w.to.length)?`<div class="alerts"><strong>Il cambio forza queste regole</strong><ul>${w.from.map(t=>`<li><strong>per ${esc(resName(F.from))}</strong>: ${t}</li>`).join("")}${w.to.map(t=>`<li><strong>per ${esc(resName(F.to))}</strong>: ${t}</li>`).join("")}</ul></div>`:`<div class="okline">Il cambio rispetta tutte le regole.</div>`)
        +freeBox([["per "+esc(resName(F.from)),w.freeFrom],["per "+esc(resName(F.to)),w.freeTo]]); }
   const sel=(id,key,opts,cur,ph,dis)=>`<select id="${id}" data-msw="${key}" ${dis?"disabled":""}><option value="">${ph}</option>${opts.map(([v,l])=>`<option value="${v}" ${cur===v?"selected":""}>${l}</option>`).join("")}</select>`;
-  return `<div class="panel"><h2>Inserisci un cambio manuale</h2><p class="muted" style="margin:0;font-size:.85rem">Solo per i gestori: il cambio si applica subito, senza chiedere conferma agli specializzandi, e compare nello storico e nei cambi da inserire.</p>
+  return `<div class="panel"><h2>Inserisci un cambio manuale</h2><p class="muted" style="margin:0;font-size:.85rem">Solo per i rappresentanti: il cambio si applica subito, senza chiedere conferma agli specializzandi, e compare nello storico e nei cambi da inserire.</p>
    <label class="stack" style="gap:4px"><span class="label">Chi cede</span>${sel("mswFrom","from",inG2.map(r=>[r.id,esc(rName(r))]),F.from,"Scegli…")}</label>
    <label class="stack" style="gap:4px"><span class="label">Il turno che cede</span>${sel("mswA","a",shA.map(x=>[x.d+"#"+x.k,slotLabel(x)]),F.a,"Scegli…",!F.from)}</label>
    <label class="stack" style="gap:4px"><span class="label">A chi</span>${sel("mswTo","to",S.residents.filter(r=>r.id!==F.from&&(inGem(mo,r.id)||isBG(mo.rot[r.id]))).map(r=>[r.id,esc(rName(r))+(isBG(mo.rot[r.id])?" · Bambin Gesù":"")]),F.to,"Scegli…")}</label>
@@ -1156,7 +1159,7 @@ function manualPanel(mk,SC,mo){ const F=UI.msw=UI.msw||{}; const inG=S.residents
    <div class="row"><button class="btn primary ${UI.confirm==="mswgo"?"confirm":""}" data-act="mswgo" ${ok?"":"disabled"}>${UI.confirm==="mswgo"?"Tocca di nuovo per applicare":"Applica il cambio"}</button></div></div>`; }
 function swCard(x,inbox,mineOut,canDel){ const st={pending:["In attesa","chip"],accepted:[x.manual?"Inserito":"Accettato","chip tag-F"],rejected:["Rifiutato","chip"],cancelled:["Annullato","chip"],invalid:["Non più valido","chip"]}[x.status]||["?","chip"];
   const txt=`<strong>${esc(resName(x.from))}</strong> cede <span class="name-strong">${slotLabel(x.a)}</span> a <strong>${esc(resName(x.to))}</strong>${x.b?` e prende <span class="name-strong">${slotLabel(x.b)}</span>`:" senza nulla in cambio"}${(x.extra||[]).map(e=>`<br><span style="font-size:.85rem">+ ${slotLabel(e)} passa da ${esc(resName(e.giver))} a ${esc(resName(e.taker))} (monto/smonto)</span>`).join("")}`;
-  const manual=x.manual?`<span class="muted" style="font-size:.8rem">Inserito dal gestore${x.by&&x.by!=="owner"?" "+esc(resName(x.by)):""}${x.reason?" · per "+esc(x.reason):""}</span>`:(x.reason?`<span class="muted" style="font-size:.8rem">Proposto dal gestore per ${esc(x.reason)} di ${esc(resName(x.from))}</span>`:"");
+  const manual=x.manual?`<span class="muted" style="font-size:.8rem">Inserito dal rappresentante${x.by&&x.by!=="owner"?" "+esc(resName(x.by)):""}${x.reason?" · per "+esc(x.reason):""}</span>`:(x.reason?`<span class="muted" style="font-size:.8rem">Proposto dal rappresentante per ${esc(x.reason)} di ${esc(resName(x.from))}</span>`:"");
   const waiting=x.status==="pending"&&x.needs?`<span class="muted" style="font-size:.8rem">Cambio a catena: in attesa di ${x.needs.filter(p=>!(x.acc||[]).includes(p)).map(p=>esc(resName(p))).join(", ")}</span>`:"";
   const forced=x.status==="accepted"&&x.forced&&x.forced.length?`<span class="muted" style="font-size:.8rem">Accettato forzando: ${x.forced.map(esc).join("; ")}</span>`:"";
   return `<div class="cand" style="cursor:default;grid-template-columns:minmax(0,1fr) auto"><span class="stack" style="gap:3px"><span>${txt}</span>${manual}${waiting}${forced}</span><span class="stack" style="gap:6px;align-items:flex-end"><span class="${st[1]}">${st[0]}</span>${inbox?`<button class="btn primary" data-act="swopen" data-id="${x.id}">Rispondi</button>`:""}${mineOut?`<button class="btn danger" data-act="swcancel" data-id="${x.id}">Annulla</button>`:""}${canDel?`<button class="btn danger ${UI.confirm==="swdel-"+x.id?"confirm":""}" data-act="swdel" data-id="${x.id}" title="${x.status==="accepted"?"Elimina solo la voce: l'orario resta com'è":"Elimina dallo storico"}">${UI.confirm==="swdel-"+x.id?(x.status==="accepted"?"Conferma (l'orario non cambia)":"Conferma"):"Elimina"}</button>`:""}</span></div>`; }
@@ -1311,7 +1314,7 @@ function maybePlan(mk,pid,d){ if(!ADMIN()) return false; const c=conflictsOf(mk,
 const FGROUPS=[["TC","TC"],["RM","RM"],["ANGIO","Angiografia"],["DEA","DEA"],["SENO","Senologia"],["ECO","Ecografia"],["RX","RX"]];
 function fgOf(p){ const k=normRoom(p.name); if(/^(diagsen|radsen)/.test(k)) return "SENO"; if(/^eco/.test(k)) return "ECO"; if(/^(rx|sala8)/.test(k)) return "RX";
   if(/^tc/.test(k)) return "TC"; if(/^rm/.test(k)) return "RM"; if(/^angio/.test(k)) return "ANGIO"; if(/^dea/.test(k)) return "DEA"; return p.cover; }
-/* sala chiusa (gestori, per giorno e turno): nessuno viene assegnato e non è un buco; vale per tutti gli anni (chiave con il nome normalizzato della sala) */
+/* sala chiusa (rappresentanti, per giorno e turno): nessuno viene assegnato e non è un buco; vale per tutti gli anni (chiave con il nome normalizzato della sala) */
 function saveYearsDoc(){ const om=oldestMk(); const cl={}; for(const mk in CLOSEDG) if(mk>=om&&Object.keys(CLOSEDG[mk]).length) cl[mk]=CLOSEDG[mk]; CLOSEDG=cl;
   const hy={}; for(const mk in HOLEY) if(mk>=om&&Object.keys(HOLEY[mk]).length) hy[mk]=HOLEY[mk]; HOLEY=hy;
   return db.doc("config/years").set({state:JSON.stringify({coverage:COVY,closed:cl,colors:YCOL,holes:hy,caps:CAPS}),updated:new Date().toISOString()}); }
@@ -1383,7 +1386,7 @@ function parseExt(rows,mk){
    (gli altri anni come "coperti", i propri come turni da allineare nella bozza) */
 function sheetSave(mo,res){ const same=mo.sheet&&JSON.stringify(mo.sheet.all)===JSON.stringify(res.all); if(same){ return false; }
   mo.sheet={at:new Date().toISOString(),all:res.all,rooms:res.seenRooms,days:res.colDays}; mo.sheetAt=mo.sheet.at; return true; }
-/* all'apertura (gestori): se un altro anno ha caricato un foglio più recente, la bozza di quest'anno si allinea ai propri nomi */
+/* all'apertura (rappresentanti): se un altro anno ha caricato un foglio più recente, la bozza di quest'anno si allinea ai propri nomi */
 let SALIGN=false;
 function runSheetAlign(){ if(SALIGN||!S||!ADMIN()) return; SALIGN=true; let n=0; const [y0,m0]=todayMk().split("-").map(Number);
   for(let k=-KEEP_MONTHS;k<=KEEP_MONTHS;k++){ const mk=mkOf(y0,m0+k); if(sheetLatest(mk)) n+=sheetAlign(mk); }
@@ -1404,7 +1407,7 @@ function sheetAlign(mk){ TICK++; if(!ADMIN()||!S) return 0; const mo=M(mk), sh=s
     sh.all[ak].forEach(v=>{ const id=ourId[v.replace(/^\(\s*\d\s*\)\s*/,"").trim().toLowerCase()]; if(id){ own++; const k=d+"|"+p.id+"|"+s; (ownMap[k]=ownMap[k]||[]).includes(id)||ownMap[k].push(id); } }); }
   const seen=new Set((sh.rooms||[]).map(x=>{ if(x==="N") return "N"; const [rk,s]=x.split("|"), p=by[rk]; return p?p.id+"|"+s:null; }).filter(Boolean));
   mo.sheetAt=sh.at; return alignOwn(mo,{own,ownMap,seen,colDays:sh.days||[]}); }
-/* aggiornamento automatico dal link salvato del foglio "BOZZA ORARI": quando un gestore apre l'app, al massimo ogni 3 ore,
+/* aggiornamento automatico dal link salvato del foglio "BOZZA ORARI": quando un rappresentante apre l'app, al massimo ogni 3 ore,
    per il mese corrente e i successivi visibili. Aggiorna solo i turni coperti da altri anni (mattina/pomeriggio dal foglio;
    notti e guardie solo se il foglio le riporta); restano quelli segnati a mano. Poi si usa "Aggiorna l'orario". */
 /* allinea la bozza ai nostri specializzandi come risultano nel foglio (sale/turni presenti nel foglio); restituisce quante caselle cambia */
@@ -1551,7 +1554,7 @@ function cellSheet(d,k){ const mo=M(UI.mk), [postId,s]=k.split("|"), post=postOf
   layer.dataset.d=d; layer.dataset.k=k; }
 
 /* ---------- export ---------- */
-/* indisponibilità, ferie, congressi (e preferenze) di tutti, per il mese: solo gestori */
+/* indisponibilità, ferie, congressi (e preferenze) di tutti, per il mese: solo rappresentanti */
 async function exportUnav(){ if(!ADMIN()) return; if(typeof XLSX==="undefined"){toast("Libreria Excel non caricata, riprova tra poco");return;}
   const mk=UI.mk, mo=M(mk), p=period(mk), PRF=PR(mk);
   const lab=u=>u==="F"?"Ferie":u==="C"?"Congresso":u==="G"?"Tutto il giorno":SH.filter(s=>u.includes(s)).map(s=>SHN[s]).join(" + ");
@@ -1714,7 +1717,7 @@ document.addEventListener("click",e=>{
   if(a==="swmine"){ UI.swMine=el.dataset.v==="1"; render(); return; }
   if(a==="privtog"){ if(!ADMIN()) return; db.doc("config/privacy").set({hideUnav:!HIDEUNAV,hideSwaps:HIDESWAPS,updated:new Date().toISOString()}).then(()=>toast(!HIDEUNAV?"Indisponibilità degli altri nascoste agli specializzandi":"Indisponibilità di nuovo visibili a tutti")).catch(()=>toast("Non riesco a salvare: aggiorna le regole del database")); return; }
   if(a==="umodeon"){ setUserMode(true); UI.tab="turni"; render(); toast("Modalità specializzando: per tornare vai in Impostazioni"); return; }
-  if(a==="umodeoff"){ setUserMode(false); render(); toast("Modalità gestore attiva"); return; }
+  if(a==="umodeoff"){ setUserMode(false); render(); toast("Modalità rappresentante attiva"); return; }
   if(a==="year"){ switchYear(+el.dataset.v); render(); return; }
   if(a==="years"){ if(UI.confirm!=="years"){UI.confirm="years";render();return;} UI.confirm=null;
     if(S.multiYear){ S.multiYear=false; persist(); toast("Più anni disattivato: dati degli altri anni conservati"); render(); return; }
@@ -1826,7 +1829,7 @@ document.addEventListener("click",e=>{
     toast(n?(el.dataset.v==="1"?`${n} turni chiusi (nella bozza, da accettare)`:`${n} turni riaperti (nella bozza)`):"Nessuna modifica"); return; }
   if(a==="cell"){ if(hasDraft(M(UI.mk))) UI.draftView=true;cellSheet(el.dataset.d,el.dataset.k);return;}
   if(a==="assign"){ const mo=M(UI.mk), d=layer.dataset.d, k=layer.dataset.k, i=+el.dataset.i, id=el.dataset.id||null;
-    const W=ensureDraft(mo,d); W[d]=W[d]||{}; W[d][k]=W[d][k]||[null]; const arr=W[d][k], fx=mo.fixed=mo.fixed||{}, pre=d+"|"+k+"|";
+    const W=ensureDraft(mo,d); mo.draft.who={...(mo.draft.who||{}),[d+"|"+k]:whoAmI()}; /* chi ha modificato la casella (per il messaggio di cambio) */ W[d]=W[d]||{}; W[d][k]=W[d][k]||[null]; const arr=W[d][k], fx=mo.fixed=mo.fixed||{}, pre=d+"|"+k+"|";
     if(id){ arr[i]=id; fx[pre+i]=id; }
     else if(arr.filter(x=>x).length>1){ /* più persone: si toglie solo questa e si riallineano i turni fissi */
       const pins=arr.map((x,j)=>fx[pre+j]===x&&x?x:null); arr.splice(i,1); pins.splice(i,1);
@@ -1930,7 +1933,7 @@ render();
     let covSub=false;
     const watchCov=()=>{ if(covSub) return; covSub=true; db.doc("config/years").onSnapshot(sn=>{ let c={}, cl={}, yc={}, hy={}; try{ const o=JSON.parse((sn.exists&&sn.data().state)||"{}"); c=o.coverage||{}; cl=o.closed||{}; yc=o.colors||{}; hy=o.holes||{}; CAPS=o.caps||{}; }catch(e){}
       COVY=c; CLOSEDG=cl; YCOL=yc; HOLEY=hy; TICK++; RAWV++; EXTC.key=null;
-      /* sale nuove: di base solo al 1° anno (TC Columbus al 3°), finché tu o un gestore non le cambiate */
+      /* sale nuove: di base solo al 1° anno (TC Columbus al 3°), finché tu o un rappresentante non le cambiate */
       const DEF=COV_DEF;
       const miss=Object.keys(DEF).filter(k=>!Array.isArray(COVY[k]));
       if(miss.length&&(OWNER||ADMIN())){ const next={...COVY}; miss.forEach(k=>next[k]=DEF[k]); COVY=next; saveYearsDoc().catch(()=>{}); }
