@@ -36,6 +36,8 @@ Proprietario: Paolo Annecchino. Lingua dell'app e delle risposte: **italiano**.
 
 - Prestazioni: `EXT(mo)` è memorizzato (`EXTMEMO`, ricalcolo solo se cambia `TICK`, che sale a ogni `render`, `persist`, `generate`, `refreshSched`, `alignOwn`, `syncExt`, `sheetAlign`; più mese/anno/RAWV/numero voci di `mo.ext`). Se si aggiunge codice che modifica `mo.ext` sul posto e poi usa `EXT` prima di un render, fare `TICK++`.
 
+- Schede: "Turni" è uguale per tutti, anche per i gestori, come la vede uno specializzando (orario pubblicato, sola lettura: `asResident(vTurni)` mette `UI.userMode` per il solo disegno); "Modifica turni" (`data-tab="modturni"`, solo gestori in modalità gestore) è la vecchia vista gestore di Turni: bozza/pubblicato, genera, aggiorna, link al foglio, notti, caselle modificabili, sale chiuse, export.
+
 ## Permessi
 - Proprietario: tutto; unico che gestisce email autorizzate, gestori, scollegamento account.
 - Gestori: impostazioni, rotazioni, generazione/modifica turni, cambi manuali, cambi da inserire, pulizia storico, indisponibilità di tutti (anche dopo la scadenza).

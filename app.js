@@ -658,16 +658,18 @@ async function createCohort(y,base){ const snap=await db.doc(yDocs(y).cfg).get()
 async function enableYears(){ if(!OWNER||!db||CURY!==2) return; const base=JSON.parse(splitS().cfg);
   for(const y of ALLY()){ if(y===2) continue; await createCohort(y,base); }
   S.multiYear=true; persist(); }
+/* "Turni" è uguale per tutti (come lo vede uno specializzando: orario pubblicato, sola lettura); i gestori modificano in "Modifica turni" */
+function asResident(fn){ const u=UI.userMode, sel=UI.clsel; UI.userMode=true; UI.clsel=null; try{ return fn(); } finally{ UI.userMode=u; UI.clsel=sel; } }
 function render(){ TICK++;
   if(UI.userMode&&S&&MYUID&&Object.keys(CLAIMS).length&&!realAdmin()) setUserMode(false);
-  if(!ADMIN()&&(UI.tab==="mese"||(UI.tab==="imp"&&!UI.userMode))) UI.tab="turni";
-  document.querySelectorAll("#tabs button").forEach(b=>{b.setAttribute("aria-selected",b.dataset.tab===UI.tab); b.hidden=!ADMIN()&&(b.dataset.tab==="mese"||(b.dataset.tab==="imp"&&!UI.userMode));});
+  if(!ADMIN()&&(UI.tab==="mese"||UI.tab==="modturni"||(UI.tab==="imp"&&!UI.userMode))) UI.tab="turni";
+  document.querySelectorAll("#tabs button").forEach(b=>{b.setAttribute("aria-selected",b.dataset.tab===UI.tab); b.hidden=!ADMIN()&&(b.dataset.tab==="mese"||b.dataset.tab==="modturni"||(b.dataset.tab==="imp"&&!UI.userMode));});
   if(!S){app.innerHTML=`<div class="empty">Caricamento dati…</div>`;return;}
   { const cb=document.querySelector('#tabs [data-tab="cambi"]'); if(cb){ let n=0; try{ n=new Set(myChanges().list.map(c=>c.d)).size; }catch(e){} cb.textContent=n?`Cambi (${n})`:"Cambi"; } }
   const yLoaded=!MULTI||ALLY().every(y=>yState(y)||(RAW[y]&&RAW[y].cfg===null));
   const needLink=db&&MYUID&&yLoaded&&(MULTI||S.residents.length)&&!myAnyPid();
   if(needLink&&!OWNER){ app.innerHTML=`<section class="view">${claimPanel("")}</section>`; return; }
-  app.innerHTML=`<section class="view">${todayBanner()}${yearBar()}${needLink?linkPanel():""}${({mese:vMese,indisp:vIndisp,turni:vTurni,cambi:vCambi,imp:vImp}[UI.tab]||vMese)()}</section>`;
+  app.innerHTML=`<section class="view">${todayBanner()}${yearBar()}${needLink?linkPanel():""}${({mese:vMese,indisp:vIndisp,turni:()=>ADMIN()?asResident(vTurni):vTurni(),modturni:vTurni,cambi:vCambi,imp:vImp}[UI.tab]||vMese)()}</section>`;
 }
 /* banner in alto: il turno di oggi e di domani di chi ha un nome associato (orario pubblicato, con i cambi accettati) */
 function mkOfDay(d){ const [y,m]=d.split("-").map(Number); for(const dm of [0,1,-1]){ const mk=mkOf(y,m+dm), p=period(mk); if(d>=p.first&&d<=p.last) return mk; } return null; }
