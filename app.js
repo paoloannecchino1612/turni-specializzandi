@@ -851,7 +851,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
       <div class="row" style="gap:8px;flex-wrap:wrap">${(mo.sched||hasDraft(mo))?`<button class="btn" data-act="xlsx">Scarica Excel</button><button class="btn" data-act="xbozza">Excel formato BOZZA ORARI</button>`:""}<button class="btn" data-act="manualstart">Inserisci turni a mano</button><button class="btn" data-act="hist">Storico bozze</button></div>
       ${histBox(UI.mk)}
       ${(mo.sched||hasDraft(mo))?`<div class="row">${clrBtn("clrsched","Elimina tutti i turni del mese")}</div>`:""}</div>`:""}`:"";
-  const pubBar=ADMIN()&&hasDraft(mo)?`<div style="height:84px"></div><div class="pubbar"><span class="name-strong">Bozza non pubblicata${(()=>{ const c=draftChanges(mo,true); return mo.sched&&c?` · ${c.size} caselle cambiate`:""; })()}</span>
+  const pubBar=ADMIN()&&hasDraft(mo)?`<div style="height:84px"></div><div class="pubbar"><span class="name-strong">Bozza non pubblicata${(()=>{ const c=draftChanges(mo,true); return c?` · ${c.size} ${mo.sched?"caselle cambiate":"caselle nuove"}`:""; })()}</span>
       <button class="btn ${UI.confirm==="accall"?"confirm":"primary"}" data-act="accall">${UI.confirm==="accall"?"Tocca di nuovo: pubblica":"Pubblica"}</button>
       ${clrBtn("drop","Annulla")}
       <button class="btn" data-act="pubwk" aria-expanded="${!!UI.pubWk}">Solo una settimana ${UI.pubWk?"▴":"▾"}</button>
@@ -925,7 +925,7 @@ function vTurni(){ if(!S.residents.length) return monthBar()+noRes();
       if(rows.length) body+=`<h3 style="margin-top:6px">Equità su più mesi</h3><p class="muted" style="margin:0;font-size:.82rem">Notti, guardie e turni nel weekend dei 3 mesi precedenti (orario pubblicato) + questo mese. Generando, chi ne ha fatti di più rispetto alla media ne riceve meno.</p>
         <div class="scroll"><table class="grid"><thead><tr><th class="sticky">Specializzando</th><th>Notti</th><th>Guardie</th><th>Weekend</th><th>Mesi</th></tr></thead><tbody>${rows.map(r=>{ const a=h[r.id], c=cur[r.id]; const f=(x,y)=>`${x+y} <span class="muted">(${x}+${y})</span>`;
           return `<tr><td class="sticky name-strong">${esc(rName(r))}</td><td class="num">${f(a.N,c.N)}</td><td class="num">${f(a.D,c.D)}</td><td class="num">${f(a.we,c.we)}</td><td class="num">${a.months}</td></tr>`; }).join("")}</tbody></table></div>`; } }
-  const summ=ADMIN()&&draftView(mo)?`<div class="row" style="gap:8px;flex-wrap:wrap;font-size:.86rem;margin:4px 0 8px"><span class="name-strong">Bozza:</span>${mo.sched?`<span class="chip" style="background:var(--chg-soft);color:var(--ink)">${(CHG||draftChanges(mo)||new Set()).size} caselle cambiate</span>`:""}<span class="chip" style="background:var(--bad-soft);color:var(--bad)">${holes.reduce((a,h)=>a+(h.n||1),0)} scoperti</span><span class="chip">${issues.length} da controllare</span></div>`:"";
+  const summ=ADMIN()&&draftView(mo)?`<div class="row" style="gap:8px;flex-wrap:wrap;font-size:.86rem;margin:4px 0 8px"><span class="name-strong">Bozza:</span><span class="chip" style="background:var(--chg-soft);color:var(--ink)">${(CHG||draftChanges(mo)||new Set()).size} ${mo.sched?"caselle cambiate":"caselle nuove"}</span><span class="chip" style="background:var(--bad-soft);color:var(--bad)">${holes.reduce((a,h)=>a+(h.n||1),0)} scoperti</span><span class="chip">${issues.length} da controllare</span></div>`:"";
   return head+draft+alerts+summ+tabs+body+holesBox+pubBar;
 }
 function code(mo,per,pid,d){ const p=per[pid]; if(p&&p.on[d]) return p.on[d]; if(p&&p.on[add(d,-1)]==="N") return "S"; const u=unavOf(mo,pid,d); return u==="G"?"X":u==="F"?"F":u==="C"?"C":""; }
@@ -1390,8 +1390,9 @@ const layer=document.getElementById("layer");
 function selC(d,k){ return (UI.clsel&&UI.clsel.has(d+"|"+k)?" sel":"")+(CHG&&CHG.has(d+"|"+k)?" chg":""); }
 /* caselle della bozza diverse dall'orario pubblicato (evidenziate in arancione nella vista Bozza) */
 let CHG=null; const sameCell=(a,b)=>{ const x=(a||[]).filter(v=>v).sort().join(), y=(b||[]).filter(v=>v).sort().join(); return x===y; };
-function draftChanges(mo,force){ if(!(force?hasDraft(mo):draftView(mo))||!mo.sched) return null; const out=new Set(), dr=mo.draft.sched||{};
-  for(const d in dr){ if(!mo.sched[d]) continue; const keys=new Set([...Object.keys(dr[d]||{}),...Object.keys(mo.sched[d]||{})]); keys.forEach(k=>{ if(!sameCell(dr[d][k],mo.sched[d][k])) out.add(d+"|"+k); }); }
+/* rispetto all'orario pubblicato; se un giorno non è ancora pubblicato (prima bozza) ogni casella con persone conta come nuova */
+function draftChanges(mo,force){ if(!(force?hasDraft(mo):draftView(mo))) return null; const out=new Set(), dr=mo.draft.sched||{}, pub=mo.sched||{};
+  for(const d in dr){ const pd=pub[d]||{}; const keys=new Set([...Object.keys(dr[d]||{}),...Object.keys(pd)]); keys.forEach(k=>{ if(!sameCell(dr[d][k],pd[k])) out.add(d+"|"+k); }); }
   return out; }
 /* chiude/riapre per tutti gli anni (config/years); per l'anno che si guarda aggiorna anche la bozza */
 function applyClosed(mk,keys,close){ const mo=M(mk), cg={...(CLOSEDG[mk]||{})}; const fx=mo.fixed=mo.fixed||{}; let n=0;
