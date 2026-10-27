@@ -190,6 +190,8 @@ function incl(mo,pid){ return false; }
 /* chi è al Bambin Gesù non entra mai nei turni generati, ma un gestore può assegnarlo a mano */
 function isBG(rot){ return rot==="BG"; }
 function inGem(mo,pid){ return !isExt(mo.rot[pid])||incl(mo,pid); }
+function roomRot(name){ const k=normRoom(name); if(/^tc/.test(k)) return "TC"; if(/^rm/.test(k)) return "RM"; if(/^(diagsen|radsen)/.test(k)) return "SENO";
+  if(/^(rxtorace|rxscheletro|sala8)$/.test(k)) return "RX"; if(/^(eco|ecocolumbus)$/.test(k)) return "ECO"; if(k==="dea") return "DEA"; return null; }
 /* rotazioni ibride: chi è in RX/Eco copre sia le sale RX sia quelle di Ecografia (circa metà e metà, con precedenza a RX) */
 const HYB={RXECO:["RX","ECO"]};
 function rotCovers(rot,cov){ return rot===cov||(HYB[rot]||[]).includes(cov); }
@@ -308,6 +310,8 @@ function load(raw){ const st=raw?JSON.parse(raw):clone(DEFAULT);
   if(!st._v6){ const MP=()=>({fer:["M","P"],sab:["M","P"],fes:[]});
     [["TCCEMI","TC 0 CEMI","TC"],["SALA8","Sala 8","RX"]].forEach(([id,name,cover])=>{ if(!st.posts.some(p=>p.id===id||normRoom(p.name)===normRoom(name))) st.posts.push({id,name,cover,on:MP()}); });
     st._v6=true; migrated=true; }
+  /* associazione fissa sala → rotazione (decisa dal proprietario): TC, RM, Senologia, RX (anche RX/Eco), Ecografia (anche RX/Eco), DEA */
+  if(!st._v8){ st.posts.forEach(p=>{ const r=roomRot(p.name); if(r&&p.cover!=="ALL"&&p.cover!==r){ p.cover=r; } }); st._v8=true; migrated=true; }
   if(!st._v7){ if(!st.rotations.some(r=>r.id==="RXECO")) st.rotations.push({id:"RXECO",name:"RX/Eco",jolly:false}); st._v7=true; migrated=true; }
   return st; }
 
